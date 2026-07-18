@@ -103,7 +103,7 @@ Eterion/
 │     ├─ src/               应用、页面、组件、功能和数据访问
 │     ├─ tests/             前端测试
 │     ├─ package.json       前端依赖清单
-│     └─ package-lock.json  前端依赖锁文件
+│     └─ pnpm-lock.yaml     前端依赖锁文件
 └─ services/
    └─ api/                  Go RESTful API
       ├─ cmd/server/        HTTP 服务入口
@@ -119,7 +119,7 @@ Eterion/
 安装依赖前，请准备以下环境：
 
 - Node.js 22.12 或更高版本
-- npm 10 或更高版本
+- pnpm 10.20 或更高版本
 - Go 1.26，推荐使用工具链 1.26.5
 - PostgreSQL 16 或更高版本
 - Git
@@ -131,7 +131,7 @@ Eterion/
 
 ```powershell
 Set-Location apps/web
-npm install
+pnpm install
 Set-Location ../..
 go -C services/api mod download
 ```
@@ -142,7 +142,16 @@ go -C services/api mod download
 go install github.com/pressly/goose/v3/cmd/goose@v3.27.2
 ```
 
-仓库尚未包含应用入口和运行配置，因此当前 README 不提供启动命令。实现第一期运行入口后，再补充前端、Go API 和基础设施的启动方式。
+## 启动前端
+
+进入前端目录后使用 pnpm 启动 Vite 开发服务器：
+
+```powershell
+Set-Location apps/web
+pnpm dev
+```
+
+默认开发地址为 `http://localhost:5173`。Go API 的启动方式将在服务入口实现后补充。
 
 ## 工程约束
 
