@@ -30,91 +30,35 @@
   scrollbar-width: thin;
 }
 
-.welcome-state {
-  align-self: center;
-  width: min(760px, calc(100% - 40px));
-  margin: 0 auto;
-  text-align: center;
-
-  h1 {
-    margin: 0;
-    color: #17181a;
-    font-family: var(--font-display);
-    font-size: clamp(2rem, 4vw, 2.8rem);
-    font-weight: 680;
-    letter-spacing: -0.04em;
-    text-wrap: balance;
-  }
-}
-
-.welcome-emblem {
-  display: grid;
-  width: 48px;
-  height: 48px;
-  margin: 0 auto 22px;
-  place-items: center;
-  border: 1px solid #e2e3e7;
-  border-radius: 15px;
-  color: var(--accent);
-  background: linear-gradient(145deg, #ffffff, #f2f3ff);
-  box-shadow: 0 14px 32px rgba(64, 92, 245, 0.1);
-  transform: rotate(-3deg);
-}
-
-.welcome-kicker,
-.thread-heading p {
-  margin: 0 0 9px;
-  color: var(--accent);
-  font-family: 'Cascadia Code', Consolas, monospace;
-  font-size: 0.69rem;
-  font-weight: 650;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.welcome-description {
-  margin: 14px auto 0;
-  color: var(--muted);
-  font-size: 0.92rem;
-  font-weight: 500;
-  line-height: 1.7;
-}
-
-.starter-actions {
+.chat-typewriter {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin-top: 20px;
+  width: min(760px, calc(100% - 40px));
+  min-height: 36px;
+  margin: 0 auto 26px;
+  color: #17181a;
+  font-family: var(--font-display);
+  font-size: clamp(1.18rem, 2vw, 1.4rem);
+  font-weight: 660;
+  line-height: 1.45;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
 
-  button {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 38px;
-    padding: 0 14px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    color: #55585f;
-    background: #ffffff;
-    font-size: 0.78rem;
-    font-weight: 560;
-    cursor: pointer;
-    transition:
-      border-color 140ms ease,
-      background-color 140ms ease,
-      transform 140ms ease;
+.chat-typewriter-text {
+  min-width: 0;
+}
 
-    &:hover {
-      border-color: #d5d6db;
-      background: #f8f8f9;
-      transform: translateY(-1px);
-    }
-  }
-
-  svg {
-    color: var(--accent);
-  }
+.chat-typewriter-cursor {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-left: 7px;
+  border-radius: 999px;
+  background: #111214;
+  box-shadow: 0 1px 5px rgba(17, 18, 20, 0.18);
+  animation: chat-cursor-breathe 1.2s ease-in-out infinite;
 }
 
 .composer-dock {
@@ -124,7 +68,6 @@
 }
 
 .new-conversation .composer-dock {
-  margin-top: 30px;
   padding: 0;
 }
 
@@ -151,11 +94,11 @@
   textarea {
     display: block;
     width: 100%;
-    min-height: 30px;
-    max-height: 180px;
-    padding: 2px 7px;
+    min-height: 58px;
+    max-height: 154px;
+    padding: 4px 7px;
     resize: none;
-    overflow-y: auto;
+    overflow-y: hidden;
     border: 0;
     outline: 0;
     color: var(--ink);
@@ -218,13 +161,6 @@
   }
 }
 
-.composer-note {
-  margin: 8px 0 0;
-  color: #9a9da3;
-  text-align: center;
-  font-size: 0.64rem;
-}
-
 .conversation-thread {
   width: min(760px, calc(100% - 40px));
   min-height: 0;
@@ -246,6 +182,35 @@
     font-weight: 680;
     letter-spacing: -0.04em;
     text-wrap: balance;
+  }
+}
+
+.thread-heading p {
+  margin: 0 0 9px;
+  color: var(--accent);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.69rem;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+@keyframes chat-cursor-breathe {
+  0%,
+  100% {
+    background: #111214;
+    transform: scale(1);
+  }
+
+  50% {
+    background: #8a8d94;
+    transform: scale(0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-typewriter-cursor {
+    animation: none;
   }
 }
 
@@ -324,23 +289,11 @@
     }
   }
 
-  .welcome-emblem {
-    margin-bottom: 18px;
-  }
-
-  .welcome-description {
-    max-width: 340px;
-  }
-
-  .starter-actions {
-    display: grid;
-    width: min(300px, 100%);
-    margin-right: auto;
-    margin-left: auto;
-
-    button {
-      justify-content: flex-start;
-    }
+  .chat-typewriter {
+    width: calc(100% - 24px);
+    margin-bottom: 22px;
+    font-size: 1.12rem;
+    white-space: normal;
   }
 
   .composer-dock,

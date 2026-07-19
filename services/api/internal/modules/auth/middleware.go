@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -14,19 +15,27 @@ func (h *Handler) RequireAccessToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rawAccessToken, err := bearerToken(c.GetHeader("Authorization"))
 		if err != nil {
-			h.handleError(c, err)
+			h.handleAccessError(c, err)
 			return
 		}
 
 		identity, err := h.service.AuthenticateAccess(c.Request.Context(), rawAccessToken)
 		if err != nil {
-			h.handleError(c, err)
+			h.handleAccessError(c, err)
 			return
 		}
 
 		c.Set(identityContextKey, identity)
 		c.Next()
 	}
+}
+
+func (h *Handler) handleAccessError(c *gin.Context, err error) {
+	var appErr *apperrors.Error
+	if errors.As(err, &appErr) && appErr.Status == http.StatusUnauthorized {
+		c.Header("WWW-Authenticate", "Bearer")
+	}
+	h.handleError(c, err)
 }
 
 func IdentityFromContext(c *gin.Context) (*Identity, bool) {

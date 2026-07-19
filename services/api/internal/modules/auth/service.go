@@ -194,12 +194,7 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*AuthRes
 			if err := repository.RevokeSessionAndTokens(ctx, session.ID, now); err != nil {
 				return err
 			}
-			authErr = apperrors.New(
-				http.StatusForbidden,
-				"AUTH_ACCOUNT_DISABLED",
-				"账号当前不可用，请联系管理员",
-				"CONTACT_SUPPORT",
-			)
+			authErr = accountDisabledError()
 			return nil
 		}
 
