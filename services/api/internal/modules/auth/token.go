@@ -14,6 +14,11 @@ import (
 
 const refreshTokenBytes = 32
 
+var (
+	ErrAccessTokenExpired = errors.New("access token expired")
+	ErrAccessTokenInvalid = errors.New("invalid access token")
+)
+
 type AccessClaims struct {
 	SessionID string `json:"sid"`
 	Type      string `json:"typ"`
@@ -52,6 +57,39 @@ func (m *TokenManager) CreateAccessToken(userID, sessionID uuid.UUID, now time.T
 		return "", time.Time{}, err
 	}
 	return signed, expiresAt, nil
+}
+
+func (m *TokenManager) ParseAccessToken(raw string, now time.Time) (*AccessClaims, error) {
+	claims := &AccessClaims{}
+	token, err := jwt.ParseWithClaims(
+		raw,
+		claims,
+		func(token *jwt.Token) (any, error) {
+			if token.Method != jwt.SigningMethodHS256 {
+				return nil, ErrAccessTokenInvalid
+			}
+			return m.secret, nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithIssuer(m.issuer),
+		jwt.WithAudience(m.audience),
+		jwt.WithExpirationRequired(),
+		jwt.WithNotBeforeRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithTimeFunc(func() time.Time { return now }),
+		jwt.WithStrictDecoding(),
+	)
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) && !errors.Is(err, jwt.ErrTokenSignatureInvalid) {
+			return nil, ErrAccessTokenExpired
+		}
+		return nil, ErrAccessTokenInvalid
+	}
+	if token == nil || !token.Valid || claims.Type != "access" || claims.Subject == "" ||
+		claims.SessionID == "" || claims.ID == "" || claims.IssuedAt == nil {
+		return nil, ErrAccessTokenInvalid
+	}
+	return claims, nil
 }
 
 func GenerateRefreshToken() (string, error) {

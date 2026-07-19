@@ -6,6 +6,7 @@
 
 # Non-core repository directories
 /docs/
+/services/api/docs/
 /scripts/
 /storage/
 

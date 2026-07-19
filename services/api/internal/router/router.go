@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Infinitefft/Eterion/services/api/internal/apidocs"
 	"github.com/Infinitefft/Eterion/services/api/internal/config"
 	"github.com/Infinitefft/Eterion/services/api/internal/middleware"
 	"github.com/Infinitefft/Eterion/services/api/internal/modules/auth"
@@ -77,6 +78,7 @@ func New(cfg config.Config, db *gorm.DB, logger *slog.Logger) (*gin.Engine, erro
 		return nil, fmt.Errorf("initialize auth handler: %w", err)
 	}
 	authHandler.RegisterRoutes(engine.Group("/api"))
+	apidocs.RegisterRoutes(engine, cfg.AppEnv)
 
 	return engine, nil
 }

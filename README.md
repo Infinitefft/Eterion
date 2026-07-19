@@ -161,3 +161,26 @@ pnpm dev
 Set-Location services/api
 Copy-Item .env.example .env
 ```
+
+数据库迁移使用 goose 显式执行，API 启动时不会自动修改表结构：
+
+```powershell
+$apiDatabaseUrl = ((Get-Content .env | Select-String '^DATABASE_URL=').Line -replace '^DATABASE_URL=', '')
+goose -dir migrations postgres $apiDatabaseUrl up
+go run ./cmd/server
+```
+
+Go API 默认监听 `http://localhost:8080`，当前接口包括：
+
+- `GET /healthz`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `GET /api/auth/me`（需要 Bearer Access Token）
+- `POST /api/auth/logout`（需要 Bearer Access Token）
+
+## 查看 Swagger 接口文档
+
+开发或测试环境启动 API 后，访问 `http://localhost:8080/docs` 即可查看和调试全部接口。原始 OpenAPI 3.0 契约位于 `services/api/docs/openapi.yaml`，运行时也可以通过 `http://localhost:8080/openapi.yaml` 查看。
+
+Swagger UI 和 OpenAPI 路由在 `APP_ENV=production` 时不会注册，生产环境访问会返回 404。新增或修改后端接口时，需要同步更新 `services/api/docs/openapi.yaml`。

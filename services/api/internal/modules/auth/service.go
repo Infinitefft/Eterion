@@ -18,6 +18,12 @@ type AuthResult struct {
 	RefreshExpiresAt time.Time
 }
 
+type Identity struct {
+	UserID    uuid.UUID
+	SessionID uuid.UUID
+	User      UserResponse
+}
+
 type Service struct {
 	repository Repository
 	tokens     *TokenManager
@@ -234,6 +240,62 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*AuthRes
 	return result, nil
 }
 
+func (s *Service) AuthenticateAccess(ctx context.Context, rawAccessToken string) (*Identity, error) {
+	now := s.now()
+	claims, err := s.tokens.ParseAccessToken(rawAccessToken, now)
+	if err != nil {
+		if errors.Is(err, ErrAccessTokenExpired) {
+			return nil, accessExpiredError()
+		}
+		return nil, invalidAccessError()
+	}
+
+	userID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return nil, invalidAccessError()
+	}
+	sessionID, err := uuid.Parse(claims.SessionID)
+	if err != nil {
+		return nil, invalidAccessError()
+	}
+
+	session, err := s.repository.FindSessionByID(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, invalidSessionError()
+		}
+		return nil, err
+	}
+	if session.UserID != userID || session.RevokedAt != nil || !now.Before(session.ExpiresAt) {
+		return nil, invalidSessionError()
+	}
+
+	user, err := s.repository.FindUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, invalidSessionError()
+		}
+		return nil, err
+	}
+	if user.Status != UserStatusActive {
+		return nil, accountDisabledError()
+	}
+
+	return &Identity{
+		UserID:    user.ID,
+		SessionID: session.ID,
+		User: UserResponse{
+			ID:       user.ID.String(),
+			Phone:    user.Phone,
+			Nickname: user.Nickname,
+		},
+	}, nil
+}
+
+func (s *Service) Logout(ctx context.Context, sessionID uuid.UUID) error {
+	return s.repository.RevokeSessionAndTokens(ctx, sessionID, s.now())
+}
+
 func (s *Service) newSession(user *User, now time.Time) (*AuthResult, *AuthSession, *RefreshToken, error) {
 	session := &AuthSession{
 		ID:        uuid.New(),
@@ -318,5 +380,41 @@ func invalidRefreshError() *apperrors.Error {
 		"AUTH_REFRESH_INVALID",
 		"刷新凭证无效，请重新登录",
 		"LOGIN_AGAIN",
+	)
+}
+
+func accessExpiredError() *apperrors.Error {
+	return apperrors.New(
+		http.StatusUnauthorized,
+		"AUTH_ACCESS_EXPIRED",
+		"访问凭证已过期",
+		"REFRESH_ACCESS_TOKEN",
+	)
+}
+
+func invalidAccessError() *apperrors.Error {
+	return apperrors.New(
+		http.StatusUnauthorized,
+		"AUTH_ACCESS_INVALID",
+		"访问凭证无效",
+		"LOGIN_AGAIN",
+	)
+}
+
+func invalidSessionError() *apperrors.Error {
+	return apperrors.New(
+		http.StatusUnauthorized,
+		"AUTH_SESSION_INVALID",
+		"登录会话已失效，请重新登录",
+		"LOGIN_AGAIN",
+	)
+}
+
+func accountDisabledError() *apperrors.Error {
+	return apperrors.New(
+		http.StatusForbidden,
+		"AUTH_ACCOUNT_DISABLED",
+		"账号当前不可用，请联系管理员",
+		"CONTACT_SUPPORT",
 	)
 }

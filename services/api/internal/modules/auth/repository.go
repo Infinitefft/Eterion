@@ -24,6 +24,7 @@ type Repository interface {
 	CreateSession(ctx context.Context, session *AuthSession, token *RefreshToken) error
 	FindUserByPhone(ctx context.Context, phone string) (*User, error)
 	FindUserByID(ctx context.Context, id uuid.UUID) (*User, error)
+	FindSessionByID(ctx context.Context, id uuid.UUID) (*AuthSession, error)
 	FindRefreshTokenForUpdate(ctx context.Context, tokenHash string) (*RefreshToken, error)
 	FindSessionForUpdate(ctx context.Context, id uuid.UUID) (*AuthSession, error)
 	CreateRefreshToken(ctx context.Context, token *RefreshToken) error
@@ -100,6 +101,14 @@ func (r *GormRepository) FindUserByID(ctx context.Context, id uuid.UUID) (*User,
 		return nil, mapNotFound(err)
 	}
 	return &user, nil
+}
+
+func (r *GormRepository) FindSessionByID(ctx context.Context, id uuid.UUID) (*AuthSession, error) {
+	var session AuthSession
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&session).Error; err != nil {
+		return nil, mapNotFound(err)
+	}
+	return &session, nil
 }
 
 func (r *GormRepository) FindRefreshTokenForUpdate(ctx context.Context, tokenHash string) (*RefreshToken, error) {

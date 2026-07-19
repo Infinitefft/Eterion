@@ -71,6 +71,8 @@ func (h *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	authGroup.POST("/register", h.Register)
 	authGroup.POST("/login", h.Login)
 	authGroup.POST("/refresh", h.Refresh)
+	authGroup.GET("/me", h.RequireAccessToken(), h.Me)
+	authGroup.POST("/logout", h.RequireAccessToken(), h.Logout)
 }
 
 func (h *Handler) Register(c *gin.Context) {
@@ -128,6 +130,29 @@ func (h *Handler) Refresh(c *gin.Context) {
 	}
 	h.setRefreshCookie(c, result.RefreshToken, result.RefreshExpiresAt)
 	response.JSON(c, http.StatusOK, result.Response)
+}
+
+func (h *Handler) Me(c *gin.Context) {
+	identity, ok := IdentityFromContext(c)
+	if !ok {
+		h.handleError(c, errors.New("authenticated identity is missing from context"))
+		return
+	}
+	response.JSON(c, http.StatusOK, identity.User)
+}
+
+func (h *Handler) Logout(c *gin.Context) {
+	identity, ok := IdentityFromContext(c)
+	if !ok {
+		h.handleError(c, errors.New("authenticated identity is missing from context"))
+		return
+	}
+	if err := h.service.Logout(c.Request.Context(), identity.SessionID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+	h.clearRefreshCookie(c)
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) bindRequest(c *gin.Context, request any) bool {
