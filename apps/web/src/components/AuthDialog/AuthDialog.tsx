@@ -47,11 +47,13 @@ const authModeCopy = {
   },
 } as const satisfies Record<AuthMode, Record<string, string>>;
 
+/** 控制认证弹窗显示和关闭行为的外部参数。 */
 type AuthDialogProps = {
   open: boolean;
   onClose: () => void;
 };
 
+/** 登录和注册共用的模态弹窗外壳，具体表单根据 mode 切换。 */
 export function AuthDialog({ open, onClose }: AuthDialogProps) {
   const [mode, setMode] = useState<AuthMode>('login');
   const phoneId = useId();
@@ -134,17 +136,22 @@ export function AuthDialog({ open, onClose }: AuthDialogProps) {
 }
 
 type AuthFormProps = {
+  /** 当前需要渲染和提交的认证模式。 */
   mode: AuthMode;
+  /** 由弹窗统一生成的字段 ID，保证 label 与 input 正确关联。 */
   phoneId: string;
   nicknameId: string;
   passwordId: string;
+  /** 登录或注册成功后关闭并重置弹窗。 */
   onSuccess: () => void;
 };
 
+/** 根据认证模式分发到类型独立的登录或注册表单。 */
 function AuthForm(props: AuthFormProps) {
   return props.mode === 'login' ? <LoginForm {...props} /> : <RegisterForm {...props} />;
 }
 
+/** 登录表单：负责本地校验、请求提交和会话写入。 */
 function LoginForm({ phoneId, passwordId, onSuccess }: AuthFormProps) {
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -218,6 +225,7 @@ function LoginForm({ phoneId, passwordId, onSuccess }: AuthFormProps) {
   );
 }
 
+/** 注册表单：提交成功后直接使用后端创建的会话完成登录。 */
 function RegisterForm({ phoneId, nicknameId, passwordId, onSuccess }: AuthFormProps) {
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
@@ -311,6 +319,7 @@ function RegisterForm({ phoneId, nicknameId, passwordId, onSuccess }: AuthFormPr
 type LoginErrorSetter = ReturnType<typeof useForm<LoginFormValues>>['setError'];
 type RegisterErrorSetter = ReturnType<typeof useForm<RegisterFormValues>>['setError'];
 
+/** 将登录接口的字段错误或通用错误写回 React Hook Form。 */
 function applyLoginError(error: unknown, setError: LoginErrorSetter) {
   const apiError = getApiError(error);
   const fieldErrors = collectFieldErrors(apiError?.fields, ['phone', 'password'] as const);
@@ -326,6 +335,7 @@ function applyLoginError(error: unknown, setError: LoginErrorSetter) {
   });
 }
 
+/** 将注册字段错误和手机号、昵称冲突映射到对应输入框。 */
 function applyRegisterError(error: unknown, setError: RegisterErrorSetter) {
   const apiError = getApiError(error);
   const fieldErrors = collectFieldErrors(apiError?.fields, [
@@ -353,6 +363,7 @@ function applyRegisterError(error: unknown, setError: RegisterErrorSetter) {
 
 type AuthFieldName = 'phone' | 'nickname' | 'password';
 
+/** 从后端 fields 中筛出当前表单实际支持的字段错误。 */
 function collectFieldErrors<T extends AuthFieldName>(
   fields: Record<string, string> | undefined,
   allowedFields: readonly T[],
@@ -375,11 +386,14 @@ function getRegistrationConflictField(code: string | undefined): 'phone' | 'nick
 }
 
 type ValidationMessageProps = {
+  /** React Hook Form 返回的单个字段错误。 */
   error?: { message?: string };
   id?: string;
+  /** 表单级错误可传入独立样式，默认使用字段错误样式。 */
   className?: string;
 };
 
+/** 统一渲染字段级和表单级错误消息。 */
 function ValidationMessage({ error, id, className = 'auth-field-error' }: ValidationMessageProps) {
   if (!error?.message) {
     return null;
@@ -392,6 +406,7 @@ function ValidationMessage({ error, id, className = 'auth-field-error' }: Valida
   );
 }
 
+/** 展示认证弹窗顶部的循环打字欢迎语。 */
 function TypewriterGreeting() {
   const prefersReducedMotion = usePrefersReducedMotion();
   const [typewriter, setTypewriter] = useState<TypewriterState>({
@@ -460,6 +475,7 @@ function TypewriterGreeting() {
   );
 }
 
+/** 监听系统减少动画偏好，让欢迎动画符合无障碍设置。 */
 function usePrefersReducedMotion() {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,

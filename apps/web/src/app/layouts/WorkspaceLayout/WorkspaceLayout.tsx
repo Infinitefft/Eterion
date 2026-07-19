@@ -7,10 +7,10 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { logout } from '@/api/auth';
 import { clearAuthSession, retryAuthInitialization } from '@/api/client';
 import { getApiError } from '@/api/errors';
-import type { AuthUser } from '@/api/types';
 import { createConversationPath, routePaths } from '@/app/routePaths';
 import { AuthDialog } from '@/components/AuthDialog/AuthDialog';
 import { useAuthStore } from '@/store/authStore';
+import type { AuthUser } from '@/types/auth';
 
 import './WorkspaceLayout.less';
 
@@ -65,12 +65,14 @@ function RoundedBookIcon() {
   );
 }
 
+/** 工作区主布局，组合侧栏、路由内容和全局认证入口。 */
 export function WorkspaceLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(getInitialSidebarState);
   const [authDialogVersion, setAuthDialogVersion] = useState<number | null>(null);
   const user = useAuthStore((state) => state.user);
   const bootstrapStatus = useAuthStore((state) => state.bootstrapStatus);
   const sessionVersion = useAuthStore((state) => state.sessionVersion);
+  // 弹窗只属于发起打开时的会话版本；登录或跨标签退出后不会意外再次出现。
   const isAuthOpen =
     user === null && authDialogVersion !== null && authDialogVersion === sessionVersion;
 
@@ -184,11 +186,15 @@ export function WorkspaceLayout() {
 }
 
 type AccountControlProps = {
+  /** 当前登录用户；null 表示当前没有可用会话。 */
   user: AuthUser | null;
+  /** 控制未登录账户入口显示加载、重试或登录状态。 */
   bootstrapStatus: 'pending' | 'ready' | 'error';
+  /** 请求工作区打开登录注册弹窗。 */
   onRequestAuth: () => void;
 };
 
+/** 根据认证状态选择未登录入口或已登录账户菜单。 */
 function AccountControl({ user, bootstrapStatus, onRequestAuth }: AccountControlProps) {
   if (user !== null) {
     return <AuthenticatedAccountMenu user={user} />;
@@ -201,6 +207,7 @@ function AccountControl({ user, bootstrapStatus, onRequestAuth }: AccountControl
 
 type AnonymousAccountControlProps = Pick<AccountControlProps, 'bootstrapStatus' | 'onRequestAuth'>;
 
+/** 展示启动恢复、恢复失败和正常未登录三种账户入口。 */
 function AnonymousAccountControl({ bootstrapStatus, onRequestAuth }: AnonymousAccountControlProps) {
   if (bootstrapStatus === 'pending') {
     return (
@@ -255,6 +262,7 @@ function AnonymousAccountControl({ bootstrapStatus, onRequestAuth }: AnonymousAc
   );
 }
 
+/** 登录后的账户菜单；退出失败时保留本地会话并允许用户重试。 */
 function AuthenticatedAccountMenu({ user }: { user: AuthUser }) {
   const logoutMutation = useMutation({
     mutationFn: logout,
@@ -307,6 +315,7 @@ function AuthenticatedAccountMenu({ user }: { user: AuthUser }) {
   );
 }
 
+/** 账户区域只展示脱敏手机号，避免侧栏直接暴露完整登录标识。 */
 function maskPhone(phone: string) {
   return phone.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2');
 }
