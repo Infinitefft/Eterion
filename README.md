@@ -161,32 +161,3 @@ pnpm dev
 Set-Location services/api
 Copy-Item .env.example .env
 ```
-
-数据库迁移使用 goose 显式执行，API 启动时不会自动修改表结构：
-
-```powershell
-$apiDatabaseUrl = ((Get-Content .env | Select-String '^DATABASE_URL=').Line -replace '^DATABASE_URL=', '')
-goose -dir migrations postgres $apiDatabaseUrl up
-go run ./cmd/server
-```
-
-Go API 默认监听 `http://localhost:8080`，健康检查地址为 `http://localhost:8080/healthz`。当前认证接口为：
-
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/refresh`
-
-注册请求体为 `{"phone":"13800138000","nickname":"昵称","password":"..."}`，手机号和昵称均唯一。登录请求体为 `{"phone":"13800138000","password":"..."}`。响应 JSON 返回 Access Token 和用户信息；Refresh Token 仅通过 `eterion_rt` HttpOnly Cookie 下发，浏览器请求必须启用 credentials。
-
-## 工程约束
-
-这些约束保证前端、Go API 和后续 Agent 服务保持清晰的职责边界：
-
-- 浏览器只访问 Go API，不直接访问数据库或 Python Agent
-- 公共 REST API 使用 `/api/v1` 前缀，资源路径使用复数名词
-- WebSocket 事件包含版本、事件 ID、会话 ID、运行 ID、序号和时间戳
-- TanStack Query 保存服务端数据，Zustand 保存客户端全局状态，React Hook Form 保存表单状态
-- Go 模块按照 Handler、Service、Repository 和 PostgreSQL 的方向处理请求
-- Agent 界面展示可公开的结构化状态与摘要，不展示模型隐藏的原始思维链
-- Token、模型密钥和敏感配置通过环境变量注入，不写入日志或版本库
-- 高风险 Skill 需要隔离环境、权限控制、资源限制和用户确认

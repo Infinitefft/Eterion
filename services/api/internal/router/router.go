@@ -76,7 +76,7 @@ func New(cfg config.Config, db *gorm.DB, logger *slog.Logger) (*gin.Engine, erro
 	if err != nil {
 		return nil, fmt.Errorf("initialize auth handler: %w", err)
 	}
-	authHandler.RegisterRoutes(engine.Group("/api/v1"))
+	authHandler.RegisterRoutes(engine.Group("/api"))
 
 	return engine, nil
 }
