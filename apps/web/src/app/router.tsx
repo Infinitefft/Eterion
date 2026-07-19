@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 
+import { WorkspaceLayout } from '@/app/layouts/WorkspaceLayout';
 import { routePaths } from '@/app/routePaths';
 import { Chat } from '@/pages/Chat';
 import { NotFound } from '@/pages/NotFound';
@@ -11,23 +12,22 @@ export const router = createBrowserRouter([
     element: <Navigate to={routePaths.chat} replace />,
   },
   {
-    path: routePaths.chat,
+    element: <WorkspaceLayout />,
     errorElement: <NotFound />,
     children: [
       {
-        index: true,
+        path: routePaths.chat,
         element: <Chat />,
       },
       {
-        path: ':conversationId',
+        path: routePaths.conversation,
         element: <Chat />,
       },
+      {
+        path: routePaths.repository,
+        element: <Repository />,
+      },
     ],
-  },
-  {
-    path: routePaths.repository,
-    element: <Repository />,
-    errorElement: <NotFound />,
   },
   {
     path: '*',

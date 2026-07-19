@@ -5,6 +5,6 @@ export const routePaths = {
   repository: '/repository',
 } as const;
 
-export function createConversationPath(conversationId = crypto.randomUUID()) {
+export function createConversationPath(conversationId: string = crypto.randomUUID()) {
   return `${routePaths.chat}/${encodeURIComponent(conversationId)}`;
 }
