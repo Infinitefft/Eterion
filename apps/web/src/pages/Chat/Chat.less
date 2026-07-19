@@ -14,6 +14,7 @@
 }
 
 .composer-tools button,
+.model-button,
 .send-button {
   display: grid;
   border: 0;
@@ -103,6 +104,7 @@
     outline: 0;
     color: var(--ink);
     background: transparent;
+    font-weight: 400;
     line-height: 1.55;
 
     &::placeholder {
@@ -136,12 +138,28 @@
     }
   }
 
-  .model-button {
-    display: flex;
-    gap: 5px;
-    padding: 0 9px;
-    color: #686b72;
-    font-size: 0.72rem;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.model-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  color: #686b72;
+  background: transparent;
+  font-size: 0.84rem;
+  font-weight: 400;
+
+  &:hover {
+    background: var(--hover);
   }
 }
 

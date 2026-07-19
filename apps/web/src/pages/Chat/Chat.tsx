@@ -218,14 +218,16 @@ function Composer() {
             <button type='button' aria-label='添加附件'>
               <Paperclip size={18} />
             </button>
+          </div>
+          <div className='composer-actions'>
             <button className='model-button' type='button'>
               Eterion Agent
               <ChevronDown size={14} />
             </button>
+            <button className='send-button' type='submit' aria-label='发送消息'>
+              <ArrowUp size={19} strokeWidth={2.3} />
+            </button>
           </div>
-          <button className='send-button' type='submit' aria-label='发送消息'>
-            <ArrowUp size={19} strokeWidth={2.3} />
-          </button>
         </div>
       </form>
     </div>

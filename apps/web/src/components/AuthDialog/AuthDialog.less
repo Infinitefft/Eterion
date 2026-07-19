@@ -143,7 +143,32 @@
       background: #ffffff;
       box-shadow: 0 0 0 4px rgba(64, 92, 245, 0.08);
     }
+
+    &[aria-invalid='true'] {
+      border-color: #d45555;
+      background: #fffafa;
+
+      &:focus {
+        box-shadow: 0 0 0 4px rgba(212, 85, 85, 0.1);
+      }
+    }
   }
+}
+
+.auth-field-error,
+.auth-form-error {
+  color: #b33d3d;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.auth-field-error {
+  margin: 6px 4px 0;
+}
+
+.auth-form-error {
+  margin: -4px 4px 0;
+  text-align: center;
 }
 
 .auth-submit-button,
@@ -172,6 +197,13 @@
     background: #292b30;
     box-shadow: 0 14px 28px rgba(23, 24, 26, 0.18);
     transform: translateY(-1px);
+  }
+
+  &:disabled {
+    box-shadow: none;
+    cursor: wait;
+    opacity: 0.62;
+    transform: none;
   }
 }
 

@@ -1,9 +1,16 @@
-import { ChevronRight, UserRound } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { useMutation } from '@tanstack/react-query';
+import { ChevronRight, LoaderCircle, LogOut, RefreshCw, UserRound } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
+import { logout } from '@/api/auth';
+import { clearAuthSession, retryAuthInitialization } from '@/api/client';
+import { getApiError } from '@/api/errors';
+import type { AuthUser } from '@/api/types';
 import { createConversationPath, routePaths } from '@/app/routePaths';
 import { AuthDialog } from '@/components/AuthDialog/AuthDialog';
+import { useAuthStore } from '@/store/authStore';
 
 import './WorkspaceLayout.less';
 
@@ -60,7 +67,12 @@ function RoundedBookIcon() {
 
 export function WorkspaceLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(getInitialSidebarState);
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authDialogVersion, setAuthDialogVersion] = useState<number | null>(null);
+  const user = useAuthStore((state) => state.user);
+  const bootstrapStatus = useAuthStore((state) => state.bootstrapStatus);
+  const sessionVersion = useAuthStore((state) => state.sessionVersion);
+  const isAuthOpen =
+    user === null && authDialogVersion !== null && authDialogVersion === sessionVersion;
 
   const closeSidebarOnMobile = () => {
     if (window.matchMedia('(max-width: 800px)').matches) {
@@ -137,21 +149,11 @@ export function WorkspaceLayout() {
         </div>
 
         <footer className='sidebar-footer'>
-          <button
-            className='account-button'
-            type='button'
-            aria-label='登录或注册'
-            onClick={() => setIsAuthOpen(true)}
-          >
-            <span className='account-avatar' aria-hidden='true'>
-              <UserRound size={17} />
-            </span>
-            <span className='account-copy'>
-              <strong>登录 / 注册</strong>
-              <small>同步你的个人工作区</small>
-            </span>
-            <ChevronRight size={16} aria-hidden='true' />
-          </button>
+          <AccountControl
+            user={user}
+            bootstrapStatus={bootstrapStatus}
+            onRequestAuth={() => setAuthDialogVersion(sessionVersion)}
+          />
         </footer>
       </aside>
 
@@ -176,7 +178,135 @@ export function WorkspaceLayout() {
         <Outlet />
       </main>
 
-      <AuthDialog open={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+      <AuthDialog open={isAuthOpen} onClose={() => setAuthDialogVersion(null)} />
     </div>
   );
+}
+
+type AccountControlProps = {
+  user: AuthUser | null;
+  bootstrapStatus: 'pending' | 'ready' | 'error';
+  onRequestAuth: () => void;
+};
+
+function AccountControl({ user, bootstrapStatus, onRequestAuth }: AccountControlProps) {
+  if (user !== null) {
+    return <AuthenticatedAccountMenu user={user} />;
+  }
+
+  return (
+    <AnonymousAccountControl bootstrapStatus={bootstrapStatus} onRequestAuth={onRequestAuth} />
+  );
+}
+
+type AnonymousAccountControlProps = Pick<AccountControlProps, 'bootstrapStatus' | 'onRequestAuth'>;
+
+function AnonymousAccountControl({ bootstrapStatus, onRequestAuth }: AnonymousAccountControlProps) {
+  if (bootstrapStatus === 'pending') {
+    return (
+      <button className='account-button' type='button' disabled>
+        <span className='account-avatar' aria-hidden='true'>
+          <LoaderCircle className='account-loading-icon' size={17} />
+        </span>
+        <span className='account-copy'>
+          <strong>正在检查登录状态</strong>
+          <small>正在恢复你的个人工作区</small>
+        </span>
+      </button>
+    );
+  }
+
+  if (bootstrapStatus === 'error') {
+    return (
+      <button
+        className='account-button account-retry-button'
+        type='button'
+        onClick={() => {
+          void retryAuthInitialization();
+        }}
+      >
+        <span className='account-avatar' aria-hidden='true'>
+          <RefreshCw size={17} />
+        </span>
+        <span className='account-copy'>
+          <strong>认证服务暂不可用</strong>
+          <small>点击重新检查登录状态</small>
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <button
+      className='account-button'
+      type='button'
+      aria-label='登录或注册'
+      onClick={onRequestAuth}
+    >
+      <span className='account-avatar' aria-hidden='true'>
+        <UserRound size={17} />
+      </span>
+      <span className='account-copy'>
+        <strong>登录 / 注册</strong>
+        <small>同步你的个人工作区</small>
+      </span>
+      <ChevronRight size={16} aria-hidden='true' />
+    </button>
+  );
+}
+
+function AuthenticatedAccountMenu({ user }: { user: AuthUser }) {
+  const logoutMutation = useMutation({
+    mutationFn: logout,
+    onSuccess: () => clearAuthSession(),
+  });
+
+  const logoutError = getApiError(logoutMutation.error);
+
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button className='account-button' type='button' aria-label='打开账户菜单'>
+          <span className='account-avatar account-avatar-authenticated' aria-hidden='true'>
+            {Array.from(user.nickname)[0] ?? <UserRound size={17} />}
+          </span>
+          <span className='account-copy'>
+            <strong>{user.nickname}</strong>
+            <small>{maskPhone(user.phone)}</small>
+          </span>
+          <ChevronRight size={16} aria-hidden='true' />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className='account-menu' side='top' align='start' sideOffset={8}>
+          <DropdownMenu.Label className='account-menu-profile'>
+            <strong>{user.nickname}</strong>
+            <span>{maskPhone(user.phone)}</span>
+          </DropdownMenu.Label>
+          <DropdownMenu.Separator className='account-menu-separator' />
+          <DropdownMenu.Item
+            className='account-menu-item account-menu-logout'
+            disabled={logoutMutation.isPending}
+            onSelect={() => logoutMutation.mutate()}
+          >
+            {logoutMutation.isPending ? (
+              <LoaderCircle className='account-loading-icon' size={16} />
+            ) : (
+              <LogOut size={16} />
+            )}
+            <span>{logoutMutation.isPending ? '正在退出…' : '退出登录'}</span>
+          </DropdownMenu.Item>
+          {logoutMutation.isError ? (
+            <p className='account-menu-error' role='alert'>
+              {logoutError?.message ?? '退出失败，请检查网络后重试'}
+            </p>
+          ) : null}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+function maskPhone(phone: string) {
+  return phone.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2');
 }
