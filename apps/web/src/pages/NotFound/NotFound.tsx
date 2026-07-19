@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 
 import { routePaths } from '@/app/routePaths';
 
+import './NotFound.less';
+
 export function NotFound() {
   return (
     <main className='not-found'>

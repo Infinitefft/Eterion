@@ -1,5 +1,7 @@
 import { BookOpen, FileText, Plus, Search, Sparkles } from 'lucide-react';
 
+import './Repository.less';
+
 const repositoryItems = [
   { title: '产品与技术规划', meta: '12 个文档 · 刚刚更新' },
   { title: 'Agent 架构资料', meta: '8 个文档 · 2 天前更新' },

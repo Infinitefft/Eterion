@@ -1,10 +1,10 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 
-import { WorkspaceLayout } from '@/app/layouts/WorkspaceLayout';
+import { WorkspaceLayout } from '@/app/layouts/WorkspaceLayout/WorkspaceLayout';
 import { routePaths } from '@/app/routePaths';
-import { Chat } from '@/pages/Chat';
-import { NotFound } from '@/pages/NotFound';
-import { Repository } from '@/pages/Repository';
+import { Chat } from '@/pages/Chat/Chat';
+import { NotFound } from '@/pages/NotFound/NotFound';
+import { Repository } from '@/pages/Repository/Repository';
 
 export const router = createBrowserRouter([
   {

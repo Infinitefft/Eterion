@@ -1,0 +1,180 @@
+@repository-tablet-breakpoint: 980px;
+@layout-mobile-breakpoint: 800px;
+@repository-mobile-breakpoint: 620px;
+
+.repository-page {
+  width: min(1040px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 86px 0 64px;
+}
+
+.repository-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+
+  h1 {
+    margin: 0;
+    color: #17181a;
+    font-family: var(--font-display);
+    font-size: clamp(2.4rem, 5vw, 4rem);
+    font-weight: 680;
+    letter-spacing: -0.04em;
+    text-wrap: balance;
+  }
+
+  > div > p:last-child {
+    margin: 12px 0 0;
+    color: var(--muted);
+  }
+}
+
+.page-kicker {
+  margin: 0 0 9px;
+  color: var(--accent);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.69rem;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.repository-create-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 11px;
+  color: #ffffff;
+  background: var(--ink);
+  font-size: 0.83rem;
+  font-weight: 680;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--accent);
+  }
+}
+
+.repository-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 480px;
+  min-height: 44px;
+  margin-top: 48px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--quiet);
+  background: #ffffff;
+
+  &:focus-within {
+    border-color: #c8cad0;
+    box-shadow: 0 0 0 3px rgba(64, 92, 245, 0.06);
+  }
+
+  input {
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font-size: 0.84rem;
+  }
+}
+
+.repository-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.repository-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 112px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  text-align: left;
+  background: #ffffff;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+
+  &:hover {
+    border-color: #d6d7dc;
+    box-shadow: 0 14px 28px rgba(29, 31, 36, 0.06);
+    transform: translateY(-2px);
+  }
+
+  > svg {
+    color: #b1b3b8;
+  }
+}
+
+.repository-card-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.repository-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+
+  strong {
+    overflow: hidden;
+    font-size: 0.84rem;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    color: var(--muted);
+    font-size: 0.68rem;
+  }
+}
+
+@media (max-width: @repository-tablet-breakpoint) {
+  .repository-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: @layout-mobile-breakpoint) {
+  .repository-page {
+    width: min(100% - 40px, 1040px);
+    padding-top: 90px;
+  }
+}
+
+@media (max-width: @repository-mobile-breakpoint) {
+  .repository-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .repository-search {
+    margin-top: 34px;
+  }
+
+  .repository-grid {
+    grid-template-columns: 1fr;
+  }
+}

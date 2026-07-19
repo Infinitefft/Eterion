@@ -1,8 +1,11 @@
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, UserRound } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
 import { createConversationPath, routePaths } from '@/app/routePaths';
+import { AuthDialog } from '@/components/AuthDialog/AuthDialog';
+
+import './WorkspaceLayout.less';
 
 const recentConversations = [
   { id: 'agent-runtime', title: 'Agent 运行时架构' },
@@ -50,20 +53,14 @@ function RoundedBookIcon() {
     >
       <rect x='2.75' y='3.5' width='5.5' height='17' rx='1.55' />
       <rect x='9.25' y='3.5' width='5.5' height='17' rx='1.55' />
-      <rect
-        x='16.1'
-        y='3.5'
-        width='5.15'
-        height='17'
-        rx='1.55'
-        transform='rotate(-8 18.675 12)'
-      />
+      <rect x='16.1' y='3.5' width='5.15' height='17' rx='1.55' transform='rotate(-8 18.675 12)' />
     </svg>
   );
 }
 
 export function WorkspaceLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(getInitialSidebarState);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
 
   const closeSidebarOnMobile = () => {
     if (window.matchMedia('(max-width: 800px)').matches) {
@@ -72,9 +69,7 @@ export function WorkspaceLayout() {
   };
 
   return (
-    <div
-      className={`workspace-shell ${isSidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}
-    >
+    <div className={`workspace-shell ${isSidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}>
       <aside className='workspace-sidebar' aria-label='主导航' aria-hidden={!isSidebarOpen}>
         <header className='sidebar-header'>
           <NavLink
@@ -83,9 +78,7 @@ export function WorkspaceLayout() {
             aria-label='返回新会话'
             onClick={closeSidebarOnMobile}
           >
-            <span className='product-wordmark' translate='no'>
-              Eterion
-            </span>
+            <img className='product-logo' src='/eterion-logo-black-transparent.png' alt='' />
           </NavLink>
           <div className='sidebar-header-actions'>
             <button
@@ -132,9 +125,7 @@ export function WorkspaceLayout() {
               {recentConversations.map((conversation) => (
                 <NavLink
                   key={conversation.id}
-                  className={({ isActive }) =>
-                    `conversation-link ${isActive ? 'is-active' : ''}`
-                  }
+                  className={({ isActive }) => `conversation-link ${isActive ? 'is-active' : ''}`}
                   to={createConversationPath(conversation.id)}
                   onClick={closeSidebarOnMobile}
                 >
@@ -146,13 +137,18 @@ export function WorkspaceLayout() {
         </div>
 
         <footer className='sidebar-footer'>
-          <button className='account-button' type='button'>
+          <button
+            className='account-button'
+            type='button'
+            aria-label='登录或注册'
+            onClick={() => setIsAuthOpen(true)}
+          >
             <span className='account-avatar' aria-hidden='true'>
-              ET
+              <UserRound size={17} />
             </span>
             <span className='account-copy'>
-              <strong>开发工作区</strong>
-              <small>Agent 在线</small>
+              <strong>登录 / 注册</strong>
+              <small>同步你的个人工作区</small>
             </span>
             <ChevronRight size={16} aria-hidden='true' />
           </button>
@@ -179,6 +175,8 @@ export function WorkspaceLayout() {
         ) : null}
         <Outlet />
       </main>
+
+      <AuthDialog open={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
     </div>
   );
 }

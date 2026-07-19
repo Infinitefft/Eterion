@@ -1,8 +1,11 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { App } from '@/app/App';
 import '@/styles/index.css';
+import '@/styles/theme.less';
+// Keep global layers ahead of component-local Less in the generated cascade.
+// eslint-disable-next-line import-x/order
+import { App } from '@/app/App';
 
 const rootElement = document.getElementById('root');
 

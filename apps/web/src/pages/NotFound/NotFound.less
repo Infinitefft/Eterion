@@ -1,0 +1,27 @@
+.not-found {
+  display: grid;
+  width: min(620px, calc(100% - 40px));
+  min-height: 100vh;
+  margin: 0 auto;
+  place-content: center;
+
+  h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 680;
+    text-wrap: balance;
+  }
+
+  p {
+    color: var(--muted);
+  }
+
+  .primary-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    justify-self: start;
+    margin-top: 18px;
+  }
+}

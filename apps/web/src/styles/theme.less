@@ -1,0 +1,96 @@
+:root {
+  --font-sans:
+    Inter, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-display:
+    'SF Pro Display', Inter, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', system-ui,
+    sans-serif;
+  font-family: var(--font-sans);
+  color: #202123;
+  background: #ffffff;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --ink: #202123;
+  --muted: #71757d;
+  --quiet: #9a9da3;
+  --canvas: #ffffff;
+  --sidebar: #f7f7f8;
+  --hover: #ececee;
+  --line: #e7e7e9;
+  --accent: #405cf5;
+  --accent-soft: #eef0ff;
+  --success: #20a66a;
+  --sidebar-width: 282px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--canvas);
+  font-weight: 480;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button {
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+a,
+textarea,
+input {
+  &:focus-visible {
+    outline: 3px solid rgba(64, 92, 245, 0.2);
+    outline-offset: 2px;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

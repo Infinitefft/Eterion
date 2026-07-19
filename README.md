@@ -151,7 +151,32 @@ Set-Location apps/web
 pnpm dev
 ```
 
-默认开发地址为 `http://localhost:5173`。Go API 的启动方式将在服务入口实现后补充。
+默认开发地址为 `http://localhost:5173`。
+
+## 初始化并启动 Go API
+
+后端的本地隐私配置保存在 `services/api/.env`，该文件不会提交到 Git。首次运行时从示例文件复制一份，并填写数据库密码和随机 JWT 密钥：
+
+```powershell
+Set-Location services/api
+Copy-Item .env.example .env
+```
+
+数据库迁移使用 goose 显式执行，API 启动时不会自动修改表结构：
+
+```powershell
+$apiDatabaseUrl = ((Get-Content .env | Select-String '^DATABASE_URL=').Line -replace '^DATABASE_URL=', '')
+goose -dir migrations postgres $apiDatabaseUrl up
+go run ./cmd/server
+```
+
+Go API 默认监听 `http://localhost:8080`，健康检查地址为 `http://localhost:8080/healthz`。当前认证接口为：
+
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
+
+注册请求体为 `{"phone":"13800138000","nickname":"昵称","password":"..."}`，手机号和昵称均唯一。登录请求体为 `{"phone":"13800138000","password":"..."}`。响应 JSON 返回 Access Token 和用户信息；Refresh Token 仅通过 `eterion_rt` HttpOnly Cookie 下发，浏览器请求必须启用 credentials。
 
 ## 工程约束
 

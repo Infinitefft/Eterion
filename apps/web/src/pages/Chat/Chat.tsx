@@ -3,13 +3,14 @@ import {
   Bot,
   Check,
   ChevronDown,
-  CircleUserRound,
   Code2,
   Paperclip,
   SlidersHorizontal,
   Sparkles,
 } from 'lucide-react';
 import { useParams } from 'react-router-dom';
+
+import './Chat.less';
 
 const conversationTitles: Record<string, string> = {
   'agent-runtime': 'Agent 运行时架构',
@@ -26,28 +27,10 @@ const starterActions = [
 
 export function Chat() {
   const { conversationId } = useParams();
-  const title = conversationId
-    ? (conversationTitles[conversationId] ?? '会话详情')
-    : '新会话';
+  const title = conversationId ? (conversationTitles[conversationId] ?? '会话详情') : '新会话';
 
   return (
     <section className={`chat-page ${conversationId ? 'chat-page-thread' : 'chat-page-new'}`}>
-      <header className='chat-header'>
-        <button className='chat-title-button' type='button'>
-          <span>{title}</span>
-          <ChevronDown size={15} />
-        </button>
-        <div className='chat-header-actions'>
-          <span className='connection-state'>
-            <span aria-hidden='true' />
-            Agent 就绪
-          </span>
-          <button className='profile-button' type='button' aria-label='打开个人设置'>
-            <CircleUserRound size={21} />
-          </button>
-        </div>
-      </header>
-
       {conversationId ? (
         <>
           <ConversationDetail title={title} />
@@ -69,9 +52,7 @@ function NewConversation() {
         </div>
         <p className='welcome-kicker'>Eterion Workspace</p>
         <h1>今天想推进什么？</h1>
-        <p className='welcome-description'>
-          从一个问题、一个想法，或一段需要继续完成的代码开始。
-        </p>
+        <p className='welcome-description'>从一个问题、一个想法，或一段需要继续完成的代码开始。</p>
       </div>
 
       <Composer />
