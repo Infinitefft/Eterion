@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package eterion.agent;
+
+option go_package = "github.com/Infinitefft/Eterion/services/api/internal/gen/agentpb;agentpb";
+
+service AgentService {
+  rpc StreamRun(RunRequest) returns (stream RunEvent);
+}
+
+message RunRequest {
+  string run_id = 1;
+  string chat_id = 2;
+  repeated ChatMessage messages = 3;
+}
+
+message ChatMessage {
+  string role = 1;
+  string content = 2;
+}
+
+message RunEvent {
+  oneof payload {
+    RunStarted started = 1;
+    ContentDelta content_delta = 2;
+    RunCompleted completed = 3;
+    RunFailed failed = 4;
+  }
+}
+
+message RunStarted {
+  string model = 1;
+}
+
+message ContentDelta {
+  string delta = 1;
+}
+
+message RunCompleted {
+  string full_text = 1;
+}
+
+message RunFailed {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+}
