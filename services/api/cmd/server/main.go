@@ -1,3 +1,4 @@
+// 负责启动 Go API、监听退出信号，并优雅关闭 HTTP、WebSocket 与 Agent Run。
 package main
 
 import (
@@ -43,7 +44,7 @@ func main() {
 		}
 	}()
 
-	engine, err := router.New(cfg, db, logger)
+	engine, runtime, err := router.New(rootCtx, cfg, db, logger)
 	if err != nil {
 		logger.Error("router initialization failed", "error", err)
 		os.Exit(1)
@@ -69,15 +70,19 @@ func main() {
 	case err := <-serverErrors:
 		if err != nil && err != http.ErrServerClosed {
 			logger.Error("API server stopped unexpectedly", "error", err)
-			os.Exit(1)
 		}
 	}
+
+	// 主动取消应用 Context，让后台 Run 感知服务正在退出。
+	stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
-		os.Exit(1)
+	}
+	if err := runtime.Close(); err != nil {
+		logger.Error("chat runtime close failed", "error", err)
 	}
 	logger.Info("API server stopped")
 }

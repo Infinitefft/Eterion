@@ -112,6 +112,13 @@ type CommandAcceptedPayload struct {
 	Duplicate          bool        `json:"duplicate"`
 }
 
+// RunCancelAcceptedPayload 表示取消请求已被服务端接管。
+type RunCancelAcceptedPayload struct {
+	Command   CommandType `json:"command"`
+	RunID     string      `json:"run_id"`
+	Duplicate bool        `json:"duplicate"`
+}
+
 // CommandError 是客户端可以根据 Code 判断的结构化错误。
 type CommandError struct {
 	Code      string `json:"code"`

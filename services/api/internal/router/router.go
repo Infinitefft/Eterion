@@ -1,3 +1,4 @@
+// 负责创建 Gin 路由，并装配认证、Chat、WebSocket 和 Python Agent 依赖。
 package router
 
 import (
@@ -12,20 +13,37 @@ import (
 	"github.com/Infinitefft/Eterion/services/api/internal/config"
 	"github.com/Infinitefft/Eterion/services/api/internal/middleware"
 	"github.com/Infinitefft/Eterion/services/api/internal/modules/auth"
+	"github.com/Infinitefft/Eterion/services/api/internal/modules/chat"
 	"github.com/Infinitefft/Eterion/services/api/internal/shared/response"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-func New(cfg config.Config, db *gorm.DB, logger *slog.Logger) (*gin.Engine, error) {
+// Runtime 保存需要在应用退出时主动关闭的长生命周期组件。
+type Runtime struct {
+	hub  *chat.Hub
+	runs *chat.RunManager
+}
+
+func (r *Runtime) Close() error {
+	r.hub.CloseAll("server shutting down")
+	return r.runs.Close()
+}
+
+func New(
+	appContext context.Context,
+	cfg config.Config,
+	db *gorm.DB,
+	logger *slog.Logger,
+) (*gin.Engine, *Runtime, error) {
 	if strings.EqualFold(cfg.AppEnv, "production") {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	engine := gin.New()
 	if err := engine.SetTrustedProxies(nil); err != nil {
-		return nil, fmt.Errorf("configure trusted proxies: %w", err)
+		return nil, nil, fmt.Errorf("configure trusted proxies: %w", err)
 	}
 	engine.Use(
 		middleware.RequestIDMiddleware(),
@@ -43,7 +61,7 @@ func New(cfg config.Config, db *gorm.DB, logger *slog.Logger) (*gin.Engine, erro
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		return nil, fmt.Errorf("get health check connection: %w", err)
+		return nil, nil, fmt.Errorf("get health check connection: %w", err)
 	}
 	engine.GET("/healthz", func(c *gin.Context) {
 		ctx, cancel := contextWithTimeout(c, 2*time.Second)
@@ -71,16 +89,57 @@ func New(cfg config.Config, db *gorm.DB, logger *slog.Logger) (*gin.Engine, erro
 	)
 	authService, err := auth.NewService(auth.NewRepository(db), tokenManager, cfg.RefreshTokenTTL)
 	if err != nil {
-		return nil, fmt.Errorf("initialize auth service: %w", err)
+		return nil, nil, fmt.Errorf("initialize auth service: %w", err)
 	}
 	authHandler, err := auth.NewHandler(authService, cfg, logger)
 	if err != nil {
-		return nil, fmt.Errorf("initialize auth handler: %w", err)
+		return nil, nil, fmt.Errorf("initialize auth handler: %w", err)
 	}
-	authHandler.RegisterRoutes(engine.Group("/api"))
+
+	chatRepository := chat.NewRepository(db)
+	chatService := chat.NewService(chatRepository)
+	hub := chat.NewHub(logger)
+	publisher := chat.NewPublisher(hub)
+	runner, err := chat.NewGRPCRunner(
+		cfg.AgentGRPCAddress,
+		cfg.AgentSharedSecret,
+		cfg.AgentRunTimeout,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize agent runner: %w", err)
+	}
+	runManager := chat.NewRunManager(
+		appContext,
+		chatRepository,
+		runner,
+		publisher,
+		logger,
+	)
+	commandRouter := chat.NewCommandRouter(
+		chatService,
+		runManager,
+		publisher,
+		logger,
+	)
+	chatHandler := chat.NewHandler(
+		chatService,
+		chat.NewTicketService(cfg.WebSocketTicketTTL),
+		hub,
+		publisher,
+		commandRouter,
+		cfg,
+		logger,
+	)
+
+	api := engine.Group("/api")
+	authHandler.RegisterRoutes(api)
+	chatHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
 	apidocs.RegisterRoutes(engine, cfg.AppEnv)
 
-	return engine, nil
+	return engine, &Runtime{
+		hub:  hub,
+		runs: runManager,
+	}, nil
 }
 
 func contextWithTimeout(c *gin.Context, timeout time.Duration) (context.Context, context.CancelFunc) {

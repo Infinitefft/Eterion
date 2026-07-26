@@ -1,3 +1,4 @@
+// 负责集中读取和校验 Go API 的数据库、认证、Chat 与 Agent 环境变量。
 package config
 
 import (
@@ -12,6 +13,7 @@ import (
 )
 
 const minimumJWTSecretLength = 32
+const minimumAgentSecretLength = 32
 
 type Config struct {
 	AppEnv              string
@@ -28,6 +30,10 @@ type Config struct {
 	RefreshCookieName   string
 	RefreshCookieSecure bool
 	AllowedOrigins      []string
+	AgentGRPCAddress    string
+	AgentSharedSecret   string
+	AgentRunTimeout     time.Duration
+	WebSocketTicketTTL  time.Duration
 }
 
 func Load() (Config, error) {
@@ -44,6 +50,8 @@ func Load() (Config, error) {
 		JWTAudience:       envOrDefault("JWT_AUDIENCE", "eterion-web"),
 		RefreshCookieName: envOrDefault("REFRESH_COOKIE_NAME", "eterion_rt"),
 		AllowedOrigins:    splitCSV(envOrDefault("CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
+		AgentGRPCAddress:  envOrDefault("AGENT_GRPC_ADDR", "127.0.0.1:50051"),
+		AgentSharedSecret: strings.TrimSpace(os.Getenv("AGENT_SHARED_SECRET")),
 	}
 
 	var err error
@@ -63,6 +71,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.RefreshCookieSecure, err = boolEnv("REFRESH_COOKIE_SECURE", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.AgentRunTimeout, err = positiveDurationEnv("AGENT_RUN_TIMEOUT", 10*time.Minute); err != nil {
+		return Config{}, err
+	}
+	if cfg.WebSocketTicketTTL, err = positiveDurationEnv("WS_TICKET_TTL", 45*time.Second); err != nil {
 		return Config{}, err
 	}
 
@@ -89,6 +103,15 @@ func (c Config) Validate() error {
 	}
 	if strings.EqualFold(c.AppEnv, "production") && !c.RefreshCookieSecure {
 		return errors.New("REFRESH_COOKIE_SECURE must be true in production")
+	}
+	if strings.TrimSpace(c.AgentGRPCAddress) == "" {
+		return errors.New("AGENT_GRPC_ADDR is required")
+	}
+	if len(c.AgentSharedSecret) < minimumAgentSecretLength {
+		return fmt.Errorf(
+			"AGENT_SHARED_SECRET must be at least %d characters",
+			minimumAgentSecretLength,
+		)
 	}
 	return nil
 }
