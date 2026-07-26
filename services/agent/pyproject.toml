@@ -1,3 +1,4 @@
+# 定义 Python Agent 项目的依赖、构建方式和测试配置。
 [build-system]
 requires = ["setuptools>=80"]
 build-backend = "setuptools.build_meta"

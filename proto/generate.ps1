@@ -1,3 +1,4 @@
+# 根据共享 Proto 生成 Go 和 Python gRPC 代码。
 [CmdletBinding()]
 param()
 

@@ -1,3 +1,4 @@
+// 定义 Go API 与 Python Agent 之间的 gRPC 流式通信契约。
 syntax = "proto3";
 
 package eterion.agent;
