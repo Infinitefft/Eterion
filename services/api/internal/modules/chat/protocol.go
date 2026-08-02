@@ -1,19 +1,17 @@
-// 负责定义浏览器与 Go 服务之间的 WebSocket 指令、事件和载荷结构。
+// Defines the WebSocket commands and events shared by the browser and Go API.
 package chat
 
 import "encoding/json"
 
-// CommandType 限制客户端可以发送的指令名称。
-// 自定义 string 类型可以避免在业务代码中到处直接比较裸字符串。
 type CommandType string
 
 const (
+	CommandChatStart  CommandType = "chat.start"
 	CommandChatSubmit CommandType = "chat.submit"
 	CommandRunCancel  CommandType = "run.cancel"
 	CommandPing       CommandType = "ping"
 )
 
-// EventType 限制服务端可以推送的事件名称。
 type EventType string
 
 const (
@@ -22,6 +20,10 @@ const (
 	EventCommandRejected  EventType = "command.rejected"
 	EventRunCreated       EventType = "run.created"
 	EventRunStatus        EventType = "run.status"
+	EventStepStarted      EventType = "step.started"
+	EventStepProgress     EventType = "step.progress"
+	EventStepCompleted    EventType = "step.completed"
+	EventStepFailed       EventType = "step.failed"
 	EventMessageStarted   EventType = "message.started"
 	EventMessageDelta     EventType = "message.delta"
 	EventMessageCompleted EventType = "message.completed"
@@ -29,7 +31,6 @@ const (
 	EventError            EventType = "error"
 )
 
-// RunStatus 表示一次 AI 执行当前所处的阶段。
 type RunStatus string
 
 const (
@@ -41,12 +42,6 @@ const (
 	RunStatusCancelled RunStatus = "cancelled"
 )
 
-// ClientEnvelope 是每一个客户端 WebSocket 文本帧的外层结构。
-//
-// Payload 暂时使用 json.RawMessage 保存原始 JSON。
-// Command Router 确认 Type 后，再把它解析成对应的具体 Payload，
-// 这样不会把所有指令的字段混在一个巨大结构体中。
-// json:"..." 是 struct tag，告诉 Go 在 JSON 转换时使用什么字段名
 type ClientEnvelope struct {
 	Type           CommandType     `json:"type"`
 	RequestID      string          `json:"request_id"`
@@ -57,11 +52,6 @@ type ClientEnvelope struct {
 	Payload        json.RawMessage `json:"payload"`
 }
 
-// ServerEnvelope 是服务端推送给浏览器的统一事件结构。
-//
-// 指针字段允许 JSON 明确输出 null。例如连接级事件没有 ChatID，
-// Run 之外的事件也没有 Seq。
-// any 表示 Payload 可以接收任意具体载荷结构，序列化时仍会得到普通 JSON。
 type ServerEnvelope struct {
 	EventID   string    `json:"event_id"`
 	Type      EventType `json:"type"`
@@ -69,122 +59,161 @@ type ServerEnvelope struct {
 	ChatID    *string   `json:"chat_id"`
 	RunID     *string   `json:"run_id"`
 	MessageID *string   `json:"message_id"`
+	StepID    *string   `json:"step_id"`
 	Seq       *int64    `json:"seq"`
 	Cursor    *string   `json:"cursor"`
 	Timestamp int64     `json:"timestamp"`
 	Payload   any       `json:"payload"`
 }
 
-// TextContent 是 chat.submit 当前支持的纯文本内容。
 type TextContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type    string     `json:"type"`
+	Format  TextFormat `json:"format"`
+	Content string     `json:"content"`
 }
 
-// ChatSubmitPayload 是 chat.submit 指令的载荷。
+type ChatStartPayload struct {
+	MessageID string      `json:"message_id"`
+	Title     *string     `json:"title"`
+	Content   TextContent `json:"content"`
+}
+
 type ChatSubmitPayload struct {
-	Content TextContent `json:"content"`
+	MessageID string      `json:"message_id"`
+	Content   TextContent `json:"content"`
 }
 
-// RunCancelPayload 是 run.cancel 指令的载荷。
 type RunCancelPayload struct {
 	Reason string `json:"reason"`
 }
 
-// PingPayload 保存浏览器发出 ping 时的本地时间。
 type PingPayload struct {
 	ClientTime int64 `json:"client_time"`
 }
 
-// ConnectionReadyPayload 告诉浏览器当前连接已经可以接收指令。
 type ConnectionReadyPayload struct {
-	ConnectionID      string   `json:"connection_id"`
-	HeartbeatInterval int64    `json:"heartbeat_interval_ms"`
-	Capabilities      []string `json:"capabilities"`
+	ConnectionID      string `json:"connection_id"`
+	HeartbeatInterval int64  `json:"heartbeat_interval_ms"`
+	ResumeSupported   bool   `json:"resume_supported"`
 }
 
-// CommandAcceptedPayload 表示 chat.submit 已经成功创建并持久化业务数据。
 type CommandAcceptedPayload struct {
-	Command            CommandType `json:"command"`
-	UserMessageID      string      `json:"user_message_id"`
-	AssistantMessageID string      `json:"assistant_message_id"`
-	RunID              string      `json:"run_id"`
-	Duplicate          bool        `json:"duplicate"`
+	CommandType CommandType `json:"command_type"`
 }
 
-// RunCancelAcceptedPayload 表示取消请求已被服务端接管。
-type RunCancelAcceptedPayload struct {
-	Command   CommandType `json:"command"`
-	RunID     string      `json:"run_id"`
-	Duplicate bool        `json:"duplicate"`
-}
-
-// CommandError 是客户端可以根据 Code 判断的结构化错误。
 type CommandError struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	Retryable bool   `json:"retryable"`
 }
 
-// CommandRejectedPayload 表示某条客户端指令没有被服务端接受。
 type CommandRejectedPayload struct {
-	Command CommandType  `json:"command"`
-	Error   CommandError `json:"error"`
+	CommandType CommandType  `json:"command_type"`
+	Error       CommandError `json:"error"`
 }
 
-// RunCreatedPayload 表示 Run 已创建但尚未开始调用 Agent。
-type RunCreatedPayload struct {
-	Status RunStatus `json:"status"`
+type WireChatMessage struct {
+	MessageID   string        `json:"message_id"`
+	ChatID      string        `json:"chat_id"`
+	RunID       *string       `json:"run_id"`
+	Role        MessageRole   `json:"role"`
+	Status      MessageStatus `json:"status"`
+	Content     TextContent   `json:"content"`
+	CreatedAt   int64         `json:"created_at"`
+	UpdatedAt   int64         `json:"updated_at"`
+	CompletedAt *int64        `json:"completed_at"`
+	Error       *CommandError `json:"error"`
 }
 
-// RunStatusPayload 描述 Run 的一次状态变化。
-type RunStatusPayload struct {
-	PreviousStatus RunStatus     `json:"previous_status"`
-	CurrentStatus  RunStatus     `json:"current_status"`
-	Reason         *string       `json:"reason"`
-	Error          *CommandError `json:"error"`
+type WireAgentRun struct {
+	RunID           string        `json:"run_id"`
+	ChatID          string        `json:"chat_id"`
+	InputMessageID  string        `json:"input_message_id"`
+	OutputMessageID string        `json:"output_message_id"`
+	Status          RunStatus     `json:"status"`
+	StepIDs         []string      `json:"step_ids"`
+	LastSeq         int64         `json:"last_seq"`
+	Desynced        bool          `json:"desynced"`
+	CreatedAt       int64         `json:"created_at"`
+	StartedAt       *int64        `json:"started_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	CompletedAt     *int64        `json:"completed_at"`
+	Error           *CommandError `json:"error"`
 }
 
-// TextBlockRef 只描述文本块身份，不包含完整文本。
-type TextBlockRef struct {
-	BlockID   string `json:"block_id"`
-	BlockType string `json:"block_type"`
+type WireAgentStepBase struct {
+	StepID       string        `json:"step_id"`
+	ChatID       string        `json:"chat_id"`
+	RunID        string        `json:"run_id"`
+	Kind         string        `json:"kind"`
+	Title        string        `json:"title"`
+	Status       string        `json:"status"`
+	Sequence     int64         `json:"sequence"`
+	ParentStepID *string       `json:"parent_step_id"`
+	StartedAt    *int64        `json:"started_at"`
+	CompletedAt  *int64        `json:"completed_at"`
+	Error        *CommandError `json:"error"`
 }
 
-// MessageStartedPayload 表示服务端开始生成 assistant 消息。
-type MessageStartedPayload struct {
-	Role  string       `json:"role"`
-	Block TextBlockRef `json:"block"`
+type WireReasoningStep struct {
+	WireAgentStepBase
+	Summary *string `json:"summary"`
 }
 
-// MessageDeltaPayload 是可以直接追加到现有文本末尾的增量。
+type WireToolReference struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type WireToolStep struct {
+	WireAgentStepBase
+	CallID string            `json:"call_id"`
+	Tool   WireToolReference `json:"tool"`
+	Input  any               `json:"input"`
+	Output any               `json:"output"`
+}
+
+type WireSkillReference struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type WireSkillStep struct {
+	WireAgentStepBase
+	CallID string             `json:"call_id"`
+	Skill  WireSkillReference `json:"skill"`
+	Input  any                `json:"input"`
+	Output any                `json:"output"`
+}
+
+type WireRetrievalStep struct {
+	WireAgentStepBase
+	RetrievalID string  `json:"retrieval_id"`
+	Query       *string `json:"query"`
+	Documents   []any   `json:"documents"`
+}
+
+type RunSnapshotPayload struct {
+	Run WireAgentRun `json:"run"`
+}
+
+type StepSnapshotPayload struct {
+	Step any `json:"step"`
+}
+
+type MessageSnapshotPayload struct {
+	Message WireChatMessage `json:"message"`
+}
+
 type MessageDeltaPayload struct {
-	BlockID   string `json:"block_id"`
-	BlockType string `json:"block_type"`
-	Delta     string `json:"delta"`
+	Delta string `json:"delta"`
 }
 
-// TextBlock 是消息完成后返回的权威文本快照。
-type TextBlock struct {
-	BlockID   string `json:"block_id"`
-	BlockType string `json:"block_type"`
-	Text      string `json:"text"`
-}
-
-// MessageCompletedPayload 携带消息的完整 Block 列表。
-type MessageCompletedPayload struct {
-	Blocks []TextBlock `json:"blocks"`
-}
-
-// PongPayload 回传客户端时间，并附上服务端生成事件的时间。
 type PongPayload struct {
 	ClientTime int64 `json:"client_time"`
 	ServerTime int64 `json:"server_time"`
 }
 
-// ErrorPayload 用于无法关联到某条具体指令的连接级错误。
 type ErrorPayload struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
+	Error CommandError `json:"error"`
 }

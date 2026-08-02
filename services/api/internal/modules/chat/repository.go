@@ -19,9 +19,12 @@ var (
 	ErrRepositoryRunActive           = errors.New("chat already has an active run")
 	ErrRepositoryInvalidRunState     = errors.New("invalid run state")
 	ErrRepositoryIdempotencyConflict = errors.New("idempotency key belongs to another chat")
+	ErrRepositoryChatAlreadyExists   = errors.New("chat already exists")
+	ErrRepositoryMessageIDConflict   = errors.New("message id is already in use")
 )
 
 type SubmitRecord struct {
+	Chat             Chat
 	Run              Run
 	UserMessage      Message
 	AssistantMessage Message
@@ -29,8 +32,9 @@ type SubmitRecord struct {
 }
 
 type RunExecution struct {
-	Run      Run
-	Messages []Message
+	Run           Run
+	OutputMessage Message
+	Messages      []Message
 }
 
 // Repository 让 Service 和 RunManager 不依赖 GORM 的具体写法，方便后续测试。
@@ -39,12 +43,25 @@ type Repository interface {
 	ListChats(ctx context.Context, userID uuid.UUID) ([]Chat, error)
 	FindChatOwned(ctx context.Context, userID, chatID uuid.UUID) (*Chat, error)
 	Snapshot(ctx context.Context, userID, chatID uuid.UUID) (*Chat, []Message, []Run, error)
+	StartChat(
+		ctx context.Context,
+		userID uuid.UUID,
+		chatID uuid.UUID,
+		messageID uuid.UUID,
+		idempotencyKey string,
+		title string,
+		content string,
+		format TextFormat,
+		now time.Time,
+	) (*SubmitRecord, error)
 	Submit(
 		ctx context.Context,
 		userID uuid.UUID,
 		chatID uuid.UUID,
+		messageID uuid.UUID,
 		idempotencyKey string,
 		content string,
+		format TextFormat,
 		now time.Time,
 	) (*SubmitRecord, error)
 	FindRunOwned(
@@ -67,6 +84,12 @@ type Repository interface {
 		next RunStatus,
 		now time.Time,
 	) (RunStatus, int64, error)
+	StartMessage(
+		ctx context.Context,
+		runID uuid.UUID,
+		messageID uuid.UUID,
+		now time.Time,
+	) (int64, error)
 	AppendDelta(
 		ctx context.Context,
 		runID uuid.UUID,
@@ -88,8 +111,9 @@ type Repository interface {
 		status RunStatus,
 		code string,
 		message string,
+		retryable bool,
 		now time.Time,
-	) (RunStatus, int64, error)
+	) (RunStatus, int64, int64, error)
 }
 
 type GormRepository struct {
@@ -171,12 +195,107 @@ func (r *GormRepository) Snapshot(
 	return chat, messages, runs, nil
 }
 
+func (r *GormRepository) StartChat(
+	ctx context.Context,
+	userID uuid.UUID,
+	chatID uuid.UUID,
+	messageID uuid.UUID,
+	idempotencyKey string,
+	title string,
+	content string,
+	format TextFormat,
+	now time.Time,
+) (*SubmitRecord, error) {
+	var result *SubmitRecord
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		duplicate, err := findSubmitByIdempotency(tx, userID, idempotencyKey)
+		if err != nil {
+			return err
+		}
+		if duplicate != nil {
+			if !sameSubmitIntent(duplicate, chatID, messageID, content, format) ||
+				duplicate.Chat.Title != title {
+				return ErrRepositoryIdempotencyConflict
+			}
+			duplicate.Duplicate = true
+			result = duplicate
+			return nil
+		}
+
+		var existingCount int64
+		if err := tx.Model(&Chat{}).
+			Where("id = ?", chatID).
+			Count(&existingCount).Error; err != nil {
+			return fmt.Errorf("check chat id: %w", err)
+		}
+		if existingCount > 0 {
+			return ErrRepositoryChatAlreadyExists
+		}
+
+		chat := Chat{
+			ID:        chatID,
+			UserID:    userID,
+			Title:     title,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if err := tx.Create(&chat).Error; err != nil {
+			return fmt.Errorf("create chat: %w", err)
+		}
+
+		record, err := createRunRecord(
+			tx,
+			chat,
+			messageID,
+			idempotencyKey,
+			content,
+			format,
+			now,
+		)
+		if err != nil {
+			return err
+		}
+		result = record
+		return nil
+	})
+	if err != nil {
+		if uniqueViolationConstraint(err) != "" {
+			duplicate, lookupErr := findSubmitByIdempotency(
+				r.db.WithContext(ctx),
+				userID,
+				idempotencyKey,
+			)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+			if duplicate != nil &&
+				sameSubmitIntent(duplicate, chatID, messageID, content, format) &&
+				duplicate.Chat.Title == title {
+				duplicate.Duplicate = true
+				return duplicate, nil
+			}
+			switch uniqueViolationConstraint(err) {
+			case "chats_pkey":
+				return nil, ErrRepositoryChatAlreadyExists
+			case "messages_pkey":
+				return nil, ErrRepositoryMessageIDConflict
+			default:
+				return nil, ErrRepositoryIdempotencyConflict
+			}
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
 func (r *GormRepository) Submit(
 	ctx context.Context,
 	userID uuid.UUID,
 	chatID uuid.UUID,
+	messageID uuid.UUID,
 	idempotencyKey string,
 	content string,
+	format TextFormat,
 	now time.Time,
 ) (*SubmitRecord, error) {
 	var result *SubmitRecord
@@ -204,7 +323,7 @@ func (r *GormRepository) Submit(
 			return err
 		}
 		if duplicate != nil {
-			if duplicate.Run.ChatID != chatID {
+			if !sameSubmitIntent(duplicate, chatID, messageID, content, format) {
 				return ErrRepositoryIdempotencyConflict
 			}
 			duplicate.Duplicate = true
@@ -230,79 +349,19 @@ func (r *GormRepository) Submit(
 			return ErrRepositoryRunActive
 		}
 
-		runID := uuid.New()
-		userMessage := Message{
-			ID:          uuid.New(),
-			ChatID:      chatID,
-			Role:        MessageRoleUser,
-			Status:      MessageStatusCompleted,
-			Content:     content,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			CompletedAt: timePointer(now),
+		record, err := createRunRecord(
+			tx,
+			lockedChat,
+			messageID,
+			idempotencyKey,
+			content,
+			format,
+			now,
+		)
+		if err != nil {
+			return err
 		}
-		assistantCreatedAt := now.Add(time.Microsecond)
-		assistantMessage := Message{
-			ID:        uuid.New(),
-			ChatID:    chatID,
-			Role:      MessageRoleAssistant,
-			Status:    MessageStatusPending,
-			Content:   "",
-			CreatedAt: assistantCreatedAt,
-			UpdatedAt: assistantCreatedAt,
-		}
-
-		if err := tx.Create(&userMessage).Error; err != nil {
-			return fmt.Errorf("create user message: %w", err)
-		}
-		if err := tx.Create(&assistantMessage).Error; err != nil {
-			return fmt.Errorf("create assistant message: %w", err)
-		}
-
-		run := Run{
-			ID:              runID,
-			ChatID:          chatID,
-			UserID:          userID,
-			InputMessageID:  userMessage.ID,
-			OutputMessageID: assistantMessage.ID,
-			Status:          RunStatusCreated,
-			IdempotencyKey:  idempotencyKey,
-			LastSeq:         0,
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-		if err := tx.Create(&run).Error; err != nil {
-			switch uniqueViolationConstraint(err) {
-			case "runs_one_active_per_chat":
-				return ErrRepositoryRunActive
-			case "runs_idempotency_unique":
-				return ErrRepositoryIdempotencyConflict
-			}
-			return fmt.Errorf("create run: %w", err)
-		}
-
-		if err := tx.Model(&Message{}).
-			Where("id IN ?", []uuid.UUID{
-				userMessage.ID,
-				assistantMessage.ID,
-			}).
-			Update("run_id", runID).Error; err != nil {
-			return fmt.Errorf("link messages to run: %w", err)
-		}
-		userMessage.RunID = &runID
-		assistantMessage.RunID = &runID
-
-		if err := tx.Model(&Chat{}).
-			Where("id = ?", chatID).
-			Update("updated_at", now).Error; err != nil {
-			return fmt.Errorf("touch chat: %w", err)
-		}
-
-		result = &SubmitRecord{
-			Run:              run,
-			UserMessage:      userMessage,
-			AssistantMessage: assistantMessage,
-		}
+		result = record
 		return nil
 	})
 	if err != nil {
@@ -359,10 +418,16 @@ func (r *GormRepository) LoadRunExecution(
 		Find(&messages).Error; err != nil {
 		return nil, fmt.Errorf("load agent message history: %w", err)
 	}
+	var outputMessage Message
+	if err := r.db.WithContext(ctx).
+		First(&outputMessage, "id = ?", run.OutputMessageID).Error; err != nil {
+		return nil, fmt.Errorf("load output message: %w", err)
+	}
 
 	return &RunExecution{
-		Run:      run,
-		Messages: messages,
+		Run:           run,
+		OutputMessage: outputMessage,
+		Messages:      messages,
 	}, nil
 }
 
@@ -414,6 +479,41 @@ func (r *GormRepository) TransitionRun(
 		return tx.Model(run).Updates(updates).Error
 	})
 	return previous, seq, err
+}
+
+func (r *GormRepository) StartMessage(
+	ctx context.Context,
+	runID uuid.UUID,
+	messageID uuid.UUID,
+	now time.Time,
+) (int64, error) {
+	var seq int64
+	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
+		if !containsRunStatus(
+			[]RunStatus{RunStatusRunning, RunStatusStreaming},
+			run.Status,
+		) {
+			return ErrRepositoryInvalidRunState
+		}
+		result := tx.Model(&Message{}).
+			Where("id = ? AND run_id = ?", messageID, runID).
+			Updates(map[string]any{
+				"status":     MessageStatusStreaming,
+				"updated_at": now,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("start assistant message: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("assistant message not found")
+		}
+		seq = run.LastSeq + 1
+		return tx.Model(run).Updates(map[string]any{
+			"last_seq":   seq,
+			"updated_at": now,
+		}).Error
+	})
+	return seq, err
 }
 
 func (r *GormRepository) AppendDelta(
@@ -496,12 +596,13 @@ func (r *GormRepository) CompleteRun(
 		messageSeq = run.LastSeq + 1
 		statusSeq = run.LastSeq + 2
 		return tx.Model(run).Updates(map[string]any{
-			"status":        RunStatusCompleted,
-			"last_seq":      statusSeq,
-			"error_code":    nil,
-			"error_message": nil,
-			"updated_at":    now,
-			"completed_at":  now,
+			"status":          RunStatusCompleted,
+			"last_seq":        statusSeq,
+			"error_code":      nil,
+			"error_message":   nil,
+			"error_retryable": false,
+			"updated_at":      now,
+			"completed_at":    now,
 		}).Error
 	})
 	return messageSeq, statusSeq, err
@@ -514,14 +615,16 @@ func (r *GormRepository) EndRun(
 	status RunStatus,
 	code string,
 	message string,
+	retryable bool,
 	now time.Time,
-) (RunStatus, int64, error) {
+) (RunStatus, int64, int64, error) {
 	if status != RunStatusFailed && status != RunStatusCancelled {
-		return "", 0, errors.New("end run requires failed or cancelled status")
+		return "", 0, 0, errors.New("end run requires failed or cancelled status")
 	}
 
 	var previous RunStatus
-	var seq int64
+	var messageSeq int64
+	var statusSeq int64
 	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
 		if !containsRunStatus(
 			[]RunStatus{
@@ -535,7 +638,8 @@ func (r *GormRepository) EndRun(
 		}
 
 		previous = run.Status
-		seq = run.LastSeq + 1
+		messageSeq = run.LastSeq + 1
+		statusSeq = run.LastSeq + 2
 		messageStatus := MessageStatusFailed
 		if status == RunStatusCancelled {
 			messageStatus = MessageStatusCancelled
@@ -556,12 +660,13 @@ func (r *GormRepository) EndRun(
 		}
 
 		updates := map[string]any{
-			"status":        status,
-			"last_seq":      seq,
-			"updated_at":    now,
-			"completed_at":  now,
-			"error_code":    nil,
-			"error_message": nil,
+			"status":          status,
+			"last_seq":        statusSeq,
+			"updated_at":      now,
+			"completed_at":    now,
+			"error_code":      nil,
+			"error_message":   nil,
+			"error_retryable": false,
 		}
 		if code != "" {
 			updates["error_code"] = code
@@ -569,9 +674,12 @@ func (r *GormRepository) EndRun(
 		if message != "" {
 			updates["error_message"] = message
 		}
+		if code != "" {
+			updates["error_retryable"] = retryable
+		}
 		return tx.Model(run).Updates(updates).Error
 	})
-	return previous, seq, err
+	return previous, messageSeq, statusSeq, err
 }
 
 func (r *GormRepository) withLockedRun(
@@ -616,6 +724,10 @@ func findSubmitByIdempotency(
 	if err != nil {
 		return nil, fmt.Errorf("find idempotent run: %w", err)
 	}
+	var chat Chat
+	if err := tx.First(&chat, "id = ?", run.ChatID).Error; err != nil {
+		return nil, fmt.Errorf("load idempotent chat: %w", err)
+	}
 
 	var userMessage Message
 	if err := tx.First(&userMessage, "id = ?", run.InputMessageID).Error; err != nil {
@@ -631,10 +743,112 @@ func findSubmitByIdempotency(
 	}
 
 	return &SubmitRecord{
+		Chat:             chat,
 		Run:              run,
 		UserMessage:      userMessage,
 		AssistantMessage: assistantMessage,
 	}, nil
+}
+
+func createRunRecord(
+	tx *gorm.DB,
+	chat Chat,
+	messageID uuid.UUID,
+	idempotencyKey string,
+	content string,
+	format TextFormat,
+	now time.Time,
+) (*SubmitRecord, error) {
+	runID := uuid.New()
+	userMessage := Message{
+		ID:            messageID,
+		ChatID:        chat.ID,
+		Role:          MessageRoleUser,
+		Status:        MessageStatusCompleted,
+		Content:       content,
+		ContentFormat: format,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		CompletedAt:   timePointer(now),
+	}
+	assistantCreatedAt := now.Add(time.Microsecond)
+	assistantMessage := Message{
+		ID:            uuid.New(),
+		ChatID:        chat.ID,
+		Role:          MessageRoleAssistant,
+		Status:        MessageStatusPending,
+		Content:       "",
+		ContentFormat: TextFormatMarkdown,
+		CreatedAt:     assistantCreatedAt,
+		UpdatedAt:     assistantCreatedAt,
+	}
+
+	if err := tx.Create(&userMessage).Error; err != nil {
+		if uniqueViolationConstraint(err) != "" {
+			return nil, ErrRepositoryMessageIDConflict
+		}
+		return nil, fmt.Errorf("create user message: %w", err)
+	}
+	if err := tx.Create(&assistantMessage).Error; err != nil {
+		return nil, fmt.Errorf("create assistant message: %w", err)
+	}
+
+	run := Run{
+		ID:              runID,
+		ChatID:          chat.ID,
+		UserID:          chat.UserID,
+		InputMessageID:  userMessage.ID,
+		OutputMessageID: assistantMessage.ID,
+		Status:          RunStatusCreated,
+		IdempotencyKey:  idempotencyKey,
+		LastSeq:         0,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := tx.Create(&run).Error; err != nil {
+		switch uniqueViolationConstraint(err) {
+		case "runs_one_active_per_chat":
+			return nil, ErrRepositoryRunActive
+		case "runs_idempotency_unique":
+			return nil, ErrRepositoryIdempotencyConflict
+		}
+		return nil, fmt.Errorf("create run: %w", err)
+	}
+
+	if err := tx.Model(&Message{}).
+		Where("id IN ?", []uuid.UUID{userMessage.ID, assistantMessage.ID}).
+		Update("run_id", runID).Error; err != nil {
+		return nil, fmt.Errorf("link messages to run: %w", err)
+	}
+	userMessage.RunID = &runID
+	assistantMessage.RunID = &runID
+
+	if err := tx.Model(&Chat{}).
+		Where("id = ?", chat.ID).
+		Update("updated_at", now).Error; err != nil {
+		return nil, fmt.Errorf("touch chat: %w", err)
+	}
+	chat.UpdatedAt = now
+
+	return &SubmitRecord{
+		Chat:             chat,
+		Run:              run,
+		UserMessage:      userMessage,
+		AssistantMessage: assistantMessage,
+	}, nil
+}
+
+func sameSubmitIntent(
+	record *SubmitRecord,
+	chatID uuid.UUID,
+	messageID uuid.UUID,
+	content string,
+	format TextFormat,
+) bool {
+	return record.Run.ChatID == chatID &&
+		record.UserMessage.ID == messageID &&
+		record.UserMessage.Content == content &&
+		record.UserMessage.ContentFormat == format
 }
 
 func containsRunStatus(

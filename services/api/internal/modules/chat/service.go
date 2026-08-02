@@ -22,6 +22,46 @@ type Service struct {
 	now        func() time.Time
 }
 
+func (s *Service) StartChat(
+	ctx context.Context,
+	userID uuid.UUID,
+	chatID uuid.UUID,
+	messageID uuid.UUID,
+	idempotencyKey string,
+	title *string,
+	content string,
+	format TextFormat,
+) (*SubmitRecord, error) {
+	normalizedTitle := ""
+	if title != nil {
+		normalizedTitle = strings.TrimSpace(*title)
+	}
+	if normalizedTitle == "" {
+		normalizedTitle = firstRunes(content, 30)
+	}
+	if utf8.RuneCountInString(normalizedTitle) > maxChatTitleRunes {
+		return nil, newBusinessError(
+			ErrorInvalidEnvelope,
+			"Chat 标题不能超过 120 个字符",
+			false,
+			http.StatusBadRequest,
+		)
+	}
+
+	record, err := s.repository.StartChat(
+		ctx,
+		userID,
+		chatID,
+		messageID,
+		idempotencyKey,
+		normalizedTitle,
+		content,
+		format,
+		s.now(),
+	)
+	return record, s.mapSubmitError(err)
+}
+
 func NewService(repository Repository) *Service {
 	return &Service{
 		repository: repository,
@@ -120,23 +160,38 @@ func (s *Service) Snapshot(
 		return nil, err
 	}
 
-	messageResponses := make([]MessageResponse, 0, len(messages))
-	for _, message := range messages {
-		messageResponses = append(
-			messageResponses,
-			messageResponse(message),
-		)
+	runsByID := make(map[uuid.UUID]Run, len(runs))
+	for _, run := range runs {
+		runsByID[run.ID] = run
 	}
 
-	runResponses := make([]RunResponse, 0, len(runs))
+	messageResponses := make([]SnapshotMessage, 0, len(messages))
+	for _, message := range messages {
+		var messageError *CommandError
+		if message.Status == MessageStatusFailed && message.RunID != nil {
+			messageError = runCommandError(runsByID[*message.RunID])
+		}
+		messageResponses = append(messageResponses, snapshotMessage(
+			wireChatMessage(message, messageError),
+		))
+	}
+
+	runResponses := make([]SnapshotRun, 0, len(runs))
 	for _, run := range runs {
-		runResponses = append(runResponses, runResponse(run))
+		runResponses = append(runResponses, snapshotRun(wireAgentRun(run)))
 	}
 
 	return &SnapshotResponse{
-		Chat:     chatResponse(*chat),
+		Chat: SnapshotChat{
+			ID:        chat.ID.String(),
+			Title:     chat.Title,
+			CreatedAt: chat.CreatedAt.UnixMilli(),
+			UpdatedAt: chat.UpdatedAt.UnixMilli(),
+		},
 		Messages: messageResponses,
 		Runs:     runResponses,
+		Steps:    []any{},
+		Cursor:   nil,
 	}, nil
 }
 
@@ -144,43 +199,65 @@ func (s *Service) Submit(
 	ctx context.Context,
 	userID uuid.UUID,
 	chatID uuid.UUID,
+	messageID uuid.UUID,
 	idempotencyKey string,
 	content string,
+	format TextFormat,
 ) (*SubmitRecord, error) {
 	record, err := s.repository.Submit(
 		ctx,
 		userID,
 		chatID,
+		messageID,
 		idempotencyKey,
 		content,
+		format,
 		s.now(),
 	)
+	return record, s.mapSubmitError(err)
+}
+
+func (s *Service) mapSubmitError(err error) error {
 	switch {
 	case errors.Is(err, ErrRepositoryChatNotFound):
-		return nil, newBusinessError(
+		return newBusinessError(
 			ErrorChatNotFound,
 			"Chat 不存在或无权访问",
 			false,
 			http.StatusNotFound,
 		)
 	case errors.Is(err, ErrRepositoryRunActive):
-		return nil, newBusinessError(
+		return newBusinessError(
 			ErrorRunActive,
 			"当前 Chat 已有正在执行的任务",
 			false,
 			http.StatusConflict,
 		)
 	case errors.Is(err, ErrRepositoryIdempotencyConflict):
-		return nil, newBusinessError(
+		return newBusinessError(
 			ErrorInvalidEnvelope,
-			"幂等键已用于其他 Chat",
+			"幂等键与原始请求不匹配",
+			false,
+			http.StatusConflict,
+		)
+	case errors.Is(err, ErrRepositoryChatAlreadyExists):
+		return newBusinessError(
+			ErrorInvalidEnvelope,
+			"Chat ID 已被使用",
+			false,
+			http.StatusConflict,
+		)
+	case errors.Is(err, ErrRepositoryMessageIDConflict):
+		return newBusinessError(
+			ErrorInvalidEnvelope,
+			"Message ID 已被使用",
 			false,
 			http.StatusConflict,
 		)
 	case err != nil:
-		return nil, err
+		return err
 	default:
-		return record, nil
+		return nil
 	}
 }
 
@@ -216,48 +293,10 @@ func chatResponse(chat Chat) ChatResponse {
 	}
 }
 
-func messageResponse(message Message) MessageResponse {
-	var runID *string
-	if message.RunID != nil {
-		value := message.RunID.String()
-		runID = &value
+func firstRunes(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
 	}
-
-	return MessageResponse{
-		ID:          message.ID.String(),
-		ChatID:      message.ChatID.String(),
-		RunID:       runID,
-		Role:        message.Role,
-		Status:      message.Status,
-		Content:     message.Content,
-		CreatedAt:   message.CreatedAt,
-		UpdatedAt:   message.UpdatedAt,
-		CompletedAt: message.CompletedAt,
-	}
-}
-
-func runResponse(run Run) RunResponse {
-	var runError *RunErrorResponse
-	if run.ErrorCode != nil {
-		runError = &RunErrorResponse{
-			Code: *run.ErrorCode,
-		}
-		if run.ErrorMessage != nil {
-			runError.Message = *run.ErrorMessage
-		}
-	}
-
-	return RunResponse{
-		ID:              run.ID.String(),
-		ChatID:          run.ChatID.String(),
-		InputMessageID:  run.InputMessageID.String(),
-		OutputMessageID: run.OutputMessageID.String(),
-		Status:          run.Status,
-		LastSeq:         run.LastSeq,
-		Error:           runError,
-		CreatedAt:       run.CreatedAt,
-		StartedAt:       run.StartedAt,
-		UpdatedAt:       run.UpdatedAt,
-		CompletedAt:     run.CompletedAt,
-	}
+	return string(runes[:limit])
 }

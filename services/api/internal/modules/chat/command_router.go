@@ -1,4 +1,4 @@
-// 负责解析和校验 WebSocket 客户端指令，并分发到对应 Chat 业务方法。
+// Strictly validates WebSocket commands and dispatches them to chat services.
 package chat
 
 import (
@@ -38,10 +38,7 @@ func NewCommandRouter(
 		logger = slog.Default()
 	}
 	return &CommandRouter{
-		service:   service,
-		runs:      runs,
-		publisher: publisher,
-		logger:    logger,
+		service: service, runs: runs, publisher: publisher, logger: logger,
 	}
 }
 
@@ -60,19 +57,14 @@ func (r *CommandRouter) HandleFrame(
 		)
 		return
 	}
-
 	if businessError := validateBaseEnvelope(envelope); businessError != nil {
-		_ = r.publisher.Rejected(
-			connection,
-			envelope.RequestID,
-			connection.ChatID(),
-			envelope.Type,
-			businessError,
-		)
+		r.reject(connection, envelope, businessError)
 		return
 	}
 
 	switch envelope.Type {
+	case CommandChatStart:
+		r.handleStart(ctx, connection, envelope)
 	case CommandChatSubmit:
 		r.handleSubmit(ctx, connection, envelope)
 	case CommandRunCancel:
@@ -80,19 +72,54 @@ func (r *CommandRouter) HandleFrame(
 	case CommandPing:
 		r.handlePing(connection, envelope)
 	default:
-		_ = r.publisher.Rejected(
-			connection,
-			envelope.RequestID,
-			connection.ChatID(),
-			envelope.Type,
-			newBusinessError(
-				ErrorInvalidEnvelope,
-				"不支持的指令类型",
-				false,
-				http.StatusBadRequest,
-			),
-		)
+		r.reject(connection, envelope, invalidEnvelope("不支持的指令类型"))
 	}
+}
+
+func (r *CommandRouter) handleStart(
+	ctx context.Context,
+	connection *Connection,
+	envelope ClientEnvelope,
+) {
+	chatID, key, businessError := validateSubmitEnvelope(envelope)
+	if businessError != nil {
+		r.reject(connection, envelope, businessError)
+		return
+	}
+	var payload ChatStartPayload
+	if err := decodeStrictJSON(envelope.Payload, &payload); err != nil {
+		r.reject(connection, envelope, invalidEnvelope("chat.start payload 不合法"))
+		return
+	}
+	messageID, businessError := validateMessagePayload(payload.MessageID, payload.Content)
+	if businessError != nil {
+		r.reject(connection, envelope, businessError)
+		return
+	}
+	if payload.Title != nil && utf8.RuneCountInString(strings.TrimSpace(*payload.Title)) > maxChatTitleRunes {
+		r.reject(connection, envelope, invalidEnvelope("Chat 标题不能超过 120 个字符"))
+		return
+	}
+	userID, err := uuid.Parse(connection.UserID())
+	if err != nil {
+		r.rejectInternal(connection, envelope, err)
+		return
+	}
+	record, err := r.service.StartChat(
+		ctx,
+		userID,
+		chatID,
+		messageID,
+		key,
+		payload.Title,
+		strings.TrimSpace(payload.Content.Content),
+		payload.Content.Format,
+	)
+	if err != nil {
+		r.rejectError(connection, envelope, err)
+		return
+	}
+	r.acceptAndStart(connection, envelope, record)
 }
 
 func (r *CommandRouter) handleSubmit(
@@ -100,50 +127,21 @@ func (r *CommandRouter) handleSubmit(
 	connection *Connection,
 	envelope ClientEnvelope,
 ) {
-	chatID, businessError := validateChatCommand(
-		connection,
-		envelope,
-	)
+	chatID, key, businessError := validateSubmitEnvelope(envelope)
 	if businessError != nil {
 		r.reject(connection, envelope, businessError)
 		return
 	}
-	if envelope.RunID != nil {
-		r.reject(
-			connection,
-			envelope,
-			invalidEnvelope("chat.submit 不能携带 run_id"),
-		)
-		return
-	}
-
-	idempotencyKey, businessError := requireIdempotencyKey(envelope)
-	if businessError != nil {
-		r.reject(connection, envelope, businessError)
-		return
-	}
-
 	var payload ChatSubmitPayload
 	if err := decodeStrictJSON(envelope.Payload, &payload); err != nil {
-		r.reject(
-			connection,
-			envelope,
-			invalidEnvelope("chat.submit payload 不合法"),
-		)
+		r.reject(connection, envelope, invalidEnvelope("chat.submit payload 不合法"))
 		return
 	}
-	content := strings.TrimSpace(payload.Content.Text)
-	if payload.Content.Type != "text" ||
-		content == "" ||
-		utf8.RuneCountInString(content) > maxUserMessageRunes {
-		r.reject(
-			connection,
-			envelope,
-			invalidEnvelope("消息文本不能为空且不能超过 32768 个字符"),
-		)
+	messageID, businessError := validateMessagePayload(payload.MessageID, payload.Content)
+	if businessError != nil {
+		r.reject(connection, envelope, businessError)
 		return
 	}
-
 	userID, err := uuid.Parse(connection.UserID())
 	if err != nil {
 		r.rejectInternal(connection, envelope, err)
@@ -153,23 +151,33 @@ func (r *CommandRouter) handleSubmit(
 		ctx,
 		userID,
 		chatID,
-		idempotencyKey,
-		content,
+		messageID,
+		key,
+		strings.TrimSpace(payload.Content.Content),
+		payload.Content.Format,
 	)
 	if err != nil {
 		r.rejectError(connection, envelope, err)
 		return
 	}
+	r.acceptAndStart(connection, envelope, record)
+}
 
-	// ACK 先进入同一个连接的发送队列，随后启动 Run，保证客户端先看到接管确认。
-	ackError := r.publisher.ChatAccepted(
+func (r *CommandRouter) acceptAndStart(
+	connection *Connection,
+	envelope ClientEnvelope,
+	record *SubmitRecord,
+) {
+	chatID := record.Run.ChatID.String()
+	runID := record.Run.ID.String()
+	ackError := r.publisher.Accepted(
 		connection,
 		envelope.RequestID,
-		record,
+		envelope.Type,
+		&chatID,
+		&runID,
 	)
 	if !record.Duplicate {
-		// 即使 ACK 因为浏览器刚好断线而发送失败，
-		// 已经提交到数据库的 Run 也必须脱离连接继续执行。
 		r.runs.Start(record.Run)
 	}
 	if ackError != nil {
@@ -182,10 +190,7 @@ func (r *CommandRouter) handleCancel(
 	connection *Connection,
 	envelope ClientEnvelope,
 ) {
-	chatID, businessError := validateChatCommand(
-		connection,
-		envelope,
-	)
+	chatID, businessError := requireChatID(envelope)
 	if businessError != nil {
 		r.reject(connection, envelope, businessError)
 		return
@@ -195,41 +200,19 @@ func (r *CommandRouter) handleCancel(
 		return
 	}
 	if envelope.RunID == nil {
-		r.reject(
-			connection,
-			envelope,
-			invalidEnvelope("run.cancel 必须携带 run_id"),
-		)
+		r.reject(connection, envelope, invalidEnvelope("run.cancel 必须携带 run_id"))
 		return
 	}
 	runID, err := uuid.Parse(*envelope.RunID)
 	if err != nil {
-		r.reject(
-			connection,
-			envelope,
-			invalidEnvelope("run_id 格式不合法"),
-		)
+		r.reject(connection, envelope, invalidEnvelope("run_id 格式不合法"))
 		return
 	}
-
 	var payload RunCancelPayload
-	if err := decodeStrictJSON(envelope.Payload, &payload); err != nil {
-		r.reject(
-			connection,
-			envelope,
-			invalidEnvelope("run.cancel payload 不合法"),
-		)
+	if err := decodeStrictJSON(envelope.Payload, &payload); err != nil || payload.Reason != "user_requested" {
+		r.reject(connection, envelope, invalidEnvelope("run.cancel 只支持 user_requested"))
 		return
 	}
-	if payload.Reason != "" && payload.Reason != "user_requested" {
-		r.reject(
-			connection,
-			envelope,
-			invalidEnvelope("当前只支持 user_requested 取消原因"),
-		)
-		return
-	}
-
 	userID, err := uuid.Parse(connection.UserID())
 	if err != nil {
 		r.rejectInternal(connection, envelope, err)
@@ -240,39 +223,32 @@ func (r *CommandRouter) handleCancel(
 		r.rejectError(connection, envelope, err)
 		return
 	}
-	duplicate, err := r.runs.Cancel(ctx, run)
-	if err != nil {
+	if _, err := r.runs.Cancel(ctx, run); err != nil {
 		r.rejectError(connection, envelope, err)
 		return
 	}
-
-	_ = r.publisher.CancelAccepted(
+	chatIDString := chatID.String()
+	runIDString := runID.String()
+	_ = r.publisher.Accepted(
 		connection,
 		envelope.RequestID,
-		chatID.String(),
-		runID.String(),
-		duplicate,
+		CommandRunCancel,
+		&chatIDString,
+		&runIDString,
 	)
 }
 
-func (r *CommandRouter) handlePing(
-	connection *Connection,
-	envelope ClientEnvelope,
-) {
-	var payload PingPayload
-	if err := decodeStrictJSON(envelope.Payload, &payload); err != nil {
-		r.reject(
-			connection,
-			envelope,
-			invalidEnvelope("ping payload 不合法"),
-		)
+func (r *CommandRouter) handlePing(connection *Connection, envelope ClientEnvelope) {
+	if envelope.IdempotencyKey != nil || envelope.ChatID != nil || envelope.RunID != nil {
+		r.reject(connection, envelope, invalidEnvelope("ping 不能携带业务 ID"))
 		return
 	}
-	_ = r.publisher.Pong(
-		connection,
-		envelope.RequestID,
-		payload.ClientTime,
-	)
+	var payload PingPayload
+	if err := decodeStrictJSON(envelope.Payload, &payload); err != nil || payload.ClientTime <= 0 {
+		r.reject(connection, envelope, invalidEnvelope("ping payload 不合法"))
+		return
+	}
+	_ = r.publisher.Pong(connection, envelope.RequestID, payload.ClientTime)
 }
 
 func (r *CommandRouter) reject(
@@ -283,7 +259,8 @@ func (r *CommandRouter) reject(
 	_ = r.publisher.Rejected(
 		connection,
 		envelope.RequestID,
-		connection.ChatID(),
+		envelope.ChatID,
+		envelope.RunID,
 		envelope.Type,
 		businessError,
 	)
@@ -314,21 +291,15 @@ func (r *CommandRouter) rejectInternal(
 		"request_id", envelope.RequestID,
 		"error", err,
 	)
-	r.reject(
-		connection,
-		envelope,
-		newBusinessError(
-			ErrorInternal,
-			"服务暂时不可用",
-			true,
-			http.StatusInternalServerError,
-		),
-	)
+	r.reject(connection, envelope, newBusinessError(
+		ErrorInternal,
+		"服务暂时不可用",
+		true,
+		http.StatusInternalServerError,
+	))
 }
 
-func validateBaseEnvelope(
-	envelope ClientEnvelope,
-) *BusinessError {
+func validateBaseEnvelope(envelope ClientEnvelope) *BusinessError {
 	requestID := strings.TrimSpace(envelope.RequestID)
 	if requestID == "" || len(requestID) > maxRequestIDLength {
 		return invalidEnvelope("request_id 不能为空且不能超过 128 字节")
@@ -346,15 +317,23 @@ func validateBaseEnvelope(
 	return nil
 }
 
-func validateChatCommand(
-	connection *Connection,
+func validateSubmitEnvelope(
 	envelope ClientEnvelope,
-) (uuid.UUID, *BusinessError) {
-	if envelope.ChatID == nil ||
-		*envelope.ChatID != connection.ChatID() {
-		return uuid.Nil, invalidEnvelope(
-			"chat_id 必须与当前 WebSocket 路由一致",
-		)
+) (uuid.UUID, string, *BusinessError) {
+	chatID, businessError := requireChatID(envelope)
+	if businessError != nil {
+		return uuid.Nil, "", businessError
+	}
+	if envelope.RunID != nil {
+		return uuid.Nil, "", invalidEnvelope("Chat 指令不能携带 run_id")
+	}
+	key, businessError := requireIdempotencyKey(envelope)
+	return chatID, key, businessError
+}
+
+func requireChatID(envelope ClientEnvelope) (uuid.UUID, *BusinessError) {
+	if envelope.ChatID == nil {
+		return uuid.Nil, invalidEnvelope("缺少 chat_id")
 	}
 	chatID, err := uuid.Parse(*envelope.ChatID)
 	if err != nil {
@@ -363,19 +342,32 @@ func validateChatCommand(
 	return chatID, nil
 }
 
-func requireIdempotencyKey(
-	envelope ClientEnvelope,
-) (string, *BusinessError) {
+func requireIdempotencyKey(envelope ClientEnvelope) (string, *BusinessError) {
 	if envelope.IdempotencyKey == nil {
 		return "", invalidEnvelope("缺少 idempotency_key")
 	}
 	value := strings.TrimSpace(*envelope.IdempotencyKey)
 	if value == "" || len(value) > maxIdempotencyKeyLength {
-		return "", invalidEnvelope(
-			"idempotency_key 不能为空且不能超过 128 字节",
-		)
+		return "", invalidEnvelope("idempotency_key 不能为空且不能超过 128 字节")
 	}
 	return value, nil
+}
+
+func validateMessagePayload(
+	rawMessageID string,
+	content TextContent,
+) (uuid.UUID, *BusinessError) {
+	messageID, err := uuid.Parse(rawMessageID)
+	if err != nil {
+		return uuid.Nil, invalidEnvelope("message_id 格式不合法")
+	}
+	text := strings.TrimSpace(content.Content)
+	if content.Type != "text" ||
+		(content.Format != TextFormatPlainText && content.Format != TextFormatMarkdown) ||
+		text == "" || utf8.RuneCountInString(text) > maxUserMessageRunes {
+		return uuid.Nil, invalidEnvelope("消息必须是有效文本且不能超过 32768 个字符")
+	}
+	return messageID, nil
 }
 
 func invalidEnvelope(message string) *BusinessError {

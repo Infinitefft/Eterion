@@ -17,12 +17,19 @@ const (
 
 type MessageStatus string
 
+type TextFormat string
+
 const (
 	MessageStatusPending   MessageStatus = "pending"
 	MessageStatusStreaming MessageStatus = "streaming"
 	MessageStatusCompleted MessageStatus = "completed"
 	MessageStatusFailed    MessageStatus = "failed"
 	MessageStatusCancelled MessageStatus = "cancelled"
+)
+
+const (
+	TextFormatPlainText TextFormat = "plain_text"
+	TextFormatMarkdown  TextFormat = "markdown"
 )
 
 // Chat 属于一个用户，是消息和 Run 的顶层容器。
@@ -41,15 +48,16 @@ func (Chat) TableName() string {
 // Message 第一阶段直接保存文本快照。
 // RunID 为空表示这条消息不是由某次 Agent Run 产生。
 type Message struct {
-	ID          uuid.UUID  `gorm:"type:uuid;primaryKey"`
-	ChatID      uuid.UUID  `gorm:"type:uuid;index"`
-	RunID       *uuid.UUID `gorm:"type:uuid;index"`
-	Role        MessageRole
-	Status      MessageStatus
-	Content     string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	CompletedAt *time.Time
+	ID            uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	ChatID        uuid.UUID  `gorm:"type:uuid;index"`
+	RunID         *uuid.UUID `gorm:"type:uuid;index"`
+	Role          MessageRole
+	Status        MessageStatus
+	Content       string
+	ContentFormat TextFormat `gorm:"column:content_format"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CompletedAt   *time.Time
 }
 
 func (Message) TableName() string {
@@ -68,6 +76,7 @@ type Run struct {
 	LastSeq         int64
 	ErrorCode       *string
 	ErrorMessage    *string
+	ErrorRetryable  bool
 	CreatedAt       time.Time
 	StartedAt       *time.Time
 	UpdatedAt       time.Time

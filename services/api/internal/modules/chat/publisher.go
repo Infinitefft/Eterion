@@ -1,4 +1,4 @@
-// 负责构造统一的 WebSocket 事件，并通过全局 Hub 发布给指定 Chat。
+// Constructs protocol-compliant WebSocket events and publishes them to a user.
 package chat
 
 import (
@@ -22,63 +22,39 @@ func NewPublisher(hub *Hub) *Publisher {
 }
 
 func (p *Publisher) ConnectionReady(connection *Connection) error {
-	event := p.event(EventConnectionReady, ConnectionReadyPayload{
+	return connection.Send(p.event(EventConnectionReady, ConnectionReadyPayload{
 		ConnectionID:      connection.ID(),
 		HeartbeatInterval: pingEvery.Milliseconds(),
-		Capabilities: []string{
-			"chat_stream",
-			"run_cancel",
-		},
-	})
-	return connection.Send(event)
+		ResumeSupported:   false,
+	}))
 }
 
-func (p *Publisher) ChatAccepted(
+func (p *Publisher) Accepted(
 	connection *Connection,
 	requestID string,
-	record *SubmitRecord,
+	commandType CommandType,
+	chatID *string,
+	runID *string,
 ) error {
 	event := p.event(EventCommandAccepted, CommandAcceptedPayload{
-		Command:            CommandChatSubmit,
-		UserMessageID:      record.UserMessage.ID.String(),
-		AssistantMessageID: record.AssistantMessage.ID.String(),
-		RunID:              record.Run.ID.String(),
-		Duplicate:          record.Duplicate,
+		CommandType: commandType,
 	})
 	event.RequestID = stringPointer(requestID)
-	event.ChatID = stringPointer(record.Run.ChatID.String())
-	event.RunID = stringPointer(record.Run.ID.String())
-	event.MessageID = stringPointer(record.AssistantMessage.ID.String())
-	return connection.Send(event)
-}
-
-func (p *Publisher) CancelAccepted(
-	connection *Connection,
-	requestID string,
-	chatID string,
-	runID string,
-	duplicate bool,
-) error {
-	event := p.event(EventCommandAccepted, RunCancelAcceptedPayload{
-		Command:   CommandRunCancel,
-		RunID:     runID,
-		Duplicate: duplicate,
-	})
-	event.RequestID = stringPointer(requestID)
-	event.ChatID = stringPointer(chatID)
-	event.RunID = stringPointer(runID)
+	event.ChatID = chatID
+	event.RunID = runID
 	return connection.Send(event)
 }
 
 func (p *Publisher) Rejected(
 	connection *Connection,
 	requestID string,
-	chatID string,
+	chatID *string,
+	runID *string,
 	command CommandType,
 	businessError *BusinessError,
 ) error {
 	event := p.event(EventCommandRejected, CommandRejectedPayload{
-		Command: command,
+		CommandType: command,
 		Error: CommandError{
 			Code:      businessError.Code,
 			Message:   businessError.Message,
@@ -88,9 +64,8 @@ func (p *Publisher) Rejected(
 	if requestID != "" {
 		event.RequestID = stringPointer(requestID)
 	}
-	if chatID != "" {
-		event.ChatID = stringPointer(chatID)
-	}
+	event.ChatID = chatID
+	event.RunID = runID
 	return connection.Send(event)
 }
 
@@ -101,9 +76,11 @@ func (p *Publisher) ConnectionError(
 	retryable bool,
 ) error {
 	return connection.Send(p.event(EventError, ErrorPayload{
-		Code:      code,
-		Message:   message,
-		Retryable: retryable,
+		Error: CommandError{
+			Code:      code,
+			Message:   message,
+			Retryable: retryable,
+		},
 	}))
 }
 
@@ -121,87 +98,51 @@ func (p *Publisher) Pong(
 	return connection.Send(event)
 }
 
-func (p *Publisher) RunCreated(
-	run *Run,
-	seq int64,
-) {
-	event := p.runEvent(run, EventRunCreated, seq, RunCreatedPayload{
-		Status: RunStatusCreated,
+func (p *Publisher) RunSnapshot(run Run, eventType EventType) {
+	event := p.runEvent(run, eventType, run.LastSeq, RunSnapshotPayload{
+		Run: wireAgentRun(run),
 	})
-	p.publish(run, event)
+	event.MessageID = nil
+	p.publish(run.UserID.String(), event)
 }
 
-func (p *Publisher) RunStatusChanged(
-	run *Run,
+func (p *Publisher) MessageSnapshot(
+	run Run,
+	message Message,
 	seq int64,
-	previous RunStatus,
-	current RunStatus,
-	reason *string,
-	runError *CommandError,
-) {
-	event := p.runEvent(run, EventRunStatus, seq, RunStatusPayload{
-		PreviousStatus: previous,
-		CurrentStatus:  current,
-		Reason:         reason,
-		Error:          runError,
-	})
-	p.publish(run, event)
-}
-
-func (p *Publisher) MessageStarted(
-	run *Run,
-	seq int64,
-	blockID string,
-) {
-	event := p.runEvent(run, EventMessageStarted, seq, MessageStartedPayload{
-		Role: string(MessageRoleAssistant),
-		Block: TextBlockRef{
-			BlockID:   blockID,
-			BlockType: "text",
-		},
-	})
-	p.publish(run, event)
-}
-
-func (p *Publisher) MessageDelta(
-	run *Run,
-	seq int64,
-	blockID string,
-	delta string,
-) {
-	event := p.runEvent(run, EventMessageDelta, seq, MessageDeltaPayload{
-		BlockID:   blockID,
-		BlockType: "text",
-		Delta:     delta,
-	})
-	p.publish(run, event)
-}
-
-func (p *Publisher) MessageCompleted(
-	run *Run,
-	seq int64,
-	blockID string,
-	fullText string,
-) {
-	event := p.runEvent(
-		run,
-		EventMessageCompleted,
-		seq,
-		MessageCompletedPayload{
-			Blocks: []TextBlock{{
-				BlockID:   blockID,
-				BlockType: "text",
-				Text:      fullText,
-			}},
-		},
-	)
-	p.publish(run, event)
-}
-
-func (p *Publisher) event(
 	eventType EventType,
-	payload any,
-) ServerEnvelope {
+	messageError *CommandError,
+) {
+	event := p.runEvent(run, eventType, seq, MessageSnapshotPayload{
+		Message: wireChatMessage(message, messageError),
+	})
+	event.MessageID = stringPointer(message.ID.String())
+	p.publish(run.UserID.String(), event)
+}
+
+func (p *Publisher) MessageDelta(run Run, seq int64, delta string) {
+	event := p.runEvent(run, EventMessageDelta, seq, MessageDeltaPayload{
+		Delta: delta,
+	})
+	event.MessageID = stringPointer(run.OutputMessageID.String())
+	p.publish(run.UserID.String(), event)
+}
+
+// StepSnapshot is reserved for the future Agent step pipeline.
+func (p *Publisher) StepSnapshot(
+	run Run,
+	eventType EventType,
+	seq int64,
+	stepID string,
+	step any,
+) {
+	event := p.runEvent(run, eventType, seq, StepSnapshotPayload{Step: step})
+	event.MessageID = nil
+	event.StepID = stringPointer(stepID)
+	p.publish(run.UserID.String(), event)
+}
+
+func (p *Publisher) event(eventType EventType, payload any) ServerEnvelope {
 	return p.eventAt(eventType, payload, p.now())
 }
 
@@ -219,7 +160,7 @@ func (p *Publisher) eventAt(
 }
 
 func (p *Publisher) runEvent(
-	run *Run,
+	run Run,
 	eventType EventType,
 	seq int64,
 	payload any,
@@ -227,23 +168,13 @@ func (p *Publisher) runEvent(
 	event := p.event(eventType, payload)
 	event.ChatID = stringPointer(run.ChatID.String())
 	event.RunID = stringPointer(run.ID.String())
-	event.MessageID = stringPointer(run.OutputMessageID.String())
 	event.Seq = int64Pointer(seq)
 	return event
 }
 
-func (p *Publisher) publish(run *Run, event ServerEnvelope) {
-	p.hub.PublishToChat(
-		run.UserID.String(),
-		run.ChatID.String(),
-		event,
-	)
+func (p *Publisher) publish(userID string, event ServerEnvelope) {
+	p.hub.PublishToUser(userID, event)
 }
 
-func stringPointer(value string) *string {
-	return &value
-}
-
-func int64Pointer(value int64) *int64 {
-	return &value
-}
+func stringPointer(value string) *string { return &value }
+func int64Pointer(value int64) *int64    { return &value }

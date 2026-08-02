@@ -33,6 +33,12 @@ type RunRepository interface {
 		next RunStatus,
 		now time.Time,
 	) (RunStatus, int64, error)
+	StartMessage(
+		ctx context.Context,
+		runID uuid.UUID,
+		messageID uuid.UUID,
+		now time.Time,
+	) (int64, error)
 	AppendDelta(
 		ctx context.Context,
 		runID uuid.UUID,
@@ -54,8 +60,9 @@ type RunRepository interface {
 		status RunStatus,
 		code string,
 		message string,
+		retryable bool,
 		now time.Time,
-	) (RunStatus, int64, error)
+	) (RunStatus, int64, int64, error)
 }
 
 type RunManager struct {
@@ -137,14 +144,20 @@ func (m *RunManager) Cancel(
 	// Run 尚未注册或进程重启后不在内存时，直接完成幂等取消。
 	endContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	previous, seq, err := m.repository.EndRun(
+	execution, err := m.repository.LoadRunExecution(endContext, run.ID)
+	if err != nil {
+		return false, err
+	}
+	now := m.now()
+	_, messageSeq, statusSeq, err := m.repository.EndRun(
 		endContext,
 		run.ID,
 		run.OutputMessageID,
 		RunStatusCancelled,
 		"",
 		"user_requested",
-		m.now(),
+		false,
+		now,
 	)
 	if errors.Is(err, ErrRepositoryInvalidRunState) {
 		return true, nil
@@ -152,15 +165,24 @@ func (m *RunManager) Cancel(
 	if err != nil {
 		return false, err
 	}
-	reason := "user_requested"
-	m.publisher.RunStatusChanged(
+	applyTerminalState(
 		run,
-		seq,
-		previous,
+		&execution.OutputMessage,
 		RunStatusCancelled,
-		&reason,
+		"",
+		"user_requested",
+		false,
+		statusSeq,
+		now,
+	)
+	m.publisher.MessageSnapshot(
+		*run,
+		execution.OutputMessage,
+		messageSeq,
+		EventMessageCompleted,
 		nil,
 	)
+	m.publisher.RunSnapshot(*run, EventRunStatus)
 	return false, nil
 }
 
@@ -180,50 +202,50 @@ func (m *RunManager) execute(
 		initialRun.ID,
 	)
 	if err != nil {
-		m.finishWithError(ctx, &initialRun, err)
+		m.finishWithError(ctx, &initialRun, nil, err)
 		return
 	}
 	run := &execution.Run
-	blockID := uuid.NewString()
-	currentStatus := run.Status
+	outputMessage := &execution.OutputMessage
 
+	now := m.now()
 	seq, err := m.repository.NextSeq(
 		ctx,
 		run.ID,
 		[]RunStatus{RunStatusCreated},
-		m.now(),
+		now,
 	)
 	if err != nil {
-		m.finishWithError(ctx, run, err)
+		m.finishWithError(ctx, run, outputMessage, err)
 		return
 	}
-	m.publisher.RunCreated(run, seq)
+	run.LastSeq = seq
+	run.UpdatedAt = now
+	m.publisher.RunSnapshot(*run, EventRunCreated)
 
 	if ctx.Err() != nil {
-		m.finishWithError(ctx, run, ctx.Err())
+		m.finishWithError(ctx, run, outputMessage, ctx.Err())
 		return
 	}
 
+	now = m.now()
 	previous, seq, err := m.repository.TransitionRun(
 		ctx,
 		run.ID,
 		[]RunStatus{RunStatusCreated},
 		RunStatusRunning,
-		m.now(),
+		now,
 	)
 	if err != nil {
-		m.finishWithError(ctx, run, err)
+		m.finishWithError(ctx, run, outputMessage, err)
 		return
 	}
-	currentStatus = RunStatusRunning
-	m.publisher.RunStatusChanged(
-		run,
-		seq,
-		previous,
-		currentStatus,
-		nil,
-		nil,
-	)
+	_ = previous
+	run.Status = RunStatusRunning
+	run.LastSeq = seq
+	run.UpdatedAt = now
+	run.StartedAt = timePointer(now)
+	m.publisher.RunSnapshot(*run, EventRunStatus)
 
 	input := AgentInput{
 		RunID:  run.ID.String(),
@@ -250,17 +272,28 @@ func (m *RunManager) execute(
 		if started {
 			return nil
 		}
-		startedSeq, err := m.repository.NextSeq(
+		startedAt := m.now()
+		startedSeq, err := m.repository.StartMessage(
 			ctx,
 			run.ID,
-			[]RunStatus{RunStatusRunning, RunStatusStreaming},
-			m.now(),
+			run.OutputMessageID,
+			startedAt,
 		)
 		if err != nil {
 			return err
 		}
 		started = true
-		m.publisher.MessageStarted(run, startedSeq, blockID)
+		outputMessage.Status = MessageStatusStreaming
+		outputMessage.UpdatedAt = startedAt
+		run.LastSeq = startedSeq
+		run.UpdatedAt = startedAt
+		m.publisher.MessageSnapshot(
+			*run,
+			*outputMessage,
+			startedSeq,
+			EventMessageStarted,
+			nil,
+		)
 		return nil
 	}
 
@@ -273,45 +306,43 @@ func (m *RunManager) execute(
 				return err
 			}
 			if !streaming {
+				streamingAt := m.now()
 				previousStatus, streamingSeq, err := m.repository.TransitionRun(
 					ctx,
 					run.ID,
 					[]RunStatus{RunStatusRunning},
 					RunStatusStreaming,
-					m.now(),
+					streamingAt,
 				)
 				if err != nil {
 					return err
 				}
-				currentStatus = RunStatusStreaming
+				_ = previousStatus
+				run.Status = RunStatusStreaming
+				run.LastSeq = streamingSeq
+				run.UpdatedAt = streamingAt
 				streaming = true
-				m.publisher.RunStatusChanged(
-					run,
-					streamingSeq,
-					previousStatus,
-					currentStatus,
-					nil,
-					nil,
-				)
+				m.publisher.RunSnapshot(*run, EventRunStatus)
 			}
 
+			deltaAt := m.now()
 			deltaSeq, err := m.repository.AppendDelta(
 				ctx,
 				run.ID,
 				run.OutputMessageID,
 				event.Delta,
-				m.now(),
+				deltaAt,
 			)
 			if err != nil {
 				return err
 			}
 			fullText += event.Delta
-			m.publisher.MessageDelta(
-				run,
-				deltaSeq,
-				blockID,
-				event.Delta,
-			)
+			outputMessage.Content += event.Delta
+			outputMessage.Status = MessageStatusStreaming
+			outputMessage.UpdatedAt = deltaAt
+			run.LastSeq = deltaSeq
+			run.UpdatedAt = deltaAt
+			m.publisher.MessageDelta(*run, deltaSeq, event.Delta)
 			return nil
 		case AgentEventCompleted:
 			if err := ensureStarted(); err != nil {
@@ -325,70 +356,82 @@ func (m *RunManager) execute(
 		}
 	})
 	if err != nil {
-		m.finishWithError(ctx, run, err)
+		m.finishWithError(ctx, run, outputMessage, err)
 		return
 	}
 	if !completed {
 		m.finishWithError(
 			ctx,
 			run,
+			outputMessage,
 			errors.New("agent did not return completed event"),
 		)
 		return
 	}
 
+	completedAt := m.now()
 	messageSeq, statusSeq, err := m.repository.CompleteRun(
 		ctx,
 		run.ID,
 		run.OutputMessageID,
 		fullText,
-		m.now(),
+		completedAt,
 	)
 	if err != nil {
-		m.finishWithError(ctx, run, err)
+		m.finishWithError(ctx, run, outputMessage, err)
 		return
 	}
 
-	m.publisher.MessageCompleted(
-		run,
+	outputMessage.Content = fullText
+	outputMessage.Status = MessageStatusCompleted
+	outputMessage.UpdatedAt = completedAt
+	outputMessage.CompletedAt = timePointer(completedAt)
+	run.Status = RunStatusCompleted
+	run.LastSeq = statusSeq
+	run.UpdatedAt = completedAt
+	run.CompletedAt = timePointer(completedAt)
+	run.ErrorCode = nil
+	run.ErrorMessage = nil
+	run.ErrorRetryable = false
+	m.publisher.MessageSnapshot(
+		*run,
+		*outputMessage,
 		messageSeq,
-		blockID,
-		fullText,
-	)
-	m.publisher.RunStatusChanged(
-		run,
-		statusSeq,
-		currentStatus,
-		RunStatusCompleted,
-		nil,
+		EventMessageCompleted,
 		nil,
 	)
+	m.publisher.RunSnapshot(*run, EventRunStatus)
 }
 
 func (m *RunManager) finishWithError(
 	ctx context.Context,
 	run *Run,
+	outputMessage *Message,
 	runError error,
 ) {
 	status := RunStatusFailed
 	code := "AGENT_ERROR"
 	message := "AI 服务执行失败"
-	reason := ""
+	retryable := true
 	var eventError *CommandError
 
 	if errors.Is(context.Cause(ctx), errUserRequestedCancel) {
 		status = RunStatusCancelled
 		code = ""
 		message = "user_requested"
-		reason = "user_requested"
+		retryable = false
 	} else if ctx.Err() != nil {
 		code = "RUN_INTERRUPTED"
 		message = "服务停止导致 Run 中断"
+		eventError = &CommandError{
+			Code: code, Message: message, Retryable: true,
+		}
 	} else {
 		var agentFailure *AgentFailure
 		if errors.As(runError, &agentFailure) {
 			code = agentFailure.Code
 			message = agentFailure.Message
+			retryable = agentFailure.Retryable
 			eventError = &CommandError{
 				Code:      agentFailure.Code,
 				Message:   agentFailure.Message,
@@ -410,14 +453,16 @@ func (m *RunManager) finishWithError(
 	)
 	defer cancel()
 
-	previous, seq, err := m.repository.EndRun(
+	endedAt := m.now()
+	_, messageSeq, statusSeq, err := m.repository.EndRun(
 		endContext,
 		run.ID,
 		run.OutputMessageID,
 		status,
 		code,
 		message,
-		m.now(),
+		retryable,
+		endedAt,
 	)
 	if errors.Is(err, ErrRepositoryInvalidRunState) {
 		return
@@ -431,18 +476,26 @@ func (m *RunManager) finishWithError(
 		return
 	}
 
-	var reasonPointer *string
-	if reason != "" {
-		reasonPointer = &reason
-	}
-	m.publisher.RunStatusChanged(
+	applyTerminalState(
 		run,
-		seq,
-		previous,
+		outputMessage,
 		status,
-		reasonPointer,
-		eventError,
+		code,
+		message,
+		retryable,
+		statusSeq,
+		endedAt,
 	)
+	if outputMessage != nil {
+		m.publisher.MessageSnapshot(
+			*run,
+			*outputMessage,
+			messageSeq,
+			EventMessageCompleted,
+			eventError,
+		)
+	}
+	m.publisher.RunSnapshot(*run, EventRunStatus)
 	if status == RunStatusFailed {
 		m.logger.Error(
 			"agent run failed",
@@ -450,6 +503,39 @@ func (m *RunManager) finishWithError(
 			"error", runError,
 		)
 	}
+}
+
+func applyTerminalState(
+	run *Run,
+	message *Message,
+	status RunStatus,
+	code string,
+	errorMessage string,
+	retryable bool,
+	statusSeq int64,
+	endedAt time.Time,
+) {
+	run.Status = status
+	run.LastSeq = statusSeq
+	run.UpdatedAt = endedAt
+	run.CompletedAt = timePointer(endedAt)
+	run.ErrorRetryable = retryable
+	if code == "" {
+		run.ErrorCode = nil
+		run.ErrorMessage = nil
+	} else {
+		run.ErrorCode = stringPointer(code)
+		run.ErrorMessage = stringPointer(errorMessage)
+	}
+	if message == nil {
+		return
+	}
+	message.Status = MessageStatusFailed
+	if status == RunStatusCancelled {
+		message.Status = MessageStatusCancelled
+	}
+	message.UpdatedAt = endedAt
+	message.CompletedAt = timePointer(endedAt)
 }
 
 func (m *RunManager) remove(runID uuid.UUID) {

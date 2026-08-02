@@ -62,7 +62,10 @@ export interface IMReconnectOptions {
 }
 
 export interface WebSocketTransportOptions {
-  url: string | (() => string | null);
+  url:
+    | string
+    | null
+    | (() => string | null | Promise<string | null>);
   reconnect?: IMReconnectOptions;
 }
 
@@ -227,13 +230,13 @@ export class WebSocketTransport implements IMTransport {
   /** 
    * 创建真正的浏览器 WebSocket
    */
-  private openSocket(isReconnect: boolean): Promise<void> {
+  private async openSocket(isReconnect: boolean): Promise<void> {
     let url: string | null;
 
     try {
-      url = typeof this.options.url === 'function'
-      ? this.options.url()
-      : this.options.url;
+      url = await (typeof this.options.url === 'function'
+        ? this.options.url()
+        : this.options.url);
     } catch {
       const error: IMError = {
         code: 'IM_URL_RESOLVE_FAILED',
@@ -246,9 +249,9 @@ export class WebSocketTransport implements IMTransport {
         lastError: error,
       })
 
-      return Promise.reject(new Error(error.message));
+      throw new Error(error.message);
     }
-    
+
     /**
      * URL 为 null 或空字符串，表示当前没有启用 IM 连接
      * 例如用户还没有登录，或者后端 IM 暂未开启
@@ -259,7 +262,7 @@ export class WebSocketTransport implements IMTransport {
         lastError: null,
       })
 
-      return Promise.resolve();
+      return;
     }
 
     this.updateState({
@@ -425,10 +428,10 @@ export class WebSocketTransport implements IMTransport {
           retryable: true,
         }
       })
-      
+
       return;
     }
-    
+
     const delay = Math.min(
       this.reconnectOptions.initialDelayMs * 2 ** (nextAttempt - 1),
       this.reconnectOptions.maxDelayMs,

@@ -79,14 +79,14 @@ func (h *Handler) RegisterRoutes(
 		h.Snapshot,
 	)
 	group.POST(
-		"/:id/ticket",
+		"/ticket",
 		requireAccessToken,
 		h.CreateTicket,
 	)
 
 	// 原生 WebSocket 无法方便地设置 Authorization Header，
 	// 因此连接入口使用前一步申请的一次性 Ticket。
-	group.GET("/:id", h.Connect)
+	group.GET("/ws", h.Connect)
 }
 
 func (h *Handler) CreateChat(c *gin.Context) {
@@ -154,21 +154,12 @@ func (h *Handler) Snapshot(c *gin.Context) {
 }
 
 func (h *Handler) CreateTicket(c *gin.Context) {
-	identity, chatID, ok := h.identityAndChatID(c)
+	identity, ok := h.identity(c)
 	if !ok {
 		return
 	}
 
-	if _, err := h.service.RequireChat(
-		c.Request.Context(),
-		identity.UserID,
-		chatID,
-	); err != nil {
-		h.writeError(c, err)
-		return
-	}
-
-	ticket, err := h.tickets.Issue(identity.UserID, chatID)
+	ticket, err := h.tickets.Issue(identity.UserID)
 	if err != nil {
 		h.writeError(c, err)
 		return
@@ -180,11 +171,6 @@ func (h *Handler) CreateTicket(c *gin.Context) {
 }
 
 func (h *Handler) Connect(c *gin.Context) {
-	chatID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		h.writeError(c, invalidEnvelope("Chat ID 格式不合法"))
-		return
-	}
 	if !h.isAllowedOrigin(c.Request) {
 		h.writeError(c, newBusinessError(
 			ErrorForbidden,
@@ -196,7 +182,7 @@ func (h *Handler) Connect(c *gin.Context) {
 	}
 
 	rawTicket := strings.TrimSpace(c.Query("ticket"))
-	userID, err := h.tickets.Consume(rawTicket, chatID)
+	userID, err := h.tickets.Consume(rawTicket)
 	if err != nil {
 		response.Error(c, apperrors.New(
 			http.StatusUnauthorized,
@@ -216,7 +202,6 @@ func (h *Handler) Connect(c *gin.Context) {
 	connection := NewConnection(
 		uuid.NewString(),
 		userID.String(),
-		chatID.String(),
 		socket,
 		h.logger,
 	)
@@ -242,7 +227,6 @@ func (h *Handler) Connect(c *gin.Context) {
 			"websocket connection ended unexpectedly",
 			"connection_id", connection.ID(),
 			"user_id", connection.UserID(),
-			"chat_id", connection.ChatID(),
 			"error", err,
 		)
 	}

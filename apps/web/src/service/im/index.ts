@@ -1,3 +1,6 @@
+import { apiClient } from '@/api/client';
+import type { ApiResponse } from '@/types/api';
+
 import { IMService } from './imService';
 import { createIMStore } from './store';
 import { WebSocketTransport } from './transport';
@@ -6,11 +9,31 @@ import { WebSocketTransport } from './transport';
  * 读取当前 IM WebSocket 地址。
  *
  * 没有配置 VITE_IM_WS_URL 时返回 null，Transport 会进入 disabled。
- * 后续接入鉴权 Ticket 时，只需要替换该 URL 解析函数。
+ * 每次连接都会申请一个新的单次 Ticket，自动重连不会复用旧凭证。
  */
-function resolveIMWebSocketUrl(): string | null {
+type IMTicketResponse = {
+  ticket: string;
+  expires_at: number;
+};
+
+async function resolveIMWebSocketUrl(): Promise<string | null> {
   const configuredUrl = import.meta.env.VITE_IM_WS_URL?.trim();
-  return configuredUrl || null;
+
+  if (!configuredUrl) {
+    return null;
+  }
+
+  const response = await apiClient.post<ApiResponse<IMTicketResponse>>('/chat/ticket');
+  const url = new URL(configuredUrl, window.location.href);
+
+  if (url.protocol === 'http:') {
+    url.protocol = 'ws:';
+  } else if (url.protocol === 'https:') {
+    url.protocol = 'wss:';
+  }
+
+  url.searchParams.set('ticket', response.data.data.ticket);
+  return url.toString();
 }
 
 function createIMRuntime() {

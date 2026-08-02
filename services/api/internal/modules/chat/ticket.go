@@ -21,7 +21,6 @@ var (
 
 type ticketRecord struct {
 	userID    uuid.UUID
-	chatID    uuid.UUID
 	expiresAt time.Time
 }
 
@@ -49,7 +48,6 @@ func NewTicketService(ttl time.Duration) *TicketService {
 
 func (s *TicketService) Issue(
 	userID uuid.UUID,
-	chatID uuid.UUID,
 ) (*IssuedTicket, error) {
 	randomBytes := make([]byte, ticketRandomBytes)
 	if _, err := rand.Read(randomBytes); err != nil {
@@ -65,7 +63,6 @@ func (s *TicketService) Issue(
 	s.deleteExpiredLocked(now)
 	s.tickets[hash] = ticketRecord{
 		userID:    userID,
-		chatID:    chatID,
 		expiresAt: expiresAt,
 	}
 	s.mu.Unlock()
@@ -79,7 +76,6 @@ func (s *TicketService) Issue(
 // Consume 成功或失败后都会删除已经命中的 Ticket，保证它只能尝试使用一次。
 func (s *TicketService) Consume(
 	value string,
-	chatID uuid.UUID,
 ) (uuid.UUID, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil || len(decoded) != ticketRandomBytes {
@@ -97,7 +93,7 @@ func (s *TicketService) Consume(
 	s.deleteExpiredLocked(now)
 	s.mu.Unlock()
 
-	if !exists || record.chatID != chatID {
+	if !exists {
 		return uuid.Nil, ErrTicketInvalid
 	}
 	if !now.Before(record.expiresAt) {

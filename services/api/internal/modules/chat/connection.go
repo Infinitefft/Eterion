@@ -43,7 +43,6 @@ type FrameHandler func(
 type Connection struct {
 	id     string
 	userID string
-	chatID string
 
 	socket *websocket.Conn
 	send   chan ServerEnvelope
@@ -58,7 +57,6 @@ type Connection struct {
 func NewConnection(
 	id string,
 	userID string,
-	chatID string,
 	socket *websocket.Conn,
 	logger *slog.Logger,
 ) *Connection {
@@ -69,9 +67,8 @@ func NewConnection(
 	return &Connection{
 		id:     id,
 		userID: userID,
-		chatID: chatID,
 		socket: socket,
-		send:   make(chan ServerEnvelope, sendQueueSize),  // 有缓冲 channel
+		send:   make(chan ServerEnvelope, sendQueueSize), // 有缓冲 channel
 		done:   make(chan struct{}),
 		logger: logger,
 	}
@@ -83,10 +80,6 @@ func (c *Connection) ID() string {
 
 func (c *Connection) UserID() string {
 	return c.userID
-}
-
-func (c *Connection) ChatID() string {
-	return c.chatID
 }
 
 // Done 返回一个只读 channel。
@@ -177,7 +170,6 @@ func (c *Connection) Close(reason string) {
 			"websocket connection closed",
 			"connection_id", c.id,
 			"user_id", c.userID,
-			"chat_id", c.chatID,
 			"reason", reason,
 		)
 	})
