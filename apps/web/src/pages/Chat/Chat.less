@@ -27,40 +27,131 @@
   width: 100%;
   max-height: 100%;
   padding: clamp(28px, 5vh, 56px) 0;
-  overflow-y: auto;
+  overflow: visible;
   scrollbar-width: thin;
-  transform: translateY(-31px);
+  transform: translateY(-22px);
 }
 
-.chat-typewriter {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: min(760px, calc(100% - 40px));
-  min-height: 36px;
-  margin: 0 auto 26px;
-  color: #17181a;
+.chat-interaction-shell {
+  position: relative;
+  width: min(792px, calc(100% - 24px));
+  margin: 0 auto;
+  padding: clamp(120px, 16vh, 146px) 16px 36px;
+  overflow: visible;
+  contain: layout style;
+  isolation: isolate;
+
+  &::before {
+    position: absolute;
+    inset: 5px;
+    z-index: 0;
+    border-radius: 34px;
+    background:
+      radial-gradient(circle at 24% 30%, rgba(255, 255, 255, 0.95), transparent 34%),
+      radial-gradient(circle at 50% 56%, rgba(92, 179, 255, 0.04), transparent 58%),
+      linear-gradient(135deg, rgba(250, 253, 255, 0.95), rgba(240, 248, 255, 0.92));
+    box-shadow:
+      0 16px 40px rgba(57, 64, 94, 0.055),
+      0 4px 14px rgba(64, 92, 245, 0.025);
+    filter: blur(4px);
+    content: '';
+  }
+
+  &::after {
+    position: absolute;
+    inset: -6% -4%;
+    z-index: 0;
+    background: radial-gradient(ellipse at center, rgba(74, 166, 255, 0.075), transparent 68%);
+    filter: blur(20px);
+    pointer-events: none;
+    content: '';
+  }
+}
+
+.wake-field {
+  --wake-visible-overflow-x: 86px;
+  --wake-visible-overflow-y: 38px;
+
+  position: absolute;
+  inset: -150px -210px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.wake-field-loading {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.wake-field-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  mix-blend-mode: multiply;
+  -webkit-mask-image: radial-gradient(
+    ellipse 94% 92% at center,
+    #000 66%,
+    rgba(0, 0, 0, 0.82) 84%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 94% 92% at center,
+    #000 66%,
+    rgba(0, 0, 0, 0.82) 84%,
+    transparent 100%
+  );
+  transform: scale(0.985);
+  transition:
+    opacity 420ms ease,
+    transform 620ms cubic-bezier(0.22, 1, 0.36, 1);
+  touch-action: none;
+}
+
+.wake-field.is-ready .wake-field-canvas {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.chat-welcome {
+  position: absolute;
+  top: clamp(42px, 6.2vh, 58px);
+  right: 34px;
+  left: 34px;
+  z-index: 2;
+  margin: 0;
+  color: rgba(30, 33, 43, 0.88);
   font-family: var(--font-display);
-  font-size: clamp(1.26rem, 2.1vw, 1.48rem);
-  font-weight: 660;
-  line-height: 1.45;
-  letter-spacing: -0.015em;
-  white-space: nowrap;
+  font-size: clamp(1.45rem, 2.7vw, 1.9rem);
+  font-weight: 620;
+  letter-spacing: -0.035em;
+  line-height: 1.25;
+  text-align: center;
+  text-wrap: balance;
+  pointer-events: none;
+  animation: chat-welcome-enter 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.chat-typewriter-text {
-  min-width: 0;
+.wake-field-fallback,
+.wake-field-loading {
+  position: absolute;
+  inset: 42% 22% auto;
+  height: 24px;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 42% 50%, rgba(119, 130, 184, 0.11), transparent 42%),
+    radial-gradient(ellipse at 60% 54%, rgba(64, 92, 245, 0.07), transparent 38%);
+  opacity: 0.52;
+  filter: blur(7px);
+  transform: translateY(-50%) scaleX(0.82);
+  transition: opacity 300ms ease;
+  animation: wake-fallback-drift 2.8s ease-in-out infinite alternate;
 }
 
-.chat-typewriter-cursor {
-  flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  margin-left: 7px;
-  border-radius: 999px;
-  background: #111214;
-  box-shadow: 0 1px 5px rgba(17, 18, 20, 0.18);
-  animation: chat-cursor-breathe 1.2s ease-in-out infinite;
+.wake-field.is-ready .wake-field-fallback {
+  opacity: 0;
 }
 
 .composer-dock {
@@ -71,6 +162,21 @@
 
 .new-conversation .composer-dock {
   padding: 0;
+}
+
+.chat-interaction-shell > .composer-dock {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.chat-interaction-shell .composer {
+  background: #ffffff;
+  box-shadow:
+    0 16px 38px rgba(28, 31, 37, 0.105),
+    0 3px 10px rgba(28, 31, 37, 0.05);
 }
 
 .composer {
@@ -138,7 +244,6 @@
       background: var(--hover);
     }
   }
-
 }
 
 .composer-actions {
@@ -214,21 +319,24 @@
   text-transform: uppercase;
 }
 
-@keyframes chat-cursor-breathe {
-  0%,
-  100% {
-    background: #111214;
-    transform: scale(1);
+@keyframes wake-fallback-drift {
+  to {
+    opacity: 0.28;
+    transform: translate(7px, calc(-50% - 2px)) scaleX(1.04);
   }
+}
 
-  50% {
-    background: #8a8d94;
-    transform: scale(0.9);
+@keyframes chat-welcome-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-typewriter-cursor {
+  .chat-welcome,
+  .wake-field-fallback,
+  .wake-field-loading {
     animation: none;
   }
 }
@@ -302,18 +410,36 @@
   .new-conversation {
     padding-top: 24px;
     padding-bottom: 24px;
-    transform: translateY(-24px);
+    transform: translateY(-16px);
 
     .composer-dock {
       padding-bottom: 0;
     }
   }
 
-  .chat-typewriter {
-    width: calc(100% - 24px);
-    margin-bottom: 22px;
-    font-size: 1.18rem;
-    white-space: normal;
+  .chat-interaction-shell {
+    width: calc(100% - 12px);
+    padding: 100px 8px 26px;
+
+    &::before {
+      right: 5px;
+      left: 5px;
+      border-radius: 24px;
+    }
+  }
+
+  .chat-welcome {
+    top: 37px;
+    right: 22px;
+    left: 22px;
+    font-size: clamp(1.3rem, 6.2vw, 1.58rem);
+  }
+
+  .wake-field {
+    --wake-visible-overflow-x: 42px;
+    --wake-visible-overflow-y: 30px;
+
+    inset: -104px -132px;
   }
 
   .composer-dock,

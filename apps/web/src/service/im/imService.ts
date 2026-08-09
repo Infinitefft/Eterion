@@ -1,20 +1,6 @@
 import type {
-  ChatStartCommand,
-  ChatSubmitCommand,
   ClientCommand,
-  CommandAcceptedEvent,
-  CommandRejectedEvent,
-  MessageDeltaEvent,
-  MessageSnapshotEvent,
-  PingCommand,
-  PongEvent,
-  RunCancelCommand,
-  RunSnapshotEvent,
   ServerEvent,
-  StepSnapshotEvent,
-  WireAgentRun,
-  WireAgentStep,
-  WireChatMessage,
 } from './protocol';
 import type { IMStoreApi } from './store';
 import type {
@@ -23,10 +9,7 @@ import type {
   IMTransportUnsubscribe,
 } from './transport';
 import type {
-  AgentRun,
-  AgentStep,
   ChatId,
-  ChatMessage,
   EventId,
   IdempotencyKey,
   IMError,
@@ -35,120 +18,266 @@ import type {
   RunId,
 } from './types';
 
-/** 创建 IM Service 时需要注入的底层依赖。 */
+/**
+ * 创建 IMService 时需要注入的底层依赖
+ * 
+ * IMService 不在内部直接窜关键 Transport 和 Store
+ * 而是由 index.ts 创建完成后传进来
+ * 
+ * - Transport 负责 WebSocket
+ * - Store 负责状态
+ * - IMService 负责编排业务
+ */
 export interface IMServiceDependencies {
-  /** 全局唯一的 WebSocket Transport。 */
+  /** 全局唯一的 WebSocket Transport */
   transport: IMTransport;
 
-  /** 全局唯一的 Zustand IM Store。 */
+  /** 全局唯一的 Zustand IM Store */
   store: IMStoreApi;
 }
 
-/** IM Service 的行为配置。 */
+/**
+ * IMService 可以由外部调整的行为配置
+ */
 export interface IMServiceOptions {
-  /** 等待服务端 command.accepted/rejected 的时间。 */
+  /**
+   * Command 发送后，等待服务端 ACK 的最长时间
+   * 
+   * 超市不代表服务端一定没有处理
+   * 因此消息会进入 delivery_unknown 状态
+   */
   commandAckTimeoutMs?: number;
 }
 
-/** 用户在首页创建新会话时输入的数据。 */
+/**
+ * 用户在首页创建新会话时输入的数据
+ */
 export interface PrepareNewChatInput {
   prompt: string;
+
   title?: string;
 }
 
-/** 向已有 Chat 发送消息时需要的数据。 */
+/**
+ * 向一个已经存在的 Chat 发送消息时需要的数据
+ */
 export interface SubmitMessageInput {
   chatId: ChatId;
   content: string;
 }
 
-/** 取消 Agent Run 时需要的数据。 */
+/**
+ * 用户主动取消 Agent Run 时需要的数据
+ */
 export interface CancelRunInput {
   chatId: ChatId;
   runId: RunId;
 }
 
-/** IM Service 对页面层提供的公开能力。 */
+/**
+ * IMService 对页面层提供的公开能力
+ * 
+ * React 页面只应该调用这些业务方法
+ * 而不应该调用 transport.send()
+ */
 export interface IMServicePublicApi {
-  /** 注册 Transport 监听器；重复调用不会重复注册。 */
+  /**
+   * 初始化 IMService
+   * 
+   * 只注册 Transport 监听器，不建立 WebSocket连接
+   * 重复调用不会注册多个监听器
+   */
   initialize(): void;
 
-  /** 建立或复用全局 WebSocket 连接。 */
+  /**
+   * 建立或复用全局 WebSocket 连接
+   * 
+   * 应该在用户身份恢复完成后调用
+   */
   connect(): Promise<void>;
 
-  /** 主动断开连接，但保留已经加载的会话数据。 */
+  /**
+   * 主动断开 WebSocket
+   * 
+   * 断开连接不会情况已经加载的 Chat 数据
+   */
   disconnect(): void;
 
-  /** 获取供 Service 修改、供 React 订阅的 Zustand Store。 */
+  /**
+   * 获取全局 zustand store
+   * 
+   * IMService 通过 getState() 修改数据
+   * React 页面通过 useStore 订阅数据
+   */
   getStore(): IMStoreApi;
 
-  /** 生成 ChatId，并登记跳转后需要发送的首条 Prompt。 */
+  /**
+   * 创建新会话的本地状态
+   * 
+   * 该方法生成 chatId 并登记首条 prompt
+   * 但不会立即发送 WebSocket Command
+   * 
+   * @returns 前端生成的永久 ChatId
+   */
   prepareNewChat(input: PrepareNewChatInput): ChatId;
 
-  /** 发送某个新 Chat 已登记的首条 Prompt。 */
+  /**
+   * 发送新会话已经登记的首条 Prompt
+   * 
+   * 历史会话没有 InitialPromptIntent
+   * 因此调用后会返回 null，不会自动发送消息
+   * 
+   * @returns 本词发送使用的 RequestId
+   */
   sendInitialPrompt(chatId: ChatId): Promise<RequestId | null>;
 
-  /** 向已经存在的 Chat 发送一条新的用户消息。 */
+  /**
+   * 向已有 Chat 发送一条新的用户信息
+   * 
+   * @returns 本次发送使用的 RequestId
+   */
   submitMessage(input: SubmitMessageInput): Promise<RequestId>;
 
-  /** 主动取消一个仍在执行的 Agent Run。 */
+  /**
+   * 主动取消一个仍在执行的 Agent Run
+   * 
+   * @returns 本次发送使用的 RequestId
+   */
   cancelRun(input: CancelRunInput): Promise<RequestId>;
 
-  /** 释放监听器、定时器和内存状态；路由切换不能调用。 */
+  /**
+   * 彻底销毁 Service 的监听器和定时器
+   * 
+   * 普通路由切换不能调用
+   * 主要用于应用彻底销毁或开发环境热更新
+   */
   destroy(): void;
 }
 
 /**
- * 一条已经发出、正在等待服务端确认的 Command。
- *
- * Command 本身用于核对 ACK 类型；messageId 用于修改乐观消息；
- * initialPromptChatId 用于确认或拒绝新会话首条 Prompt。
+ * 一条通过 WebSocket 发出
+ * 但仍在等待服务端 ACK 的 Command
+ * 
+ * 它只保存在 IMService 内存中，不需要放入 zustand store
+ * 
+ * 主要用于：
+ * 收到 command.accepted 时找到原始 Command
+ * 收到 command.rejected 时找到对应消息
+ * ACK 超时时把消息标记为 delivery_unknwon
  */
 interface PendingCommand {
-  /** 已经通过 WebSocket 发出的原始指令。 */
+  /**
+   * 已经发送给服务端的完整指令
+   * 
+   * 收到 ACK 后可以通过它检查：
+   * 服务端返回的 command_type 是否于原指令一致
+   */
   command: ClientCommand;
 
-  /** 当前指令对应的本地用户消息；非消息指令为 null。 */
+  /**
+   * 当前 Command 对应的本地用户消息
+   * 
+   * chat.start 和 chat.submit 会有 MessageId
+   * run.cancel 等非消息指令为 null
+   */
   messageId: MessageId | null;
 
-  /** chat.start 对应的 Chat；其他指令为 null。 */
+  /**
+   * 当前 Command 是否属于新绘画首条 prompt
+   * 
+   * chat.start 保存对应的 ChatId
+   * 其他指令为 null
+   * 
+   * 服务端接收 chat.start 后
+   * 需要根据这个 ChatId 删除 InitialPromptIntent
+   */
   initialPromptChatId: ChatId | null;
 
-  /** 用来把长时间未收到 ACK 的消息标记为 delivery_unknown。 */
+  /**
+   * 等待服务器 ACK 的超时定时器
+   * 
+   * 收到 accepted/rejected 后要清除
+   * 超时后将消息标记为 delivery_unknown
+   */
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * IMService 的默认配置
+ * 
+ * Required<IMServiceOptions> 会把可选字段转为必填字段
+ * 保证 Service 内部读取配置时不需要反复判断 undefined
+ */
 const DEFAULT_OPTIONS: Required<IMServiceOptions> = {
+  /**
+   * command 发送 15 秒后仍未收到 ACK
+   * 就进入 delivery_unknown
+   */
   commandAckTimeoutMs: 15_000,
-};
+}
 
+/**
+ * IMService 最多记住多少条已经处理过的服务端事件 ID
+ * 
+ * 全局 WebSocket 可能长时间运行
+ * 如果无限保存 EventId，会造成内存持续增长
+ */
 const MAX_REMEMBERED_EVENT_IDS = 2_048;
 
+/**
+ * 生成前端业务 ID
+ * 
+ * ChatId、MessageId、RequestID、IdempotencyKey
+ * 当前都使用浏览器生成的 UUID
+ * 
+ * 虽然它们底层都是 string
+ * 但会通过不同字段和 TypeScript 类型表达不同语义
+ */
 function createId(): string {
-  /**
-   * Chat、Message、Request 和幂等键都由前端生成 UUID。
-   * 不同语义仍通过 TypeScript 类型和字段位置进行区分。
-   */
   return crypto.randomUUID();
 }
 
-function normalizeError(
-  error: unknown,
-  fallbackCode: string,
-  fallbackMessage: string,
-): IMError {
-  return {
-    code: fallbackCode,
-    message: error instanceof Error ? error.message : fallbackMessage,
-    retryable: true,
-  };
-}
-
+/**
+ * 判断一个 unknown 值是否是非 null 对象
+ * 
+ * JSON.parse() 和 catch 中拿到的数据都不可信
+ * 不能直接访问 value.type、value.code 等属性
+ */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isSupportedServerEventType(type: string): boolean {
+/**
+ * 把任意异常转化为前端统一使用的 IMError
+ * 
+ * error 可能是
+ * - Error 实例
+ * - 字符串
+ * - null
+ * - 后端返回的未知对象
+ */
+function normalizeError(error: unknown, fallback: IMError): IMError {
+  if (error instanceof Error) {
+    return {
+      ...fallback,
+
+      /**
+       * 保留调用位置规定的 code 和 retryable
+       * 只使用真实 Error 和 message
+       */
+      message: error.message || fallback.message,
+    }
+  }
+  return fallback;
+}
+
+/**
+ * 判断字符串是不是当前前端认识的 ServerEvent type
+ * 
+ * 返回值中的 `type is ServerEvent['type']`
+ * 是 TypeScript 类型谓词
+ */
+function isSupportedServerEventType(type: string): type is ServerEvent['type'] {
   switch (type) {
     case 'connection.ready':
     case 'command.accepted':
@@ -157,11 +286,9 @@ function isSupportedServerEventType(type: string): boolean {
     case 'run.status':
     case 'step.started':
     case 'step.progress':
-    case 'step.completed':
     case 'step.failed':
     case 'message.started':
     case 'message.delta':
-    case 'message.completed':
     case 'pong':
     case 'error':
       return true;
@@ -171,169 +298,170 @@ function isSupportedServerEventType(type: string): boolean {
 }
 
 /**
- * 当前只进行 JSON 和事件名称检查。
- * 具体 payload 依赖 protocol.ts 中的静态 Interface 约束。
+ * 把 Transport 收到的原始 JSON 字符串转化为 ServerEvent
+ * 
+ * 只检查最外层核心字段
+ * - 必须是对象
+ * - type 必须是受支持的事件名称
+ * - event_id 必须是字符串
+ * - timestamp 必须是数字
+ * - 必须存在 payload
  */
 function parseServerEvent(raw: string): ServerEvent {
   const parsed: unknown = JSON.parse(raw);
 
+  if (!isRecord(parsed)) {
+    throw new Error('服务端 IM 消息不是对象');
+  }
+
   if (
-    !isRecord(parsed) ||
     typeof parsed.type !== 'string' ||
     !isSupportedServerEventType(parsed.type)
   ) {
-    throw new Error('服务端 IM 事件结构不正确。');
+    throw new Error('服务端事件 IM 事件类型不受支持');
+  }
+
+  if (typeof parsed.event_id !== 'string') {
+    throw new Error('服务端 IM 事件缺少 event_id');
+  }
+  
+  if (typeof parsed.timestamp !== 'number') {
+    throw new Error('服务端 IM 事件缺少 timestamp');
+  }
+
+  if (!('payload' in parsed)) {
+    throw new Error('服务端 IM 事件缺少 payload');
   }
 
   return parsed as unknown as ServerEvent;
 }
 
-function toChatMessage(message: WireChatMessage): ChatMessage {
-  /** 网络协议使用 snake_case，Store 领域对象使用 camelCase。 */
-  return {
-    id: message.message_id,
-    chatId: message.chat_id,
-    runId: message.run_id,
-    role: message.role,
-    status: message.status,
-    content: { ...message.content },
-    createdAt: message.created_at,
-    updatedAt: message.updated_at,
-    completedAt: message.completed_at,
-    error: message.error,
-  };
-}
-
-function toAgentRun(run: WireAgentRun): AgentRun {
-  /** 复制 step_ids，避免 Store 与网络对象共享可变数组引用。 */
-  return {
-    id: run.run_id,
-    chatId: run.chat_id,
-    inputMessageId: run.input_message_id,
-    outputMessageId: run.output_message_id,
-    status: run.status,
-    stepIds: [...run.step_ids],
-    lastSeq: run.last_seq,
-    desynced: run.desynced,
-    createdAt: run.created_at,
-    startedAt: run.started_at,
-    updatedAt: run.updated_at,
-    completedAt: run.completed_at,
-    error: run.error,
-  };
-}
-
-function toAgentStep(step: WireAgentStep): AgentStep {
-  /**
-   * kind 是可辨识字段。根据它把网络 Step 转换成
-   * Reasoning、Tool、Skill 或 Retrieval 领域对象。
-   */
-  const base = {
-    id: step.step_id,
-    chatId: step.chat_id,
-    runId: step.run_id,
-    title: step.title,
-    status: step.status,
-    sequence: step.sequence,
-    parentStepId: step.parent_step_id,
-    startedAt: step.started_at,
-    completedAt: step.completed_at,
-    error: step.error,
-  };
-
-  switch (step.kind) {
-    case 'reasoning':
-      return {
-        ...base,
-        kind: 'reasoning',
-        summary: step.summary,
-      };
-
-    case 'tool':
-      return {
-        ...base,
-        kind: 'tool',
-        callId: step.call_id,
-        tool: { ...step.tool },
-        input: step.input,
-        output: step.output,
-      };
-
-    case 'skill':
-      return {
-        ...base,
-        kind: 'skill',
-        callId: step.call_id,
-        skill: { ...step.skill },
-        input: step.input,
-        output: step.output,
-      };
-
-    case 'retrieval':
-      return {
-        ...base,
-        kind: 'retrieval',
-        retrievalId: step.retrieval_id,
-        query: step.query,
-        documents: [...step.documents],
-      };
-  }
-}
-
-/** 全局 IM Service。 */
+/**
+ * 全局 IM Service
+ * 
+ * 它位于页面和 Tansport 之间：
+ * 
+ * 页面调用 IMSerivce 的业务方法
+ * IMService 调用 Transport 完成 WebSocket 通信
+ * IMService 收到服务端事件后更新 zustand Store
+ */
 export class IMService implements IMServicePublicApi {
-  /** initialize() 是否已经注册过唯一的 Transport 监听器。 */
+  /**
+   * initialize() 是否已经执行
+   * 
+   * 用于防止重复注册 Transport 监听器
+   */
   private initialized = false;
 
-  /** destroy() 时使用它移除 Transport 监听器。 */
+  /**
+   * Transport 监听器的取消函数
+   * 
+   * destroy() 时调用，避免 Service 销毁后继续收到事件
+   */
   private unsubscribeTransport: IMTransportUnsubscribe | null = null;
 
-  /** connection.ready 到达后创建的应用层心跳定时器。 */
+  /**
+   * 应用层心跳定时器
+   * 
+   * 收到 connection.ready 后创建
+   * 断开连接或销毁 Service 时清除
+   */
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** 正在等待服务端 ACK 的客户端指令。 */
-  private readonly pendingCommands = new Map<RequestId, PendingCommand>();
+  /**
+   * 等待服务端 ACK 的客户端 Command
+   * 
+   * Key 是 RequestId
+   * Value 是对应的 PendingCommand
+   */
+  private readonly pendingCommand = new Map<RequestId, PendingCommand>();
 
-  /** 用于过滤断线续传或服务端重复下发的事件。 */
+  /**
+   * 已经处理过的服务端 EventId
+   * 
+   * 用于过滤服务端重复下发或断线续传产生的重复事件
+   */
   private readonly processedEventIds = new Set<EventId>();
-  private readonly processedEventOrder: EventId[] = [];
 
+  /**
+   * EventId 的进入顺序
+   * 
+   * Set 只能判断是否存在，不能方便地知道哪个最旧
+   * 因此额外使用数组记录顺序，超过上限时删除最旧记录
+   */
+  private readonly processedEventOrder: EventId[] = [];
+  
+  /**
+   * 合并默认值后的最终配置
+   * 
+   * 类内部读取时所有字段都一定存在
+   */
   private readonly options: Required<IMServiceOptions>;
 
+  /**
+   * 创建 IMService
+   * 
+   * 构造函数只保存依赖和配置
+   * 不注册监听器，也不连接 WebSocket
+   * 
+   * 真正的初始化由 initialize() 完成
+   */
   constructor(
     private readonly dependencies: IMServiceDependencies,
     options: IMServiceOptions = {},
   ) {
-    /** 调用者只需要传入想覆盖的配置，其余使用稳定默认值。 */
     this.options = {
       ...DEFAULT_OPTIONS,
       ...options,
-    };
+    }
+
+    if (
+      !Number.isFinite(this.options.commandAckTimeoutMs) ||
+      this.options.commandAckTimeoutMs <= 0
+    ) {
+      throw new Error('commandAckTimeoutMs 必须是大于 0 的有限数字');
+    }
   }
 
-  /** 注册唯一的 Transport 监听器，但不主动连接。 */
+  /**
+   * 初始化 IMService
+   * 
+   * 只建立 IMService 和 Transport 之间的监听关系
+   * 不会主动连接后端
+   * 
+   * 可以在 React 渲染前调用
+   */
   initialize(): void {
     if (this.initialized) {
       return;
     }
 
     this.initialized = true;
+
+    /**
+     * 注册全局唯一的 Transport 监听器
+     */
     this.unsubscribeTransport = this.dependencies.transport.subscribe(
       this.handleTransportEvent,
-    );
+    )
 
+    /**
+     * Transport 可能比 IMService 更早创建
+     * 因此初始化时主动同步一次当前状态
+     */
     this.dependencies.store
       .getState()
-      .setConnectionState(this.dependencies.transport.getState());
+      .setConnectionState(
+        this.dependencies.transport.getState(),
+      );
   }
 
-  /** 建立或复用全局 WebSocket 连接。 */
   connect(): Promise<void> {
     this.initialize();
+
     return this.dependencies.transport.connect();
   }
 
-  /** 主动断开连接，但保留当前 Chat 数据。 */
   disconnect(): void {
     this.clearHeartbeat();
     this.dependencies.transport.disconnect();
@@ -344,27 +472,212 @@ export class IMService implements IMServicePublicApi {
   }
 
   /**
-   * 创建前端 ChatId，并登记一次性 InitialPromptIntent。
-   * 该方法不会立即发送 WebSocket 指令。
+   * Transport 的统一事件入口
+   * 
+   * 是用箭头函数是为了固定 this
+   * 将函数传给 subscribe() 后
+   * 函数内部仍然能访问当前 IMService 实例
+   */
+  private readonly handleTransportEvent = (
+    event: IMTransportEvent,
+  ): void => {
+    if (event.type === 'state.changed') {
+      /**
+       * 将 WebSocket 物理连接状态同步到 store
+       */
+      this.dependencies.store
+        .getState()
+        .setConnectionState(event.state);
+
+      if (event.state.status !== 'connected') {
+        /**
+         * 物理连接断开后，当前 connectionId 和 pong 时间失效
+         * 
+         * cursor 不能清除
+         * 因为后续重连还需要使用它请求时间续传
+         */
+        this.clearHeartbeat();
+
+        this.dependencies.store
+          .getState()
+          .updateSessionState({
+            connectionId: null,
+            lastPongAt: null,
+          })
+      }
+
+      return;
+    }
+
+    /**
+     * message.received 携带服务端原始 JSON 字符串
+     */
+    this.handleRawServerMessage(event.data);
+  }
+
+  /**
+   * 服务端原始字符串的统一入口
+   * 
+   * 当前已完成 JSON 解析
+   */
+  private handleRawServerMessage(raw: string): void {
+    try {
+      const event = parseServerEvent(raw);
+      this.handleServerEvent(event);
+    } catch (error) {
+      this.reportError(
+        normalizeError(error, {
+          code: 'IM_EVENT_HANDLE_FAILED',
+          message: '服务端 IM 事件处理失败',
+          retryable: false,
+        })
+      )
+    }
+  }
+
+  /**
+   * 服务端事件的开发期入口。
+   *
+   * 当前先完成事件去重，具体的事件分发会在后续模块逐步补充。
+   * 这里不能直接抛错，否则开发期间后端只要下发一条消息，
+   * 就会让页面不断进入错误状态。
+   */
+  private handleServerEvent(event: ServerEvent): void {
+    if (this.processedEventIds.has(event.event_id)) {
+      return;
+    }
+
+    this.processedEventIds.add(event.event_id);
+    this.processedEventOrder.push(event.event_id);
+
+    if (this.processedEventOrder.length > MAX_REMEMBERED_EVENT_IDS) {
+      const oldestEventId = this.processedEventOrder.shift();
+
+      if (oldestEventId) {
+        this.processedEventIds.delete(oldestEventId);
+      }
+    }
+
+    // TODO: 后续在这里按照 event.type 分发并更新 Store。
+  }
+
+  /**
+   * 把 Service 运行错误同步到连接状态中
+   * 
+   * 当前 Store 还没有单独的全局错误队列
+   * 所以暂时保存到 connection.lastError
+   */
+  private reportError(error: IMError): void {
+    const store = this.dependencies.store.getState();
+
+    store.setConnectionState({
+      ...store.connection,
+      lastError: error,
+    })
+  }
+
+  /**
+   * 清除应用层心跳定时器
+   * 
+   * 可以重复调用，没有心跳时不会产生副作用
+   */
+  private clearHeartbeat(): void {
+    if (!this.heartbeatTimer) {
+      return;
+    }
+    
+    clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+  }
+
+  /**
+   * 彻底销毁 IMService 当前运行状态
+   * 
+   * 普通路由切换不能调用
+   */
+  destroy(): void {
+    this.clearHeartbeat();
+
+    /**
+     * 清除所有等待 ACK 的超时定时器
+     */
+    for (const pending of this.pendingCommand.values()) {
+      clearTimeout(pending.timeoutId);
+    }
+
+    this.pendingCommand.clear();
+    this.processedEventIds.clear();
+    this.processedEventOrder.length = 0;
+
+    /**
+     * 主动断开 WebSocket
+     */
+    this.dependencies.transport.disconnect();
+    
+    /**
+     * 取消 Transport 监听
+     */
+    this.unsubscribeTransport?.();
+    this.unsubscribeTransport = null;
+
+    /**
+     * 允许后续重新 initialize()
+     */
+    this.initialized = false;
+  }
+
+  /**
+   * 准备一个新会话
+   * 
+   * 这个阶段只负责：
+   * - 由前端生成 ChatId
+   * - 提前创建一条本地 Chat
+   * - 保存“进入聊天页后自动发送 prompt”的意图
+   * 
+   * 这里不会真正发送 WebSocket 命令
+   * 页面拿到 ChatId 后，可以立刻跳转到 /chat/:chatId
    */
   prepareNewChat(input: PrepareNewChatInput): ChatId {
     const prompt = input.prompt.trim();
 
     if (!prompt) {
-      throw new Error('新会话 Prompt 不能为空。');
+      throw new Error('新会话 Prompt 不能为空');
     }
 
+    /**
+     * 这些 ID 在真正发送消息以前就确定下来
+     * 
+     * chatId：标识这次会话，用于路由跳转和后续所有事件归属
+     * 
+     * messageId：
+     *   标识用户即将发送第一条消息
+     *   即使发送失败后重试，也应该继续使用这个 messageId
+     * 
+     * idempotencyKey：
+     *   用于保证同一次首次 Prompt 重试时，不会被服务端重复执行
+     */
     const chatId: ChatId = createId();
     const messageId: MessageId = createId();
     const idempotencyKey: IdempotencyKey = createId();
+
     const now = Date.now();
     const title = input.title?.trim() || null;
+
+    /**
+     * 如果调用方没有提供标题，先截取 Prompt 的前 30 个字符
+     * 作为前端展示用的临时标题
+     * 
+     * 后续服务端生成正式标题后，可以通过 upsertChat 覆盖
+     */
     const optimisticTitle = title ?? prompt.slice(0, 30);
+
     const store = this.dependencies.store.getState();
 
     /**
-     * 先把 Chat 放入 Store，再返回 ChatId。
-     * 因此首页无需等待后端，就可以立即跳转到 /chat/:chatId。
+     * 先把 Chat 写入 store
+     * 
+     * 因此页面跳转到 /chat/:chatId 后
+     * 即使服务端还没有收到请求，页面也能立即找到该对话
      */
     store.upsertChat({
       id: chatId,
@@ -373,6 +686,15 @@ export class IMService implements IMServicePublicApi {
       updatedAt: now,
     });
 
+    /**
+     * 保存首次 Prompt 的发送意图
+     * 
+     * Chat 页面加载后会调用 sendInitialPrompt(chatid)
+     * 该方法会查询这里保存的数据，决定是否需要自动发送
+     * 
+     * 历史会话没有 InitialPromptIntent
+     * 所以进入历史会话页面时不会重复发送消息
+     */
     store.registerInitialPromptIntent({
       chatId,
       messageId,
@@ -384,243 +706,67 @@ export class IMService implements IMServicePublicApi {
       lastRequestId: null,
       error: null,
     });
-
+    
     return chatId;
   }
 
-  /** 发送新 Chat 已经登记的首条 Prompt。 */
-  async sendInitialPrompt(chatId: ChatId): Promise<RequestId | null> {
-    const store = this.dependencies.store.getState();
-    const intent = store.initialPromptIntentsByChatId[chatId];
-
-    if (!intent || intent.status === 'rejected') {
-      /**
-       * 历史会话没有 InitialPromptIntent，因此进入相同页面时
-       * 会自然走到这里，不需要额外的 shouldSendPrompt 布尔值。
-       */
-      return null;
-    }
-
-    /** 页面重复调用时复用正在等待 ACK 的 RequestId。 */
-    if (intent.status === 'sending' && intent.lastRequestId) {
-      return intent.lastRequestId;
-    }
-
-    const requestId: RequestId = createId();
-    const now = Date.now();
-
-    store.upsertMessage({
-      id: intent.messageId,
-      chatId,
-      runId: null,
-      role: 'user',
-      status: 'pending',
-      content: {
-        type: 'text',
-        format: 'plain_text',
-        content: intent.prompt,
-      },
-      createdAt: now,
-      updatedAt: now,
-      completedAt: null,
-      error: null,
-    });
-
-    store.updateInitialPromptIntent(chatId, {
-      status: 'sending',
-      lastRequestId: requestId,
-      error: null,
-    });
-
-    const command: ChatStartCommand = {
-      type: 'chat.start',
-      request_id: requestId,
-      idempotency_key: intent.idempotencyKey,
-      chat_id: chatId,
-      run_id: null,
-      timestamp: now,
-      payload: {
-        /** 重试时继续使用 Intent 中同一个 MessageId 和幂等键。 */
-        message_id: intent.messageId,
-        title: intent.title,
-        content: {
-          type: 'text',
-          format: 'plain_text',
-          content: intent.prompt,
-        },
-      },
-    };
-
-    try {
-      await this.dispatchCommand(command, {
-        messageId: intent.messageId,
-        initialPromptChatId: chatId,
-      });
-    } catch (error) {
-      const normalized = normalizeError(
-        error,
-        'IM_INITIAL_PROMPT_SEND_FAILED',
-        '新会话首条消息发送失败。',
-      );
-
-      store.updateInitialPromptIntent(chatId, {
-        status: 'pending',
-        error: normalized,
-      });
-      this.markMessageFailed(intent.messageId, normalized);
-
-      throw error;
-    }
-
-    return requestId;
-  }
-
-  /** 向已有 Chat 发送用户文本。 */
-  async submitMessage(input: SubmitMessageInput): Promise<RequestId> {
-    const content = input.content.trim();
-    const store = this.dependencies.store.getState();
-
-    if (!content) {
-      throw new Error('消息内容不能为空。');
-    }
-
-    if (!store.chatsById[input.chatId]) {
-      throw new Error('目标 Chat 尚未加载。');
-    }
-
-    const requestId: RequestId = createId();
-    const messageId: MessageId = createId();
-    const idempotencyKey: IdempotencyKey = createId();
-    const now = Date.now();
-
-    store.upsertMessage({
-      id: messageId,
-      chatId: input.chatId,
-      runId: null,
-      role: 'user',
-      status: 'pending',
-      content: {
-        type: 'text',
-        format: 'plain_text',
-        content,
-      },
-      createdAt: now,
-      updatedAt: now,
-      completedAt: null,
-      error: null,
-    });
-
-    store.upsertChat({
-      ...store.chatsById[input.chatId],
-      updatedAt: now,
-    });
-
-    const command: ChatSubmitCommand = {
-      type: 'chat.submit',
-      request_id: requestId,
-      idempotency_key: idempotencyKey,
-      chat_id: input.chatId,
-      run_id: null,
-      timestamp: now,
-      payload: {
-        message_id: messageId,
-        content: {
-          type: 'text',
-          format: 'plain_text',
-          content,
-        },
-      },
-    };
-
-    try {
-      await this.dispatchCommand(command, {
-        messageId,
-        initialPromptChatId: null,
-      });
-    } catch (error) {
-      this.markMessageFailed(
-        messageId,
-        normalizeError(
-          error,
-          'IM_MESSAGE_SEND_FAILED',
-          '消息发送失败。',
-        ),
-      );
-      throw error;
-    }
-
-    return requestId;
-  }
-
-  /** 主动取消一个 Agent Run。 */
-  async cancelRun(input: CancelRunInput): Promise<RequestId> {
-    const store = this.dependencies.store.getState();
-
-    if (!store.runsById[input.runId]) {
-      throw new Error('需要取消的 Agent Run 不存在。');
-    }
-
-    const requestId: RequestId = createId();
-    const command: RunCancelCommand = {
-      type: 'run.cancel',
-      request_id: requestId,
-      idempotency_key: createId(),
-      chat_id: input.chatId,
-      run_id: input.runId,
-      timestamp: Date.now(),
-      payload: {
-        reason: 'user_requested',
-      },
-    };
-
-    await this.dispatchCommand(command, {
-      messageId: null,
-      initialPromptChatId: null,
-    });
-
-    return requestId;
-  }
-
-  /** 释放监听器、定时器和内存中的 ACK 记录。 */
-  destroy(): void {
-    this.clearHeartbeat();
-
-    for (const pending of this.pendingCommands.values()) {
-      clearTimeout(pending.timeoutId);
-    }
-
-    this.pendingCommands.clear();
-    this.processedEventIds.clear();
-    this.processedEventOrder.length = 0;
-
-    this.dependencies.transport.disconnect();
-    this.unsubscribeTransport?.();
-    this.unsubscribeTransport = null;
-    this.initialized = false;
-  }
-
-  /** 连接成功后发送一条 Command，并开始等待 ACK。 */
+  /**
+   * 统一发送一条客户端 command
+   * 
+   * 所有需要服务端 ACK 的业务指令都会经过这里，例如：
+   * - chat.start
+   * - chat.submit
+   * - run.cancel
+   * 
+   * context 用来记录这条 command 和本地业务数据之间的关系
+   */
   private async dispatchCommand(
     command: ClientCommand,
     context: Pick<PendingCommand, 'messageId' | 'initialPromptChatId'>,
   ): Promise<void> {
+    /**
+     * 发送前确保 WebSocket 已经建立
+     * 
+     * connect() 内部具有连接复用能力
+     * 已连接时直接返回，连接时复用同一个 promise
+     */
     await this.connect();
 
+    /**
+     * Transport 在未配置 URL 时可能进入 disabled
+     * 此时 connect() 虽然正常结束，但并没有可用的 WebSocket
+     */
     if (this.dependencies.transport.getState().status !== 'connected') {
-      throw new Error('IM WebSocket 当前不可用。');
+      throw new Error('IM WebSocket 当前不可用');
     }
 
+    /**
+     * Protocol 中定义的是 TypeScript 对象
+     * WebSocket 实际发送的必须是字符串，因此需要序列化
+     * 
+     * send() 成功只代表数据已经交给浏览器
+     * 不代表服务器已经接收或处理
+     */
     this.dependencies.transport.send(JSON.stringify(command));
 
     /**
-     * WebSocket.send() 成功只表示数据交给了浏览器，
-     * 不代表服务端已经处理，因此还必须等待业务层 ACK。
+     * 开始等待服务端的业务 ACK
+     * 
+     * 服务端后续需要返回：
+     * - command.accepted
+     * - command.rejected
      */
     const timeoutId = setTimeout(() => {
       this.handleCommandTimeout(command.request_id);
     }, this.options.commandAckTimeoutMs);
 
-    this.pendingCommands.set(command.request_id, {
+    /**
+     * 使用 RequestId 保存 Command 的等待状态
+     * 
+     * 后续收到 ACK 时，可以通过 event.request_id
+     * 找到这里保存的 Command 和本地业务上下文
+     */
+    this.pendingCommand.set(command.request_id, {
       command,
       messageId: context.messageId,
       initialPromptChatId: context.initialPromptChatId,
@@ -628,203 +774,49 @@ export class IMService implements IMServicePublicApi {
     });
   }
 
-  private readonly handleTransportEvent = (
-    event: IMTransportEvent,
-  ): void => {
-    if (event.type === 'state.changed') {
-      this.dependencies.store.getState().setConnectionState(event.state);
-
-      if (event.state.status !== 'connected') {
-        this.clearHeartbeat();
-        this.dependencies.store.getState().updateSessionState({
-          connectionId: null,
-          lastPongAt: null,
-        });
-      }
-
-      return;
-    }
-
-    this.handleRawServerMessage(event.data);
-  };
-
-  /** 将原始 JSON 字符串转换为静态 ServerEvent 并分发。 */
-  private handleRawServerMessage(raw: string): void {
-    try {
-      this.handleServerEvent(parseServerEvent(raw));
-    } catch (error) {
-      this.reportError(
-        normalizeError(
-          error,
-          'IM_EVENT_PARSE_FAILED',
-          '服务端 IM 事件解析失败。',
-        ),
-      );
-    }
-  }
-
-  private handleServerEvent(event: ServerEvent): void {
-    /** 断线续传可能重复下发旧事件，先通过 event_id 去重。 */
-    if (!this.rememberEvent(event.event_id)) {
-      return;
-    }
-
-    if (event.cursor !== null) {
-      /** 保存最新全局位置，为后续携带 cursor 续传做准备。 */
-      this.dependencies.store.getState().updateSessionState({
-        cursor: event.cursor,
-      });
-    }
-
-    if (!this.acceptRunSequence(event.run_id, event.seq)) {
-      /** 同一个 Run 中 seq 不大于 lastSeq 的事件已经处理过。 */
-      return;
-    }
-
-    switch (event.type) {
-      case 'connection.ready':
-        this.dependencies.store.getState().updateSessionState({
-          connectionId: event.payload.connection_id,
-          lastPongAt: Date.now(),
-        });
-        this.startHeartbeat(event.payload.heartbeat_interval_ms);
-        break;
-
-      case 'command.accepted':
-        this.handleCommandAccepted(event);
-        break;
-
-      case 'command.rejected':
-        this.handleCommandRejected(event);
-        break;
-
-      case 'run.created':
-      case 'run.status':
-        this.handleRunSnapshot(event);
-        break;
-
-      case 'step.started':
-      case 'step.progress':
-      case 'step.completed':
-      case 'step.failed':
-        this.handleStepSnapshot(event);
-        break;
-
-      case 'message.started':
-      case 'message.completed':
-        this.handleMessageSnapshot(event);
-        break;
-
-      case 'message.delta':
-        this.handleMessageDelta(event);
-        break;
-
-      case 'pong':
-        this.handlePong(event);
-        break;
-
-      case 'error':
-        this.reportError(event.payload.error);
-        break;
-    }
-  }
-
-  private handleCommandAccepted(event: CommandAcceptedEvent): void {
-    const pending = this.takePendingCommand(event.request_id);
-
-    if (!pending) {
-      return;
-    }
-
-    if (pending.command.type !== event.payload.command_type) {
-      this.reportError({
-        code: 'IM_ACK_COMMAND_MISMATCH',
-        message: '服务端 ACK 与客户端 Command 类型不一致。',
-        retryable: false,
-      });
-      return;
-    }
-
-    if (pending.messageId) {
-      const store = this.dependencies.store.getState();
-      const message = store.messagesById[pending.messageId];
-
-      if (message && message.status !== 'completed') {
-        store.upsertMessage({
-          ...message,
-          status: 'completed',
-          updatedAt: event.timestamp,
-          completedAt: event.timestamp,
-          error: null,
-        });
-      }
-    }
-
-    if (pending.initialPromptChatId) {
-      /**
-       * chat.start 已被服务端确认后删除 Intent，
-       * 页面再次渲染时不会重复发送首条 Prompt。
-       */
-      this.dependencies.store
-        .getState()
-        .removeInitialPromptIntent(pending.initialPromptChatId);
-    }
-  }
-
-  private handleCommandRejected(event: CommandRejectedEvent): void {
-    const pending = this.takePendingCommand(event.request_id);
-
-    if (!pending) {
-      return;
-    }
-
-    if (pending.command.type !== event.payload.command_type) {
-      this.reportError({
-        code: 'IM_REJECTION_COMMAND_MISMATCH',
-        message: '服务端拒绝事件与客户端 Command 类型不一致。',
-        retryable: false,
-      });
-      return;
-    }
-
-    const store = this.dependencies.store.getState();
-    const intent = pending.initialPromptChatId
-      ? store.initialPromptIntentsByChatId[pending.initialPromptChatId]
-      : null;
-    const isLatestInitialRequest =
-      !intent || intent.lastRequestId === event.request_id;
-
-    if (pending.messageId && isLatestInitialRequest) {
-      this.markMessageFailed(pending.messageId, event.payload.error);
-    }
-
-    if (pending.initialPromptChatId && isLatestInitialRequest) {
-      store.updateInitialPromptIntent(pending.initialPromptChatId, {
-        status: 'rejected',
-        error: event.payload.error,
-      });
-    }
-  }
-
+  /**
+   * Command 在规定时间内没有收到服务端 ACK
+   * 
+   * 超时不等于服务端一定没有执行
+   * 可能是服务端已经处理，但 ACK 在网络中丢失了
+   * 
+   * 因此这里使用 delivery_unknown
+   * 而不是直接将消息标记为 false
+   */
   private handleCommandTimeout(requestId: RequestId): void {
-    const pending = this.pendingCommands.get(requestId);
-
-    if (!pending) {
-      return;
-    }
+    const pending = this.pendingCommand.get(requestId);
 
     /**
-     * 超时后暂时保留 pendingCommands 记录。
-     * 如果迟到的 accepted/rejected 之后到达，仍然能够正确关联。
+     * 找不到说明这条 Command 已经收到 ACK
+     * 并且已经从 pendingCommand 中删除
      */
+    if (!pending) {
+      return;
+    }
 
     const store = this.dependencies.store.getState();
-    const intent = pending.initialPromptChatId
+
+    /**
+     * 如果这是新会话的首条 Prompt
+     * 找到它对应的 InitialPromptIntent
+     */
+    const intent = pending.initialPromptChatId 
       ? store.initialPromptIntentsByChatId[pending.initialPromptChatId]
       : null;
+    
+    /**
+     * 首条 Prompt 后续可能继续重试
+     * 
+     * 旧请求的超时回调不能覆盖新请求的方法
+     * 所以要确认当前 requestId 仍是最近一次发送
+     */
     const isLatestInitialRequest =
       !intent || intent.lastRequestId === requestId;
-
+    
+    /**
+     * 如果 command 对应一条本地用户消息
+     * 将它标记为“投递结果未知”
+     */
     if (pending.messageId && isLatestInitialRequest) {
       const message = store.messagesById[pending.messageId];
 
@@ -837,191 +829,48 @@ export class IMService implements IMServicePublicApi {
       }
     }
 
+    /**
+     * 同步更新首次 Prompt 意图
+     * 
+     * 保留这个 Intent，后续才能支持用户重试，
+     * 并继续复用原来的 MessageId 和 IdempotencyKey
+     */
     if (pending.initialPromptChatId && isLatestInitialRequest) {
-      store.updateInitialPromptIntent(pending.initialPromptChatId, {
-        status: 'delivery_unknown',
-        error: {
-          code: 'IM_COMMAND_ACK_TIMEOUT',
-          message: '等待服务端确认超时，本次操作是否完成暂时未知。',
-          retryable: true,
+      store.updateInitialPromptIntent(
+        pending.initialPromptChatId,
+        {
+          status: 'delivery_unknown',
+          error: {
+            code: 'IM_COMMAND_ACK_TIMEOUT',
+            message: '等待服务端确认超时，本次操作是否完成暂时未知',
+            retyrable: true,
+          },
         },
-      });
+      );
     }
   }
 
-  private handleRunSnapshot(event: RunSnapshotEvent): void {
-    const store = this.dependencies.store.getState();
-    const current = store.runsById[event.run_id];
-    const run = toAgentRun(event.payload.run);
-
-    store.upsertRun({
-      ...run,
-      lastSeq: Math.max(run.lastSeq, event.seq),
-      desynced: run.desynced || current?.desynced === true,
-    });
+  /**
+   * 开发期占位：历史会话或尚未接入发送模块时，不执行自动发送。
+   * 后续实现首条 Prompt 模块时替换这里。
+   */
+  async sendInitialPrompt(_chatId: ChatId): Promise<RequestId | null> {
+    return null;
   }
 
-  private handleStepSnapshot(event: StepSnapshotEvent): void {
-    this.dependencies.store
-      .getState()
-      .upsertStep(toAgentStep(event.payload.step));
+  /**
+   * 开发期占位：保留稳定的页面调用接口。
+   * 后续实现 Command 发送模块时替换这里。
+   */
+  async submitMessage(_input: SubmitMessageInput): Promise<RequestId> {
+    throw new Error('IM 消息发送模块尚未实现');
   }
 
-  private handleMessageSnapshot(event: MessageSnapshotEvent): void {
-    this.dependencies.store
-      .getState()
-      .upsertMessage(toChatMessage(event.payload.message));
-  }
-
-  private handleMessageDelta(event: MessageDeltaEvent): void {
-    this.dependencies.store.getState().appendMessageDelta({
-      messageId: event.message_id,
-      delta: event.payload.delta,
-      updatedAt: event.timestamp,
-    });
-  }
-
-  private handlePong(_event: PongEvent): void {
-    this.dependencies.store.getState().updateSessionState({
-      lastPongAt: Date.now(),
-    });
-  }
-
-  /** 返回 false 表示当前事件是已经处理过的旧事件。 */
-  private acceptRunSequence(runId: RunId | null, seq: number | null): boolean {
-    if (runId === null || seq === null) {
-      return true;
-    }
-
-    const store = this.dependencies.store.getState();
-    const run = store.runsById[runId];
-
-    if (!run) {
-      return true;
-    }
-
-    if (seq <= run.lastSeq) {
-      /** 重复事件或比当前状态更旧的事件不能再次修改 Store。 */
-      return false;
-    }
-
-    store.upsertRun({
-      ...run,
-      lastSeq: seq,
-      /** seq 出现跳号表示中间事件可能丢失，需要后续加载快照校准。 */
-      desynced: run.desynced || seq > run.lastSeq + 1,
-      updatedAt: Date.now(),
-    });
-
-    return true;
-  }
-
-  private rememberEvent(eventId: EventId): boolean {
-    if (this.processedEventIds.has(eventId)) {
-      return false;
-    }
-
-    this.processedEventIds.add(eventId);
-    this.processedEventOrder.push(eventId);
-
-    if (this.processedEventOrder.length > MAX_REMEMBERED_EVENT_IDS) {
-      /**
-       * 全局连接会长期存在，因此事件去重集合必须设置上限，
-       * 避免随着会话使用时间无限增长。
-       */
-      const oldestEventId = this.processedEventOrder.shift();
-
-      if (oldestEventId) {
-        this.processedEventIds.delete(oldestEventId);
-      }
-    }
-
-    return true;
-  }
-
-  private takePendingCommand(requestId: RequestId): PendingCommand | null {
-    const pending = this.pendingCommands.get(requestId);
-
-    if (!pending) {
-      return null;
-    }
-
-    clearTimeout(pending.timeoutId);
-    this.pendingCommands.delete(requestId);
-    return pending;
-  }
-
-  private markMessageFailed(messageId: MessageId, error: IMError): void {
-    const store = this.dependencies.store.getState();
-    const message = store.messagesById[messageId];
-
-    if (!message || message.status === 'completed') {
-      return;
-    }
-
-    store.upsertMessage({
-      ...message,
-      status: 'failed',
-      updatedAt: Date.now(),
-      completedAt: Date.now(),
-      error,
-    });
-  }
-
-  private startHeartbeat(intervalMs: number): void {
-    this.clearHeartbeat();
-
-    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
-      return;
-    }
-
-    this.heartbeatTimer = setInterval(() => {
-      if (this.dependencies.transport.getState().status !== 'connected') {
-        return;
-      }
-
-      const command: PingCommand = {
-        type: 'ping',
-        request_id: createId(),
-        idempotency_key: null,
-        chat_id: null,
-        run_id: null,
-        timestamp: Date.now(),
-        payload: {
-          client_time: Date.now(),
-        },
-      };
-
-      try {
-        /** 心跳直接发送，不进入业务 Command ACK 队列，由 pong 单独确认。 */
-        this.dependencies.transport.send(JSON.stringify(command));
-      } catch (error) {
-        this.reportError(
-          normalizeError(
-            error,
-            'IM_HEARTBEAT_SEND_FAILED',
-            'IM 心跳发送失败。',
-          ),
-        );
-      }
-    }, Math.max(intervalMs, 1_000));
-  }
-
-  private clearHeartbeat(): void {
-    if (!this.heartbeatTimer) {
-      return;
-    }
-
-    clearInterval(this.heartbeatTimer);
-    this.heartbeatTimer = null;
-  }
-
-  private reportError(error: IMError): void {
-    const store = this.dependencies.store.getState();
-
-    store.setConnectionState({
-      ...store.connection,
-      lastError: error,
-    });
+  /**
+   * 开发期占位：保留稳定的页面调用接口。
+   * 后续实现 Run 控制模块时替换这里。
+   */
+  async cancelRun(_input: CancelRunInput): Promise<RequestId> {
+    throw new Error('IM Run 取消模块尚未实现');
   }
 }

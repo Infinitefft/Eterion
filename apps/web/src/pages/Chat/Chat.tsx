@@ -1,14 +1,19 @@
-import {
-  ArrowUp,
-  Bot,
-  Check,
-  ChevronDown,
-  Paperclip,
-} from 'lucide-react';
-import { type FormEvent, useEffect, useState } from 'react';
+import { ArrowUp, Bot, Check, ChevronDown, Paperclip } from 'lucide-react';
+import { lazy, Suspense, useState, type FormEvent } from 'react';
 import { useParams } from 'react-router-dom';
 
 import './Chat.less';
+
+const WakeField = lazy(() => import('./WakeField'));
+
+const welcomeMessages = [
+  '今天，想推进什么？',
+  '从一个想法开始吧。',
+  '有什么想一起完成的？',
+  '有个模糊的想法也没关系。',
+  '让想法在这里慢慢成形。',
+  '下一步，想从哪里开始？',
+] as const;
 
 const conversationTitles: Record<string, string> = {
   'agent-runtime': 'Agent 运行时架构',
@@ -17,22 +22,8 @@ const conversationTitles: Record<string, string> = {
   'realtime-events': '实时事件协议梳理',
 };
 
-const chatTypewriterPhrases = [
-  '今天想从哪里开始？',
-  '把一个想法变成清晰的下一步',
-  '一起梳理代码与技术方案',
-  '从资料中找到真正重要的线索',
-  '复杂的任务，也可以从一句话开始',
-] as const;
-
 const composerTextareaMinHeight = 58;
 const composerTextareaMaxHeight = 154;
-
-type ChatTypewriterState = {
-  phraseIndex: number;
-  visibleLength: number;
-  phase: 'typing' | 'deleting';
-};
 
 function resizeComposerTextarea(event: FormEvent<HTMLTextAreaElement>) {
   const textarea = event.currentTarget;
@@ -44,8 +35,7 @@ function resizeComposerTextarea(event: FormEvent<HTMLTextAreaElement>) {
   );
 
   textarea.style.height = `${nextHeight}px`;
-  textarea.style.overflowY =
-    textarea.scrollHeight > composerTextareaMaxHeight ? 'auto' : 'hidden';
+  textarea.style.overflowY = textarea.scrollHeight > composerTextareaMaxHeight ? 'auto' : 'hidden';
 }
 
 export function Chat() {
@@ -67,97 +57,21 @@ export function Chat() {
 }
 
 function NewConversation() {
+  const [welcomeMessage] = useState(
+    () => welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)],
+  );
+
   return (
     <div className='new-conversation'>
-      <h1 className='sr-only'>开始新会话</h1>
-      <ChatTypewriter />
-      <Composer />
+      <div className='chat-interaction-shell'>
+        <Suspense fallback={<div className='wake-field-loading' aria-hidden='true' />}>
+          <WakeField />
+        </Suspense>
+        <h1 className='chat-welcome'>{welcomeMessage}</h1>
+        <Composer />
+      </div>
     </div>
   );
-}
-
-function ChatTypewriter() {
-  const prefersReducedMotion = usePrefersReducedMotion();
-  const [typewriter, setTypewriter] = useState<ChatTypewriterState>({
-    phraseIndex: 0,
-    visibleLength: 0,
-    phase: 'typing',
-  });
-  const phraseCharacters = Array.from(chatTypewriterPhrases[typewriter.phraseIndex]);
-  const hasFinishedTyping = typewriter.visibleLength >= phraseCharacters.length;
-  const hasFinishedDeleting = typewriter.visibleLength === 0;
-  const visibleText = prefersReducedMotion
-    ? chatTypewriterPhrases[0]
-    : phraseCharacters.slice(0, typewriter.visibleLength).join('');
-
-  useEffect(() => {
-    if (prefersReducedMotion) {
-      return undefined;
-    }
-
-    const delay =
-      typewriter.phase === 'typing'
-        ? hasFinishedTyping
-          ? 1650
-          : 92
-        : hasFinishedDeleting
-          ? 420
-          : 52;
-
-    const timer = window.setTimeout(() => {
-      setTypewriter((current) => {
-        if (current.phase === 'typing') {
-          if (current.visibleLength >= phraseCharacters.length) {
-            return { ...current, phase: 'deleting' };
-          }
-
-          return { ...current, visibleLength: current.visibleLength + 1 };
-        }
-
-        if (current.visibleLength > 0) {
-          return { ...current, visibleLength: current.visibleLength - 1 };
-        }
-
-        return {
-          phraseIndex: (current.phraseIndex + 1) % chatTypewriterPhrases.length,
-          visibleLength: 0,
-          phase: 'typing',
-        };
-      });
-    }, delay);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    hasFinishedDeleting,
-    hasFinishedTyping,
-    phraseCharacters.length,
-    prefersReducedMotion,
-    typewriter.phase,
-    typewriter.visibleLength,
-  ]);
-
-  return (
-    <div className='chat-typewriter' aria-hidden='true'>
-      <span className='chat-typewriter-text'>{visibleText}</span>
-      <span className='chat-typewriter-cursor' />
-    </div>
-  );
-}
-
-function usePrefersReducedMotion() {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-  );
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const updatePreference = () => setPrefersReducedMotion(mediaQuery.matches);
-
-    mediaQuery.addEventListener('change', updatePreference);
-    return () => mediaQuery.removeEventListener('change', updatePreference);
-  }, []);
-
-  return prefersReducedMotion;
 }
 
 function ConversationDetail({ title }: { title: string }) {
