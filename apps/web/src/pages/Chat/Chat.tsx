@@ -13,6 +13,7 @@ const welcomeMessages = [
   '有个模糊的想法也没关系。',
   '让想法在这里慢慢成形。',
   '下一步，想从哪里开始？',
+  '接下来想聊点什么？',
 ] as const;
 
 const conversationTitles: Record<string, string> = {

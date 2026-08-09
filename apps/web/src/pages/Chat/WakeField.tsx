@@ -119,25 +119,32 @@ const backgroundFragmentShader = /* glsl */ `
       0.5 + sin(uTime * 0.11 + 3.4) * 0.34,
       0.5 + cos(uTime * 0.19 + 0.4) * 0.2
     );
-    vec2 cloudVectorA = (vUv - roamingCenterA) * vec2(3.0, 5.5);
-    vec2 cloudVectorB = (vUv - roamingCenterB) * vec2(3.8, 6.2);
+    vec2 roamingCenterC = vec2(
+      0.5 + cos(uTime * 0.14 + 5.1) * 0.31,
+      0.5 + sin(uTime * 0.16 + 1.2) * 0.22
+    );
+    vec2 flowOffset = vec2(
+      sin(vUv.y * 4.2 + uTime * 0.13),
+      cos(vUv.x * 3.6 - uTime * 0.11)
+    ) * 0.026;
+    vec2 flowUv = vUv + flowOffset;
+    vec2 cloudVectorA = (flowUv - roamingCenterA) * vec2(3.0, 5.5);
+    vec2 cloudVectorB = (flowUv - roamingCenterB) * vec2(3.8, 6.2);
+    vec2 cloudVectorC = (flowUv - roamingCenterC) * vec2(3.35, 5.8);
     float roamingCloudA = exp(-dot(cloudVectorA, cloudVectorA));
     float roamingCloudB = exp(-dot(cloudVectorB, cloudVectorB));
-    float roamingDensity = roamingCloudA * 0.68 + roamingCloudB * 0.48;
+    float roamingCloudC = exp(-dot(cloudVectorC, cloudVectorC));
+    float roamingDensity = roamingCloudA * 0.44 + roamingCloudB * 0.42 + roamingCloudC * 0.5;
 
-    float colorFlow = sin(vUv.x * 5.4 - vUv.y * 3.2 + uTime * 0.3) * 0.5 + 0.5;
-    float colorDensity = clamp(
-      roamingCloudA * 0.88 + roamingCloudB * 0.72 + density * 0.12,
-      0.0,
-      1.0
-    );
-    vec3 mistColor = mix(vec3(0.91, 0.96, 1.0), vec3(0.68, 0.85, 1.0), colorDensity);
-    mistColor = mix(
-      mistColor,
-      vec3(0.75, 0.89, 1.0),
-      colorFlow * (0.07 + roamingCloudB * 0.13)
-    );
-    float alpha = (density * 0.128 + roamingDensity * 0.074) * edgeFade;
+    float colorFlowA = sin(flowUv.x * 4.8 + flowUv.y * 3.1 + uTime * 0.19) * 0.5 + 0.5;
+    float colorFlowB = sin(-flowUv.x * 3.2 + flowUv.y * 5.4 - uTime * 0.14 + 2.0) * 0.5 + 0.5;
+    float wholeFlow = mix(colorFlowA, colorFlowB, 0.38);
+    vec3 mistColor = mix(vec3(0.925, 0.961, 0.976), vec3(0.91, 0.973, 0.965), wholeFlow * 0.42);
+    mistColor = mix(mistColor, vec3(0.97, 0.985, 0.99), roamingCloudA * 0.52);
+    mistColor = mix(mistColor, vec3(0.89, 0.93, 0.95), roamingCloudB * 0.38);
+    mistColor = mix(mistColor, vec3(0.94, 0.98, 0.94), roamingCloudC * 0.5);
+    float ambientFlow = 0.026 + wholeFlow * 0.018;
+    float alpha = (ambientFlow + density * 0.075 + roamingDensity * 0.058) * edgeFade;
     gl_FragColor = vec4(mistColor, alpha);
   }
 `;
@@ -168,7 +175,7 @@ function getParticleAppearance(kind: ParticleKind, speedFactor: number) {
         curlRange: 1.15,
         jitter: 5,
         maxLife: 1.2 + Math.random() * 0.95 + speedFactor * 0.7,
-        size: 22 + Math.random() * 26 + speedFactor * 34,
+        size: 19 + Math.random() * 22 + speedFactor * 28,
       };
     case 1:
       return {
@@ -200,7 +207,7 @@ function getParticleAppearance(kind: ParticleKind, speedFactor: number) {
 function getParticleExpansion(kind: ParticleKind) {
   switch (kind) {
     case 0:
-      return 1.15;
+      return 0.95;
     case 1:
       return 0.48;
     case 2:
@@ -226,13 +233,13 @@ function getParticleDamping(kind: ParticleKind) {
 function getParticleColor(kind: ParticleKind): readonly [number, number, number] {
   switch (kind) {
     case 0:
-      return [0.56, 0.66, 0.82];
+      return [0.62, 0.72, 0.86];
     case 1:
-      return [0.22, 0.29, 0.58];
+      return [0.27, 0.34, 0.64];
     case 2:
-      return [0.25, 0.38, 0.72];
+      return [0.31, 0.44, 0.77];
     case 3:
-      return [0.42, 0.52, 0.72];
+      return [0.48, 0.58, 0.77];
   }
 }
 
