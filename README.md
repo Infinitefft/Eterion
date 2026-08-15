@@ -40,7 +40,7 @@ Eterion 优先建设前端交互体验和 Agent 任务处理能力。Go API 负�
 
 ## 当前架构
 
-浏览器通过 REST API 和 WebSocket 访问 Go API。PostgreSQL 保存需要持久化的业务数据，Python Agent 服务将在开始开发 AI 功能时接入。
+浏览器通过 REST API 和 WebSocket 访问统一的 Go 服务。PostgreSQL 保存需要持久化的业务数据，AI Agent 由同一进程内的 CloudWeGo Eino 驱动。
 
 ```text
 React Web
@@ -48,7 +48,7 @@ React Web
     ▼
 Go Gin API
     ├─ PostgreSQL
-    └─ Python Agent（规划中，尚未启用）
+    └─ Eino Agent / OpenAI-compatible Model
 ```
 
 普通资源操作使用 REST API。实时消息、Agent 状态和交互请求使用统一的 WebSocket 事件信封，并以服务端状态为最终依据。
@@ -80,6 +80,7 @@ Go Gin API
 | 请求校验 | go-playground/validator 10.30.3 |
 | 认证与安全 | golang-jwt/jwt 5.3.1、x/crypto 0.54.0 |
 | 标识与配置 | google/uuid 1.6.0、godotenv 1.5.1 |
+| AI Agent | CloudWeGo Eino 0.9.14、Eino OpenAI Model 0.1.13 |
 | 日志 | Go 标准库 `log/slog` |
 | 数据库迁移 | goose 3.27.2 |
 
@@ -87,7 +88,7 @@ Go Gin API
 
 以下依赖会在对应功能进入开发阶段后安装：
 
-- Python Agent、FastAPI、LangGraph、LangChain、向量数据库和模型软件开发工具包（SDK）
+- 向量数据库、模型厂商专用软件开发工具包（SDK）和 Agent 可观测性后端
 - Quill、Markdown 渲染、代码高亮、PDF 和 DOCX 预览依赖
 - Redis、gRPC、消息队列、服务注册和独立 API Gateway
 
@@ -108,6 +109,7 @@ Eterion/
    └─ api/                  Go RESTful API
       ├─ cmd/server/        HTTP 服务入口
       ├─ internal/          配置、路由、中间件、模块和共享能力
+      │  └─ agent/          Eino Agent 契约、模型和工作流
       ├─ migrations/        goose 数据库迁移
       ├─ tests/             后端测试
       ├─ go.mod             Go 模块与直接依赖
@@ -155,7 +157,7 @@ pnpm dev
 
 ## 初始化并启动 Go API
 
-后端的本地隐私配置保存在 `services/api/.env`，该文件不会提交到 Git。首次运行时从示例文件复制一份，并填写数据库密码和随机 JWT 密钥：
+后端的本地隐私配置保存在 `services/api/.env`，该文件不会提交到 Git。首次运行时从示例文件复制一份，并填写数据库密码、随机 JWT 密钥、模型 API Key 和模型名称：
 
 ```powershell
 Set-Location services/api

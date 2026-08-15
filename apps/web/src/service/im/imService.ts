@@ -558,7 +558,146 @@ export class IMService implements IMServicePublicApi {
       }
     }
 
-    // TODO: 后续在这里按照 event.type 分发并更新 Store。
+    /**
+     * 当前模块先接入 Command ACK。
+     * 其他事件会在后面的模块中逐步添加。
+     */
+    switch (event.type) {
+      case 'command.accepted':
+        this.handleCommandAccepted(event);
+        return;
+
+      case 'command.rejected':
+        this.handleCommandRejected(event);
+        return;
+
+      default:
+        /** 尚未接入的服务端事件暂时安全忽略。 */
+        return;
+    }
+  }
+
+  /**
+   * 根据 RequestId 取出一条正在等待 ACK 的 Command。
+   *
+   * 一条 Command 只处理一次最终 ACK，因此取出时同时清除
+   * 超时定时器和 pendingCommand 中的记录。
+   */
+  private takePendingCommand(
+    requestId: RequestId,
+  ): PendingCommand | null {
+    const pending = this.pendingCommand.get(requestId);
+
+    if (!pending) {
+      /** 重复 ACK 或刷新前遗留的 ACK 无需再次处理。 */
+      return null;
+    }
+
+    clearTimeout(pending.timeoutId);
+    this.pendingCommand.delete(requestId);
+
+    return pending;
+  }
+
+  /** 处理服务端接受 Command 的事件。 */
+  private handleCommandAccepted(
+    event: Extract<
+      ServerEvent,
+      { type: 'command.accepted' }
+    >,
+  ): void {
+    const pending = this.takePendingCommand(event.request_id);
+
+    if (!pending) {
+      return;
+    }
+
+    /** 服务端确认的 Command 类型必须与前端原始 Command 一致。 */
+    if (pending.command.type !== event.payload.command_type) {
+      this.reportError({
+        code: 'IM_ACK_COMMAND_MISMATCH',
+        message: '服务端 ACK 与客户端 Command 类型不一致。',
+        retryable: false,
+      });
+      return;
+    }
+
+    const store = this.dependencies.store.getState();
+
+    /**
+     * chat.start 和 chat.submit 都关联一条本地用户消息。
+     * ACK 表示用户消息已被服务端接受，不代表 AI 回答已经完成。
+     */
+    if (pending.messageId) {
+      const message = store.messagesById[pending.messageId];
+
+      if (message && message.status !== 'completed') {
+        store.upsertMessage({
+          ...message,
+          status: 'completed',
+          updatedAt: event.timestamp,
+          completedAt: event.timestamp,
+          error: null,
+        });
+      }
+    }
+
+    /**
+     * chat.start 被确认后删除首次发送意图，避免页面再次渲染时
+     * 重复发送相同 Prompt。
+     */
+    if (pending.initialPromptChatId) {
+      store.removeInitialPromptIntent(pending.initialPromptChatId);
+    }
+  }
+
+  /** 处理服务端拒绝 Command 的事件。 */
+  private handleCommandRejected(
+    event: Extract<
+      ServerEvent,
+      { type: 'command.rejected' }
+    >,
+  ): void {
+    const pending = this.takePendingCommand(event.request_id);
+
+    if (!pending) {
+      return;
+    }
+
+    if (pending.command.type !== event.payload.command_type) {
+      this.reportError({
+        code: 'IM_REJECTION_COMMAND_MISMATCH',
+        message: '服务端拒绝事件与客户端 Command 类型不一致。',
+        retryable: false,
+      });
+      return;
+    }
+
+    const store = this.dependencies.store.getState();
+    const intent = pending.initialPromptChatId
+      ? store.initialPromptIntentsByChatId[pending.initialPromptChatId]
+      : null;
+
+    /** 旧请求迟到的 rejected 不能覆盖首条 Prompt 的新请求状态。 */
+    const isLatestInitialRequest =
+      !intent || intent.lastRequestId === event.request_id;
+
+    if (pending.messageId && isLatestInitialRequest) {
+      this.markMessageFailed(pending.messageId, event.payload.error);
+    }
+
+    /** 保留被拒绝的首次发送意图，方便后续实现手动重试。 */
+    if (pending.initialPromptChatId && isLatestInitialRequest) {
+      store.updateInitialPromptIntent(pending.initialPromptChatId, {
+        status: 'rejected',
+        error: event.payload.error,
+      });
+    }
+
+    /** run.cancel 不关联 Message，拒绝原因记录为全局 IM 错误。 */
+    if (!pending.messageId && !pending.initialPromptChatId) {
+      this.reportError(event.payload.error);
+    }
   }
 
   /**
@@ -588,6 +727,42 @@ export class IMService implements IMServicePublicApi {
     
     clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = null;
+  }
+
+  /**
+   * 将一条本地消息标记为发送失败
+   */
+  private markMessageFailed(
+    messageId: MessageId,
+    error: IMError,
+  ): void {
+    /**
+     * 必须重新调用 getState() 获取最新状态
+     * 不一定包含刚刚通过 upsertMessage() 写入的消息
+     */
+    const store = this.dependencies.store.getState();
+    const message = store.messagesById[messageId];
+
+    if (!message) {
+      return;
+    }
+
+    /**
+     * 如果消息已经完成，迟到的失败结果不能覆盖成功状态
+     */
+    if (message.status === 'completed') {
+      return;
+    }
+
+    const now = Date.now();
+
+    store.upsertMessage({
+      ...message,
+      status: 'failed',
+      updatedAt: now,
+      completedAt: now,
+      error,
+    })
   }
 
   /**
@@ -843,7 +1018,7 @@ export class IMService implements IMServicePublicApi {
           error: {
             code: 'IM_COMMAND_ACK_TIMEOUT',
             message: '等待服务端确认超时，本次操作是否完成暂时未知',
-            retyrable: true,
+            retryable: true,
           },
         },
       );
@@ -851,26 +1026,355 @@ export class IMService implements IMServicePublicApi {
   }
 
   /**
-   * 开发期占位：历史会话或尚未接入发送模块时，不执行自动发送。
-   * 后续实现首条 Prompt 模块时替换这里。
+   * 发送新会话已经登陆的首条 Prompt
+   * 
+   * prepareNewChat() 只创建本地 Chat 和发送意图
+   * 真正的 WebSocket 发送由这个方法完成
+   * 
+   * 历史会话没有 InitialPromptIntent，因此不会自动发送
    */
-  async sendInitialPrompt(_chatId: ChatId): Promise<RequestId | null> {
-    return null;
+  async sendInitialPrompt(
+    chatId: ChatId,
+  ): Promise<RequestId | null> {
+    const store = this.dependencies.store.getState();
+    const intent = 
+      store.initialPromptIntentsByChatId[chatId];
+    
+    /**
+     * 没有发送意图，说明是历史会话
+     * 或者没有首条 Prompt 已经成功发送并删除了 Intent
+    */
+    if (!intent) {
+      return null;
+    }
+
+    /**
+      * rejected 表示服务端明确拒绝了这条 Command
+      * 暂时不进行自动重试，避免进入循环发送
+      */
+    if (intent.status === 'rejected') {
+      return null;
+    }
+
+    /**
+     * 如果已经处于 sending，就复用当前 RequestId
+     * 不能就再次创建一条 chat.start Command
+     */
+    if (intent.status === 'sending') {
+      return intent.lastRequestId;
+    }
+
+    const requestId: RequestId = createId();
+    const now = Date.now();
+
+    /**
+     * 在真正发送之前，先把用户消息写入 Store
+     * 乐观更新
+     */
+    store.upsertMessage({
+      id: intent.messageId,
+      chatId,
+      runId: null,
+      role: 'user',
+      status: 'pending',
+      content: {
+        type: 'text',
+        format: 'plain_text',
+        content: intent.prompt,
+      },
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+      error: null,
+    });
+
+    /**
+     * 发送前先把 Intent 改为 sending
+     * 
+     * 这一步需要发生在 await 以前
+     * 防止页面重复调用时再发送相同 Prompt
+     */
+    store.updateInitialPromptIntent(chatId, {
+      status: 'sending',
+      lastRequestId: requestId,
+      error: null,
+    });
+
+    /**
+     * 构造“创建新会话并提交第一条消息”的 Command
+     * 
+     * ClientCommand 是联合类型
+     */
+    const command: ClientCommand = {
+      type: 'chat.start',
+
+      /**
+       * 标识当前这一次发送操作
+       * 服务端 ACK 会携带相同的 request_id
+       */
+      request_id: requestId,
+      
+      /**
+       * 首次发送和重试必须复用相同的幂等键
+       */
+      idempotency_key: intent.idempotencyKey,
+
+      chat_id: chatId,
+
+      /**
+       * chat.start 发生时还没有 Agent Run
+       */
+      run_id: null,
+
+      timestamp: now,
+
+      payload: {
+        /**
+         * 服务端必须采用前端提前生成的 MessageId
+         * 才能和 Store 中的乐观消息对应起来
+         */
+        message_id: intent.messageId,
+
+        title: intent.title,
+
+        content: {
+          type: 'text',
+          format: 'plain_text',
+          content: intent.prompt,
+        }
+      }
+    };
+
+    try {
+      /**
+       * dispatchCommand() 负责：
+       * - 确保 WebSocket 已连接
+       * - 序列化并发送 Command
+       * - 根据 RequestId 等待 ACK
+       */
+      await this.dispatchCommand(command, {
+        messageId: intent.messageId,
+        initialPromptChatId: chatId,
+      });
+    } catch (error) {
+      const imError = normalizeError(error, {
+        code: 'IM_INITIAL_PROMPT_SEND_FAILED',
+        message: '新会话首条消息发送失败',
+        retryable: true,
+      });
+
+      /**
+       * 发送阶段直接失败时恢复为 pending
+       * 允许页面后续重新调用 sendInitialPrompt()
+       */
+      this.dependencies.store
+        .getState()
+        .updateInitialPromptIntent(chatId, {
+          status: 'pending',
+          lastRequestId: null,
+          error: imError,
+        })
+
+      this.markMessageFailed(
+        intent.messageId,
+        imError,
+      )
+
+      throw error;
+    }
+
+    return requestId;
   }
 
   /**
-   * 开发期占位：保留稳定的页面调用接口。
-   * 后续实现 Command 发送模块时替换这里。
+   * 向一个已经存在的 Chat 发送用户信息
    */
-  async submitMessage(_input: SubmitMessageInput): Promise<RequestId> {
-    throw new Error('IM 消息发送模块尚未实现');
+  async submitMessage(
+    input: SubmitMessageInput,
+  ): Promise<RequestId> {
+    const content = input.content.trim();
+
+    if (!content) {
+      throw new Error('消息内容不能为空');
+    }
+
+    const store = this.dependencies.store.getState();
+    const chat = store.chatsById[input.chatId];
+
+    /**
+     * submitMessage 只能向已有会话发送消息
+     */
+    if (!chat) {
+      throw new Error('需要发送消息的 chat 不存在');
+    }
+
+    /**
+     * 每条消息都需要新的：
+     * 
+     * messageId: 标识这条聊太消息
+     * requestId: 标识本次发送操作
+     * idempotencyKey: 防止本次操作后被后端重复执行
+     */
+    const messageId: MessageId = createId();
+    const requestId: RequestId = createId();
+    const idempotencyKey: IdempotencyKey = createId();
+    const now = Date.now();
+
+    /**
+     * 先把用户消息写入 Store，进行乐观更新
+     */
+    store.upsertMessage({
+      id: messageId,
+      chatId: input.chatId,
+      runId: null,
+      role: 'user',
+      status: 'pending',
+      content: {
+        type: 'text',
+        format: 'plain_text',
+        content,
+      },
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+      error: null,
+    });
+
+    /**
+     * 同步更新 Chat 的最后活动时间
+     * 
+     * 后续会话列表可以根据 updatedAt 排序
+     */
+    store.upsertChat({
+      ...chat,
+      updatedAt: now,
+    });
+
+    /**
+     * 构造向已有会话发送消息的 Command
+     */
+    const command: ClientCommand = {
+      type: 'chat.submit',
+      request_id: requestId,
+      idempotency_key: idempotencyKey,
+      chat_id: input.chatId,
+      run_id: null,
+      timestamp: now,
+      payload: {
+        message_id: messageId,
+        content: {
+          type: 'text',
+          format: 'plain_text',
+          content,
+        }
+      }
+    }
+
+    try {
+      await this.dispatchCommand(command, {
+        /**
+         * 保存 MessageId
+         * 
+         * 后续 ACK 超时或服务端拒绝时
+         * 可以找到并修改这条乐观消息
+         */
+        messageId,
+        initialPromptChatId: null,
+      });
+    } catch (error) {
+      /**
+       * 这里表示 Command 还没有成功交给 WebSocket
+       * 例如连接建立失败或 Transport 不可用
+       */
+      this.markMessageFailed(
+        messageId,
+        normalizeError(error, {
+          code: 'IM_MESSAGE_SEND_FAILED',
+          message: '消息发送失败',
+          retryable: true,
+        })
+      );
+
+      throw error;
+    }
+
+    return requestId;
   }
 
   /**
-   * 开发期占位：保留稳定的页面调用接口。
-   * 后续实现 Run 控制模块时替换这里。
+   * 请求服务端取消一个正在执行的 Agent Run
+   * 
+   * 这里发送的是取消请求
+   * Run 最终是否取消成功仍以服务端事件为准
    */
-  async cancelRun(_input: CancelRunInput): Promise<RequestId> {
-    throw new Error('IM Run 取消模块尚未实现');
+  async cancelRun(
+    input: CancelRunInput,
+  ): Promise<RequestId> {
+    const store = this.dependencies.store.getState();
+    const run = store.runsById[input.runId];
+
+    /**
+     * run.cancel 必须指向一个已经存在的 Run
+     * 
+     * 如果 Store 中不存在，通常说明：
+     * - Run 事件还没有达到
+     * - 页面传错了 RunId
+     * - Run 数据还没有加载
+     */
+    if (!run) {
+      throw new Error('需要取消的 Agent Run 不存在');
+    }
+
+    /**
+     * 防止页面将其他 Chat 的 RunId 错误地传进来
+     */
+    if (run.chatId !== input.chatId) {
+      throw new Error('Agent Run 不属于当前 Chat');
+    }
+
+    /**
+     * 已经进入终态的 Run 不需要再次取消
+     */
+    if (
+      run.status === 'completed' ||
+      run.status === 'failed' ||
+      run.status === 'cancelled'
+    ) {
+      throw new Error('Agent Run 已经结束，无法再次取消');
+    }
+
+    const requestId: RequestId = createId();
+    const idempotencyKey: IdempotencyKey = createId();
+    const now = Date.now();
+
+    /**
+     * 构造取消 Run 的 Command
+     * 
+     * runId 标识需要取消哪个 Agent 任务
+     * requestId 标识这是哪一次取消操作
+     */
+    const command: ClientCommand = {
+      type: 'run.cancel',
+      request_id: requestId,
+      idempotency_key: idempotencyKey,
+      chat_id: input.chatId,
+      run_id: input.runId,
+      timestamp: now,
+      payload: {
+        reason: 'user_requested',
+      }
+    }
+
+    /**
+     * 取消操作不直接对应某条用户消息
+     * 也不属于首次 Prompt 意图
+     * 所以两个本地关联字段都是 null
+     */
+    await this.dispatchCommand(command, {
+      messageId: null,
+      initialPromptChatId: null,
+    });
+
+    return requestId;
   }
 }

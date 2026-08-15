@@ -38,16 +38,6 @@ tmp/
 *.out
 coverage.out
 
-# Python environments and caches (for the optional Agent service)
-.venv/
-venv/
-__pycache__/
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-*.py[cod]
-
 # Logs and operating-system files
 *.log
 npm-debug.log*
