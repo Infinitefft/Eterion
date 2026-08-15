@@ -225,6 +225,14 @@ const DEFAULT_OPTIONS: Required<IMServiceOptions> = {
 const MAX_REMEMBERED_EVENT_IDS = 2_048;
 
 /**
+ * ACK 超时后继续保留 Command 的时间。
+ *
+ * 这段时间内仍可处理迟到的 accepted/rejected；到期后必须清理，
+ * 避免全局 IMService 长时间运行时 pendingCommand 无限增长。
+ */
+const LATE_ACK_RETENTION_MS = 5 * 60_000;
+
+/**
  * 生成前端业务 ID
  * 
  * ChatId、MessageId、RequestID、IdempotencyKey
@@ -286,9 +294,11 @@ function isSupportedServerEventType(type: string): type is ServerEvent['type'] {
     case 'run.status':
     case 'step.started':
     case 'step.progress':
+    case 'step.completed':
     case 'step.failed':
     case 'message.started':
     case 'message.delta':
+    case 'message.completed':
     case 'pong':
     case 'error':
       return true;
@@ -543,19 +553,24 @@ export class IMService implements IMServicePublicApi {
    * 就会让页面不断进入错误状态。
    */
   private handleServerEvent(event: ServerEvent): void {
-    if (this.processedEventIds.has(event.event_id)) {
+    /** 第一层：通过 EventId 过滤完全重复的事件。 */
+    if (!this.rememberEvent(event.event_id)) {
       return;
     }
 
-    this.processedEventIds.add(event.event_id);
-    this.processedEventOrder.push(event.event_id);
+    /**
+     * 第二层：保存全局事件流 Cursor。
+     * 断线重连后可以从这个位置继续请求事件。
+     */
+    if (event.cursor !== null) {
+      this.dependencies.store.getState().updateSessionState({
+        cursor: event.cursor,
+      });
+    }
 
-    if (this.processedEventOrder.length > MAX_REMEMBERED_EVENT_IDS) {
-      const oldestEventId = this.processedEventOrder.shift();
-
-      if (oldestEventId) {
-        this.processedEventIds.delete(oldestEventId);
-      }
+    /** 第三层：过滤同一个 Run 中重复或更旧的事件。 */
+    if (!this.acceptRunSequence(event.run_id, event.seq)) {
+      return;
     }
 
     /**
@@ -563,6 +578,10 @@ export class IMService implements IMServicePublicApi {
      * 其他事件会在后面的模块中逐步添加。
      */
     switch (event.type) {
+      case 'connection.ready':
+        this.handleConnectionReady(event);
+        return;
+
       case 'command.accepted':
         this.handleCommandAccepted(event);
         return;
@@ -571,10 +590,103 @@ export class IMService implements IMServicePublicApi {
         this.handleCommandRejected(event);
         return;
 
+      case 'run.created':
+      case 'run.status':
+        this.handleRunSnapshot(event);
+        return;
+
+      case 'step.started':
+      case 'step.progress':
+      case 'step.completed':
+      case 'step.failed':
+        this.handleStepSnapshot(event);
+        return;
+
+      case 'message.started':
+      case 'message.completed':
+        this.handleMessageSnapshot(event);
+        return;
+
+      case 'message.delta':
+        this.handleMessageDelta(event);
+        return;
+
+      case 'pong':
+        this.handlePong(event);
+        return;
+
+      case 'error':
+        this.reportError(event.payload.error);
+        return;
+
       default:
         /** 尚未接入的服务端事件暂时安全忽略。 */
         return;
     }
+  }
+
+  /**
+   * 记录一条服务端 EventId。
+   *
+   * @returns true 表示第一次收到；false 表示重复事件。
+   */
+  private rememberEvent(eventId: EventId): boolean {
+    if (this.processedEventIds.has(eventId)) {
+      return false;
+    }
+
+    this.processedEventIds.add(eventId);
+    this.processedEventOrder.push(eventId);
+
+    /** 限制去重记录数量，避免全局连接长期运行时无限占用内存。 */
+    if (this.processedEventOrder.length > MAX_REMEMBERED_EVENT_IDS) {
+      const oldestEventId = this.processedEventOrder.shift();
+
+      if (oldestEventId) {
+        this.processedEventIds.delete(oldestEventId);
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * 检查同一个 Agent Run 中的事件顺序。
+   *
+   * seq 小于等于 lastSeq 表示重复或旧事件；seq 跳号则说明中间
+   * 事件可能丢失，需要把 Run 标记为 desynced，供后续快照校准。
+   */
+  private acceptRunSequence(
+    runId: RunId | null,
+    seq: number | null,
+  ): boolean {
+    /** ACK、connection.ready、pong 等事件不属于某个 Run。 */
+    if (runId === null || seq === null) {
+      return true;
+    }
+
+    const store = this.dependencies.store.getState();
+    const run = store.runsById[runId];
+
+    /** run.created 到达前本地没有 Run，由后续事件处理器负责创建。 */
+    if (!run) {
+      return true;
+    }
+
+    if (seq <= run.lastSeq) {
+      return false;
+    }
+
+    const hasSequenceGap = seq > run.lastSeq + 1;
+
+    store.upsertRun({
+      ...run,
+      lastSeq: seq,
+      desynced: run.desynced || hasSequenceGap,
+      updatedAt: Date.now(),
+    });
+
+    return true;
   }
 
   /**
@@ -763,6 +875,144 @@ export class IMService implements IMServicePublicApi {
       completedAt: now,
       error,
     })
+  }
+
+  /**
+   * 处理服务端的连接就绪事件
+   * 
+   * WebSocket onopen 只表示物理连接已经打开
+   * connection.ready 表示服务端 IM 协议已经准备完成
+   */
+  private handleConnectionReady(
+    event: Extract<
+      ServerEvent,
+      { type: 'connection.ready' }
+    >,
+  ): void {
+    this.dependencies.store
+      .getState()
+      .updateSessionState({
+        /**
+         * 服务端为当前这次物理连接分配的ID
+         * 
+         * WebSocket 重连后通常会得到新的 connectionId
+         */
+        connectionId: event.payload.connection_id,
+        lastPongAt: Date.now(),
+      });
+
+    /**
+     * 心跳间隔由服务端决定
+     * 
+     * 例如服务端要求每 15 秒发送一次 ping
+     * 前端就按照 15 秒创建定时器
+     */
+    this.startHeartbeat(event.payload.heartbeat_interval_ms);
+  }
+
+  /**
+   * 启动应用层 ping/pong 心跳
+   * 
+   * 心跳属于整个全局 WebSocket 连接
+   * 不属于某个 Chat 或某个 Run
+   */
+  private startHeartbeat(intervalMs: number): void {
+    /**
+     * 重连后可能再次收到 connection.ready
+     * 
+     * 创建定时器前必须先清除旧定时器
+     * 避免同时存在多个 Ping 定时器
+     */
+    this.clearHeartbeat();
+
+    if (
+      !Number.isFinite(intervalMs) ||
+      intervalMs <= 0
+    ) {
+      return;
+    }
+
+    /**
+     * 最小间隔限制为 1s
+     * 防止错误的服务端配置导致高频循环发送
+     */
+    const safeIntervalMs = Math.max(intervalMs, 1000);
+
+    this.heartbeatTimer = setInterval(() => {
+      /**
+       * 定时器触发需要重新检查连接状态
+       * 
+       * WebSocket 断开以后不能继续发送 Ping
+       */
+      if (
+        this.dependencies.transport
+          .getState()
+          .status !== 'connected'
+      ) {
+        return;
+      }
+      
+      const now = Date.now();
+
+      /**
+       * Ping 也是一条客户端 Command
+       * 但它不属于 Chat、Run，也不需要幂等键
+       */
+      const command: ClientCommand = {
+        type: 'ping',
+        request_id: createId(),
+        idempotency_key: null,
+        chat_id: null,
+        run_id: null,
+        timestamp: now,
+        payload: {
+          client_time: now,
+        },
+      };
+      
+      try {
+        /**
+         * Ping 不进入 pendingCommand ACK 队列
+         * 
+         * 普通业务 Command 等待
+         * command.accepted / command.rejected
+         * 
+         * Ping 单独等待 pong
+         */
+        this.dependencies.transport.send(
+          JSON.stringify(command),
+        );
+      } catch (error) {
+        this.reportError(
+          normalizeError(error, {
+            code: 'IM_HEARTBEAT_SEND_FAILED',
+            message: 'IM 心跳发送失败。',
+            retryable: true,
+          }),
+        )
+      }
+    }, safeIntervalMs); 
+  }
+
+  /**
+   * 处理服务端返回的 Pong
+   * 
+   * lastPongAt 可以用于：
+   * - 显示连接后活跃状态
+   * - 判断连接是否可能假死
+   * - 后续实现心跳超时重连
+   */
+  private handlePong(
+    _event: Extract<
+      ServerEvent,
+      { type: 'pong' }
+    >,
+  ): void {
+    this.dependencies.store
+      .getState()
+      .updateSessionState({
+        lastPongAt: Date.now(),
+      })
   }
 
   /**
@@ -1023,6 +1273,241 @@ export class IMService implements IMServicePublicApi {
         },
       );
     }
+
+    /**
+     * 超时后短暂保留关联关系以接收迟到 ACK，但不能永久保留。
+     * takePendingCommand() 收到迟到 ACK 时会清除这个回收定时器。
+     */
+    pending.timeoutId = setTimeout(() => {
+      if (this.pendingCommand.get(requestId) === pending) {
+        this.pendingCommand.delete(requestId);
+      }
+    }, LATE_ACK_RETENTION_MS);
+  }
+
+  /**
+   * 处理服务端下发的完整 Message 快照
+   * 
+   * message.started:
+   * 创建一条准备开始流式输出的 Assistant 消息
+   * 
+   * message.completed:
+   * 使用服务端最终快照完成这条消息
+   */
+  private handleMessageSnapshot(
+    event: Extract<
+      ServerEvent,
+      {
+        type:
+          | 'message.started'
+          | 'message.completed';
+      }
+    >,
+  ): void {
+    const message = event.payload.message;
+
+    /**
+     * 网络协议使用 snake_case
+     * Store 内部领域对象使用 camelCase
+     * 
+     * 这里就是协议数据与前端数据之间的转换边界
+     */
+    this.dependencies.store
+      .getState()
+      .upsertMessage({
+        id: message.message_id,
+        chatId: message.chat_id,
+        runId: message.run_id,
+        role: message.role,
+        status: message.status,
+
+        /**
+         * 创建新的 content 对象
+         * 避免 Store 和网络事件共享同一个对象引用
+         */
+        content: {
+          ...message.content,
+        },
+
+        createdAt: message.created_at,
+        updatedAt: message.updated_at,
+        completedAt: message.completed_at,
+        error: message.error
+      });
+  }
+
+  /**
+   * 处理 Assitant 消息的流式文本增量
+   * 
+   */
+  private handleMessageDelta(
+    event: Extract<
+      ServerEvent,
+      { type: 'message.delta' }
+    >,
+  ): void {
+    this.dependencies.store
+      .getState()
+      .appendMessageDelta({
+        /**
+         * 找到需要追加文本的 Assistant Message
+         */
+        messageId: event.message_id,
+        delta: event.payload.delta,
+        updatedAt: event.timestamp,
+      });
+  }
+
+  /**
+   * 处理服务端下发的 Agent Run 快照
+   * 
+   * run.created:
+   * 服务端创建了一次新的 Agent 执行
+   * 
+   * run.status:
+   * Agent 执行状态发生变化
+   */
+  private handleRunSnapshot(
+    event: Extract<
+      ServerEvent,
+      {
+        type:
+          | 'run.created'
+          | 'run.status';
+      }
+    >
+  ): void {
+    const store = this.dependencies.store.getState();
+    const wireRun = event.payload.run;
+
+    /**
+     * acceptRunSequence() 可能已经提前更新过当前 Run 的
+     * lastSeq 和 desynced，因此需要读取最新状态
+     */
+    const currentRun = 
+      store.runsById[wireRun.run_id];
+    
+    /**
+     * 将服务端的 snake_case 网络对象
+     * 转化成 Store 使用的 camelCase 领域对象
+     */
+    store.upsertRun({
+      id: wireRun.run_id,
+      chatId: wireRun.chat_id,
+
+      /**
+       * 触发本次 Run 的用户消息
+       */
+      inputMessageId:
+        wireRun.input_message_id,
+      
+      outputMessageId:
+        wireRun.output_message_id,
+      
+      status: wireRun.status,
+
+      /** 复制数组，避免 Store 与网络事件共享可变引用。 */
+      stepIds: [...wireRun.step_ids],
+
+      /** Run 的事件进度只能向前推进，不能被旧快照覆盖。 */
+      lastSeq: Math.max(
+        wireRun.last_seq,
+        event.seq,
+        currentRun?.lastSeq ?? 0,
+      ),
+
+      /** 本地一旦发现序号缺口，普通状态事件不能直接清除它。 */
+      desynced:
+        wireRun.desynced ||
+        currentRun?.desynced === true,
+
+      createdAt: wireRun.created_at,
+      startedAt: wireRun.started_at,
+      updatedAt: wireRun.updated_at,
+      completedAt: wireRun.completed_at,
+      error: wireRun.error,
+    })
+  }
+
+  /**
+   * 处理服务端下发的 Agent Step 快照。
+   *
+   * started、progress、completed、failed 都携带当前 Step 的完整状态。
+   */
+  private handleStepSnapshot(
+    event: Extract<
+      ServerEvent,
+      {
+        type:
+          | 'step.started'
+          | 'step.progress'
+          | 'step.completed'
+          | 'step.failed';
+      }
+    >,
+  ): void {
+    const wireStep = event.payload.step;
+    const store = this.dependencies.store.getState();
+
+    /** 所有 Step 共有的字段，具体 kind 在下面的分支中补充。 */
+    const base = {
+      id: wireStep.step_id,
+      chatId: wireStep.chat_id,
+      runId: wireStep.run_id,
+      title: wireStep.title,
+      status: wireStep.status,
+      sequence: wireStep.sequence,
+      parentStepId: wireStep.parent_step_id,
+      startedAt: wireStep.started_at,
+      completedAt: wireStep.completed_at,
+      error: wireStep.error,
+    };
+
+    /** kind 是可辨识字段，TypeScript 会据此推断每类 Step 的专属字段。 */
+    switch (wireStep.kind) {
+      case 'reasoning':
+        store.upsertStep({
+          ...base,
+          kind: 'reasoning',
+          /** 只保存允许公开展示的摘要，不承载模型隐藏思维链。 */
+          summary: wireStep.summary,
+        });
+        return;
+
+      case 'tool':
+        store.upsertStep({
+          ...base,
+          kind: 'tool',
+          callId: wireStep.call_id,
+          tool: { ...wireStep.tool },
+          /** 输入输出暂用 unknown，当前 UI 可以只展示工具名称。 */
+          input: wireStep.input,
+          output: wireStep.output,
+        });
+        return;
+
+      case 'skill':
+        store.upsertStep({
+          ...base,
+          kind: 'skill',
+          callId: wireStep.call_id,
+          skill: { ...wireStep.skill },
+          input: wireStep.input,
+          output: wireStep.output,
+        });
+        return;
+
+      case 'retrieval':
+        store.upsertStep({
+          ...base,
+          kind: 'retrieval',
+          retrievalId: wireStep.retrieval_id,
+          query: wireStep.query,
+          /** RAG 文档结构暂未确定，复制 unknown[] 作为占位数据。 */
+          documents: [...wireStep.documents],
+        });
+        return;
+    }
   }
 
   /**
@@ -1066,6 +1551,7 @@ export class IMService implements IMServicePublicApi {
 
     const requestId: RequestId = createId();
     const now = Date.now();
+    const existingMessage = store.messagesById[intent.messageId];
 
     /**
      * 在真正发送之前，先把用户消息写入 Store
@@ -1082,7 +1568,8 @@ export class IMService implements IMServicePublicApi {
         format: 'plain_text',
         content: intent.prompt,
       },
-      createdAt: now,
+      /** 重试首条 Prompt 时保留这条消息最初的创建时间。 */
+      createdAt: existingMessage?.createdAt ?? now,
       updatedAt: now,
       completedAt: null,
       error: null,

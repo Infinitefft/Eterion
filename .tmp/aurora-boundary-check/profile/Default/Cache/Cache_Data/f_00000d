@@ -1,0 +1,377 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/pages/Chat/Chat.tsx");const lazy = __vite__cjsImport1_react["lazy"]; const Suspense = __vite__cjsImport1_react["Suspense"]; const useState = __vite__cjsImport1_react["useState"];const _jsxDEV = __vite__cjsImport4_react_jsxDevRuntime["jsxDEV"]; const _Fragment = __vite__cjsImport4_react_jsxDevRuntime["Fragment"];import { ArrowUp, Bot, Check, ChevronDown, Paperclip } from "/node_modules/.vite/deps/lucide-react.js?v=b7b515bd";
+import __vite__cjsImport1_react from "/node_modules/.vite/deps/react.js?v=6b089dde";
+import { useParams } from "/node_modules/.vite/deps/react-router-dom.js?v=c91c229a";
+import "/src/pages/Chat/Chat.less?t=1786802771226";
+var _jsxFileName = "D:/Eterion/apps/web/src/pages/Chat/Chat.tsx";
+import __vite__cjsImport4_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=6b089dde";
+var _s = $RefreshSig$(), _s2 = $RefreshSig$();
+const WakeField = lazy(_c = () => import("/src/pages/Chat/WakeField.tsx?t=1786802773097"));
+_c2 = WakeField;
+const welcomeMessages = [
+	"今天，想推进什么？",
+	"从一个想法开始吧。",
+	"有什么想一起完成的？",
+	"有个模糊的想法也没关系。",
+	"让想法在这里慢慢成形。",
+	"下一步，想从哪里开始？",
+	"接下来想聊点什么？"
+];
+const conversationTitles = {
+	"agent-runtime": "Agent 运行时架构",
+	"ui-layout": "工作台界面布局",
+	"rag-design": "知识库检索设计",
+	"realtime-events": "实时事件协议梳理"
+};
+const composerTextareaMinHeight = 58;
+const composerTextareaMaxHeight = 154;
+function resizeComposerTextarea(event) {
+	const textarea = event.currentTarget;
+	textarea.style.height = "auto";
+	const nextHeight = Math.min(Math.max(textarea.scrollHeight, composerTextareaMinHeight), composerTextareaMaxHeight);
+	textarea.style.height = `${nextHeight}px`;
+	textarea.style.overflowY = textarea.scrollHeight > composerTextareaMaxHeight ? "auto" : "hidden";
+}
+export function Chat() {
+	_s();
+	const { conversationId } = useParams();
+	const title = conversationId ? conversationTitles[conversationId] ?? "会话详情" : "新会话";
+	return /* @__PURE__ */ _jsxDEV("section", {
+		className: `chat-page ${conversationId ? "chat-page-thread" : "chat-page-new"}`,
+		children: conversationId ? /* @__PURE__ */ _jsxDEV(_Fragment, { children: [/* @__PURE__ */ _jsxDEV(ConversationDetail, { title }, void 0, false, {
+			fileName: _jsxFileName,
+			lineNumber: 50,
+			columnNumber: 11
+		}, this), /* @__PURE__ */ _jsxDEV(Composer, {}, void 0, false, {
+			fileName: _jsxFileName,
+			lineNumber: 51,
+			columnNumber: 11
+		}, this)] }, void 0, true, {
+			fileName: _jsxFileName,
+			lineNumber: 49,
+			columnNumber: 9
+		}, this) : /* @__PURE__ */ _jsxDEV(NewConversation, {}, void 0, false, {
+			fileName: _jsxFileName,
+			lineNumber: 54,
+			columnNumber: 9
+		}, this)
+	}, void 0, false, {
+		fileName: _jsxFileName,
+		lineNumber: 47,
+		columnNumber: 5
+	}, this);
+}
+_s(Chat, "ORtRfAbrkOU3e6GI/41ttPLIWds=", false, function() {
+	return [useParams];
+});
+_c3 = Chat;
+function NewConversation() {
+	_s2();
+	const [welcomeMessage] = useState(() => welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)]);
+	return /* @__PURE__ */ _jsxDEV("div", {
+		className: "new-conversation",
+		children: /* @__PURE__ */ _jsxDEV("div", {
+			className: "chat-interaction-shell",
+			children: [
+				/* @__PURE__ */ _jsxDEV(Suspense, {
+					fallback: /* @__PURE__ */ _jsxDEV("div", {
+						className: "wake-field-loading",
+						"aria-hidden": "true"
+					}, void 0, false, {
+						fileName: _jsxFileName,
+						lineNumber: 68,
+						columnNumber: 29
+					}, this),
+					children: /* @__PURE__ */ _jsxDEV(WakeField, {}, void 0, false, {
+						fileName: _jsxFileName,
+						lineNumber: 69,
+						columnNumber: 11
+					}, this)
+				}, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 68,
+					columnNumber: 9
+				}, this),
+				/* @__PURE__ */ _jsxDEV("h1", {
+					className: "chat-welcome",
+					children: welcomeMessage
+				}, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 71,
+					columnNumber: 9
+				}, this),
+				/* @__PURE__ */ _jsxDEV(Composer, {}, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 72,
+					columnNumber: 9
+				}, this)
+			]
+		}, void 0, true, {
+			fileName: _jsxFileName,
+			lineNumber: 67,
+			columnNumber: 7
+		}, this)
+	}, void 0, false, {
+		fileName: _jsxFileName,
+		lineNumber: 66,
+		columnNumber: 5
+	}, this);
+}
+_s2(NewConversation, "XsU80LXspr/+X/G1BROSunehauE=");
+_c4 = NewConversation;
+function ConversationDetail({ title }) {
+	return /* @__PURE__ */ _jsxDEV("div", {
+		className: "conversation-thread",
+		children: [
+			/* @__PURE__ */ _jsxDEV("div", {
+				className: "thread-heading",
+				children: [/* @__PURE__ */ _jsxDEV("p", { children: "会话详情" }, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 82,
+					columnNumber: 9
+				}, this), /* @__PURE__ */ _jsxDEV("h1", { children: title }, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 83,
+					columnNumber: 9
+				}, this)]
+			}, void 0, true, {
+				fileName: _jsxFileName,
+				lineNumber: 81,
+				columnNumber: 7
+			}, this),
+			/* @__PURE__ */ _jsxDEV("article", {
+				className: "message message-user",
+				children: [/* @__PURE__ */ _jsxDEV("div", {
+					className: "message-avatar",
+					children: "你"
+				}, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 86,
+					columnNumber: 9
+				}, this), /* @__PURE__ */ _jsxDEV("div", { children: [/* @__PURE__ */ _jsxDEV("p", {
+					className: "message-author",
+					children: "你"
+				}, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 88,
+					columnNumber: 11
+				}, this), /* @__PURE__ */ _jsxDEV("p", { children: "帮我整理这一部分的设计目标，并给出下一步可以直接执行的方案。" }, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 89,
+					columnNumber: 11
+				}, this)] }, void 0, true, {
+					fileName: _jsxFileName,
+					lineNumber: 87,
+					columnNumber: 9
+				}, this)]
+			}, void 0, true, {
+				fileName: _jsxFileName,
+				lineNumber: 85,
+				columnNumber: 7
+			}, this),
+			/* @__PURE__ */ _jsxDEV("article", {
+				className: "message message-agent",
+				children: [/* @__PURE__ */ _jsxDEV("div", {
+					className: "message-avatar",
+					children: /* @__PURE__ */ _jsxDEV(Bot, { size: 17 }, void 0, false, {
+						fileName: _jsxFileName,
+						lineNumber: 94,
+						columnNumber: 11
+					}, this)
+				}, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 93,
+					columnNumber: 9
+				}, this), /* @__PURE__ */ _jsxDEV("div", { children: [
+					/* @__PURE__ */ _jsxDEV("p", {
+						className: "message-author",
+						children: "Eterion"
+					}, void 0, false, {
+						fileName: _jsxFileName,
+						lineNumber: 97,
+						columnNumber: 11
+					}, this),
+					/* @__PURE__ */ _jsxDEV("p", { children: "已经梳理完成。当前重点是先稳定页面结构，再逐步接入数据与 Agent 状态，让每一步都有清晰反馈。" }, void 0, false, {
+						fileName: _jsxFileName,
+						lineNumber: 98,
+						columnNumber: 11
+					}, this),
+					/* @__PURE__ */ _jsxDEV("ul", { children: [
+						/* @__PURE__ */ _jsxDEV("li", { children: [/* @__PURE__ */ _jsxDEV(Check, { size: 15 }, void 0, false, {
+							fileName: _jsxFileName,
+							lineNumber: 104,
+							columnNumber: 15
+						}, this), " 完成基础布局与导航层级"] }, void 0, true, {
+							fileName: _jsxFileName,
+							lineNumber: 103,
+							columnNumber: 13
+						}, this),
+						/* @__PURE__ */ _jsxDEV("li", { children: [/* @__PURE__ */ _jsxDEV(Check, { size: 15 }, void 0, false, {
+							fileName: _jsxFileName,
+							lineNumber: 107,
+							columnNumber: 15
+						}, this), " 保留会话、知识库和任务状态的扩展位置"] }, void 0, true, {
+							fileName: _jsxFileName,
+							lineNumber: 106,
+							columnNumber: 13
+						}, this),
+						/* @__PURE__ */ _jsxDEV("li", { children: "下一步可以接入真实会话列表与消息流。" }, void 0, false, {
+							fileName: _jsxFileName,
+							lineNumber: 109,
+							columnNumber: 13
+						}, this)
+					] }, void 0, true, {
+						fileName: _jsxFileName,
+						lineNumber: 102,
+						columnNumber: 11
+					}, this)
+				] }, void 0, true, {
+					fileName: _jsxFileName,
+					lineNumber: 96,
+					columnNumber: 9
+				}, this)]
+			}, void 0, true, {
+				fileName: _jsxFileName,
+				lineNumber: 92,
+				columnNumber: 7
+			}, this)
+		]
+	}, void 0, true, {
+		fileName: _jsxFileName,
+		lineNumber: 80,
+		columnNumber: 5
+	}, this);
+}
+_c5 = ConversationDetail;
+function Composer() {
+	return /* @__PURE__ */ _jsxDEV("div", {
+		className: "composer-dock",
+		children: /* @__PURE__ */ _jsxDEV("form", {
+			className: "composer",
+			onSubmit: (event) => event.preventDefault(),
+			children: [
+				/* @__PURE__ */ _jsxDEV("label", {
+					className: "sr-only",
+					htmlFor: "chat-prompt",
+					children: "输入消息"
+				}, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 121,
+					columnNumber: 9
+				}, this),
+				/* @__PURE__ */ _jsxDEV("textarea", {
+					id: "chat-prompt",
+					name: "prompt",
+					rows: 2,
+					placeholder: "给 Eterion 发送消息",
+					onInput: resizeComposerTextarea
+				}, void 0, false, {
+					fileName: _jsxFileName,
+					lineNumber: 124,
+					columnNumber: 9
+				}, this),
+				/* @__PURE__ */ _jsxDEV("div", {
+					className: "composer-toolbar",
+					children: [/* @__PURE__ */ _jsxDEV("div", {
+						className: "composer-tools",
+						children: /* @__PURE__ */ _jsxDEV("button", {
+							type: "button",
+							"aria-label": "添加附件",
+							children: /* @__PURE__ */ _jsxDEV(Paperclip, { size: 18 }, void 0, false, {
+								fileName: _jsxFileName,
+								lineNumber: 134,
+								columnNumber: 15
+							}, this)
+						}, void 0, false, {
+							fileName: _jsxFileName,
+							lineNumber: 133,
+							columnNumber: 13
+						}, this)
+					}, void 0, false, {
+						fileName: _jsxFileName,
+						lineNumber: 132,
+						columnNumber: 11
+					}, this), /* @__PURE__ */ _jsxDEV("div", {
+						className: "composer-actions",
+						children: [/* @__PURE__ */ _jsxDEV("button", {
+							className: "model-button",
+							type: "button",
+							children: ["Eterion Agent", /* @__PURE__ */ _jsxDEV(ChevronDown, { size: 14 }, void 0, false, {
+								fileName: _jsxFileName,
+								lineNumber: 140,
+								columnNumber: 15
+							}, this)]
+						}, void 0, true, {
+							fileName: _jsxFileName,
+							lineNumber: 138,
+							columnNumber: 13
+						}, this), /* @__PURE__ */ _jsxDEV("button", {
+							className: "send-button",
+							type: "submit",
+							"aria-label": "发送消息",
+							children: /* @__PURE__ */ _jsxDEV(ArrowUp, {
+								size: 19,
+								strokeWidth: 2.3
+							}, void 0, false, {
+								fileName: _jsxFileName,
+								lineNumber: 143,
+								columnNumber: 15
+							}, this)
+						}, void 0, false, {
+							fileName: _jsxFileName,
+							lineNumber: 142,
+							columnNumber: 13
+						}, this)]
+					}, void 0, true, {
+						fileName: _jsxFileName,
+						lineNumber: 137,
+						columnNumber: 11
+					}, this)]
+				}, void 0, true, {
+					fileName: _jsxFileName,
+					lineNumber: 131,
+					columnNumber: 9
+				}, this)
+			]
+		}, void 0, true, {
+			fileName: _jsxFileName,
+			lineNumber: 120,
+			columnNumber: 7
+		}, this)
+	}, void 0, false, {
+		fileName: _jsxFileName,
+		lineNumber: 119,
+		columnNumber: 5
+	}, this);
+}
+_c6 = Composer;
+var _c, _c2, _c3, _c4, _c5, _c6;
+$RefreshReg$(_c, "WakeField$lazy");
+$RefreshReg$(_c2, "WakeField");
+$RefreshReg$(_c3, "Chat");
+$RefreshReg$(_c4, "NewConversation");
+$RefreshReg$(_c5, "ConversationDetail");
+$RefreshReg$(_c6, "Composer");
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
+import * as __vite_react_currentExports from "/src/pages/Chat/Chat.tsx?t=1786802773097";
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+
+  const currentExports = __vite_react_currentExports;
+  queueMicrotask(() => {
+    RefreshRuntime.registerExportsForReactRefresh("D:/Eterion/apps/web/src/pages/Chat/Chat.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("D:/Eterion/apps/web/src/pages/Chat/Chat.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+function $RefreshReg$(type, id) { return RefreshRuntime.register(type, "D:/Eterion/apps/web/src/pages/Chat/Chat.tsx" + ' ' + id); }
+function $RefreshSig$() { return RefreshRuntime.createSignatureFunctionForTransform(); }
+
+//# sourceMappingURL=data:application/json;base64,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OztnQkFBQyxxQkFDakI7Ozs7O01BQ0osd0JBQUMsTUFBRCxZQUFJLHFCQUFzQjs7Ozs7S0FDeEI7Ozs7O0lBQ0Q7Ozs7WUFDRTs7Ozs7O0VBQ047Ozs7OztBQUVUOztBQUVBLFNBQVMsV0FBVztDQUNsQixPQUNFLHdCQUFDLE9BQUQ7RUFBSyxXQUFVO1lBQ2Isd0JBQUMsUUFBRDtHQUFNLFdBQVU7R0FBVyxXQUFXLFVBQVUsTUFBTSxlQUFlO2FBQXJFO0lBQ0Usd0JBQUMsU0FBRDtLQUFPLFdBQVU7S0FBVSxTQUFRO2VBQWM7SUFFMUM7Ozs7O0lBQ1Asd0JBQUMsWUFBRDtLQUNFLElBQUc7S0FDSCxNQUFLO0tBQ0wsTUFBTTtLQUNOLGFBQVk7S0FDWixTQUFTO0lBQ1Y7Ozs7O0lBQ0Qsd0JBQUMsT0FBRDtLQUFLLFdBQVU7ZUFBZixDQUNFLHdCQUFDLE9BQUQ7TUFBSyxXQUFVO2dCQUNiLHdCQUFDLFVBQUQ7T0FBUSxNQUFLO09BQVMsY0FBVztpQkFDL0Isd0JBQUMsV0FBRCxFQUFXLE1BQU0sR0FBSzs7Ozs7TUFDaEI7Ozs7O0tBQ0w7Ozs7ZUFDTCx3QkFBQyxPQUFEO01BQUssV0FBVTtnQkFBZixDQUNFLHdCQUFDLFVBQUQ7T0FBUSxXQUFVO09BQWUsTUFBSztpQkFBdEMsQ0FBK0MsaUJBRTdDLHdCQUFDLGFBQUQsRUFBYSxNQUFNLEdBQUs7Ozs7ZUFDbEI7Ozs7O2dCQUNSLHdCQUFDLFVBQUQ7T0FBUSxXQUFVO09BQWMsTUFBSztPQUFTLGNBQVc7aUJBQ3ZELHdCQUFDLFNBQUQ7UUFBUyxNQUFNO1FBQUksYUFBYTtPQUFNOzs7OztNQUNoQzs7OztjQUNMOzs7OzthQUNGOzs7Ozs7R0FDRDs7Ozs7O0NBQ0g7Ozs7O0FBRVQiLCJuYW1lcyI6W10sInNvdXJjZXMiOlsiQ2hhdC50c3giXSwidmVyc2lvbiI6Mywic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHsgQXJyb3dVcCwgQm90LCBDaGVjaywgQ2hldnJvbkRvd24sIFBhcGVyY2xpcCB9IGZyb20gJ2x1Y2lkZS1yZWFjdCc7XG5pbXBvcnQgeyBsYXp5LCBTdXNwZW5zZSwgdXNlU3RhdGUsIHR5cGUgRm9ybUV2ZW50IH0gZnJvbSAncmVhY3QnO1xuaW1wb3J0IHsgdXNlUGFyYW1zIH0gZnJvbSAncmVhY3Qtcm91dGVyLWRvbSc7XG5cbmltcG9ydCAnLi9DaGF0Lmxlc3MnO1xuXG5jb25zdCBXYWtlRmllbGQgPSBsYXp5KCgpID0+IGltcG9ydCgnLi9XYWtlRmllbGQnKSk7XG5cbmNvbnN0IHdlbGNvbWVNZXNzYWdlcyA9IFtcbiAgJ+S7iuWkqe+8jOaDs+aOqOi/m+S7gOS5iO+8nycsXG4gICfku47kuIDkuKrmg7Pms5XlvIDlp4vlkKfjgIInLFxuICAn5pyJ5LuA5LmI5oOz5LiA6LW35a6M5oiQ55qE77yfJyxcbiAgJ+acieS4quaooeeziueahOaDs+azleS5n+ayoeWFs+ezu+OAgicsXG4gICforqnmg7Pms5XlnKjov5nph4zmhaLmhaLmiJDlvaLjgIInLFxuICAn5LiL5LiA5q2l77yM5oOz5LuO5ZOq6YeM5byA5aeL77yfJyxcbiAgJ+aOpeS4i+adpeaDs+iBiueCueS7gOS5iO+8nycsXG5dIGFzIGNvbnN0O1xuXG5jb25zdCBjb252ZXJzYXRpb25UaXRsZXM6IFJlY29yZDxzdHJpbmcsIHN0cmluZz4gPSB7XG4gICdhZ2VudC1ydW50aW1lJzogJ0FnZW50IOi/kOihjOaXtuaetuaehCcsXG4gICd1aS1sYXlvdXQnOiAn5bel5L2c5Y+w55WM6Z2i5biD5bGAJyxcbiAgJ3JhZy1kZXNpZ24nOiAn55+l6K+G5bqT5qOA57Si6K6+6K6hJyxcbiAgJ3JlYWx0aW1lLWV2ZW50cyc6ICflrp7ml7bkuovku7bljY/orq7morPnkIYnLFxufTtcblxuY29uc3QgY29tcG9zZXJUZXh0YXJlYU1pbkhlaWdodCA9IDU4O1xuY29uc3QgY29tcG9zZXJUZXh0YXJlYU1heEhlaWdodCA9IDE1NDtcblxuZnVuY3Rpb24gcmVzaXplQ29tcG9zZXJUZXh0YXJlYShldmVudDogRm9ybUV2ZW50PEhUTUxUZXh0QXJlYUVsZW1lbnQ+KSB7XG4gIGNvbnN0IHRleHRhcmVhID0gZXZlbnQuY3VycmVudFRhcmdldDtcbiAgdGV4dGFyZWEuc3R5bGUuaGVpZ2h0ID0gJ2F1dG8nO1xuXG4gIGNvbnN0IG5leHRIZWlnaHQgPSBNYXRoLm1pbihcbiAgICBNYXRoLm1heCh0ZXh0YXJlYS5zY3JvbGxIZWlnaHQsIGNvbXBvc2VyVGV4dGFyZWFNaW5IZWlnaHQpLFxuICAgIGNvbXBvc2VyVGV4dGFyZWFNYXhIZWlnaHQsXG4gICk7XG5cbiAgdGV4dGFyZWEuc3R5bGUuaGVpZ2h0ID0gYCR7bmV4dEhlaWdodH1weGA7XG4gIHRleHRhcmVhLnN0eWxlLm92ZXJmbG93WSA9IHRleHRhcmVhLnNjcm9sbEhlaWdodCA+IGNvbXBvc2VyVGV4dGFyZWFNYXhIZWlnaHQgPyAnYXV0bycgOiAnaGlkZGVuJztcbn1cblxuZXhwb3J0IGZ1bmN0aW9uIENoYXQoKSB7XG4gIGNvbnN0IHsgY29udmVyc2F0aW9uSWQgfSA9IHVzZVBhcmFtcygpO1xuICBjb25zdCB0aXRsZSA9IGNvbnZlcnNhdGlvbklkID8gKGNvbnZlcnNhdGlvblRpdGxlc1tjb252ZXJzYXRpb25JZF0gPz8gJ+S8muivneivpuaDhScpIDogJ+aWsOS8muivnSc7XG5cbiAgcmV0dXJuIChcbiAgICA8c2VjdGlvbiBjbGFzc05hbWU9e2BjaGF0LXBhZ2UgJHtjb252ZXJzYXRpb25JZCA/ICdjaGF0LXBhZ2UtdGhyZWFkJyA6ICdjaGF0LXBhZ2UtbmV3J31gfT5cbiAgICAgIHtjb252ZXJzYXRpb25JZCA/IChcbiAgICAgICAgPD5cbiAgICAgICAgICA8Q29udmVyc2F0aW9uRGV0YWlsIHRpdGxlPXt0aXRsZX0gLz5cbiAgICAgICAgICA8Q29tcG9zZXIgLz5cbiAgICAgICAgPC8+XG4gICAgICApIDogKFxuICAgICAgICA8TmV3Q29udmVyc2F0aW9uIC8+XG4gICAgICApfVxuICAgIDwvc2VjdGlvbj5cbiAgKTtcbn1cblxuZnVuY3Rpb24gTmV3Q29udmVyc2F0aW9uKCkge1xuICBjb25zdCBbd2VsY29tZU1lc3NhZ2VdID0gdXNlU3RhdGUoXG4gICAgKCkgPT4gd2VsY29tZU1lc3NhZ2VzW01hdGguZmxvb3IoTWF0aC5yYW5kb20oKSAqIHdlbGNvbWVNZXNzYWdlcy5sZW5ndGgpXSxcbiAgKTtcblxuICByZXR1cm4gKFxuICAgIDxkaXYgY2xhc3NOYW1lPSduZXctY29udmVyc2F0aW9uJz5cbiAgICAgIDxkaXYgY2xhc3NOYW1lPSdjaGF0LWludGVyYWN0aW9uLXNoZWxsJz5cbiAgICAgICAgPFN1c3BlbnNlIGZhbGxiYWNrPXs8ZGl2IGNsYXNzTmFtZT0nd2FrZS1maWVsZC1sb2FkaW5nJyBhcmlhLWhpZGRlbj0ndHJ1ZScgLz59PlxuICAgICAgICAgIDxXYWtlRmllbGQgLz5cbiAgICAgICAgPC9TdXNwZW5zZT5cbiAgICAgICAgPGgxIGNsYXNzTmFtZT0nY2hhdC13ZWxjb21lJz57d2VsY29tZU1lc3NhZ2V9PC9oMT5cbiAgICAgICAgPENvbXBvc2VyIC8+XG4gICAgICA8L2Rpdj5cbiAgICA8L2Rpdj5cbiAgKTtcbn1cblxuZnVuY3Rpb24gQ29udmVyc2F0aW9uRGV0YWlsKHsgdGl0bGUgfTogeyB0aXRsZTogc3RyaW5nIH0pIHtcbiAgcmV0dXJuIChcbiAgICA8ZGl2IGNsYXNzTmFtZT0nY29udmVyc2F0aW9uLXRocmVhZCc+XG4gICAgICA8ZGl2IGNsYXNzTmFtZT0ndGhyZWFkLWhlYWRpbmcnPlxuICAgICAgICA8cD7kvJror53or6bmg4U8L3A+XG4gICAgICAgIDxoMT57dGl0bGV9PC9oMT5cbiAgICAgIDwvZGl2PlxuICAgICAgPGFydGljbGUgY2xhc3NOYW1lPSdtZXNzYWdlIG1lc3NhZ2UtdXNlcic+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPSdtZXNzYWdlLWF2YXRhcic+5L2gPC9kaXY+XG4gICAgICAgIDxkaXY+XG4gICAgICAgICAgPHAgY2xhc3NOYW1lPSdtZXNzYWdlLWF1dGhvcic+5L2gPC9wPlxuICAgICAgICAgIDxwPuW4ruaIkeaVtOeQhui/meS4gOmDqOWIhueahOiuvuiuoeebruagh++8jOW5tue7meWHuuS4i+S4gOatpeWPr+S7peebtOaOpeaJp+ihjOeahOaWueahiOOAgjwvcD5cbiAgICAgICAgPC9kaXY+XG4gICAgICA8L2FydGljbGU+XG4gICAgICA8YXJ0aWNsZSBjbGFzc05hbWU9J21lc3NhZ2UgbWVzc2FnZS1hZ2VudCc+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPSdtZXNzYWdlLWF2YXRhcic+XG4gICAgICAgICAgPEJvdCBzaXplPXsxN30gLz5cbiAgICAgICAgPC9kaXY+XG4gICAgICAgIDxkaXY+XG4gICAgICAgICAgPHAgY2xhc3NOYW1lPSdtZXNzYWdlLWF1dGhvcic+RXRlcmlvbjwvcD5cbiAgICAgICAgICA8cD5cbiAgICAgICAgICAgIOW3sue7j+ais+eQhuWujOaIkOOAguW9k+WJjemHjeeCueaYr+WFiOeos+Wumumhtemdoue7k+aehO+8jOWGjemAkOatpeaOpeWFpeaVsOaNruS4jiBBZ2VudFxuICAgICAgICAgICAg54q25oCB77yM6K6p5q+P5LiA5q2l6YO95pyJ5riF5pmw5Y+N6aaI44CCXG4gICAgICAgICAgPC9wPlxuICAgICAgICAgIDx1bD5cbiAgICAgICAgICAgIDxsaT5cbiAgICAgICAgICAgICAgPENoZWNrIHNpemU9ezE1fSAvPiDlrozmiJDln7rnoYDluIPlsYDkuI7lr7zoiKrlsYLnuqdcbiAgICAgICAgICAgIDwvbGk+XG4gICAgICAgICAgICA8bGk+XG4gICAgICAgICAgICAgIDxDaGVjayBzaXplPXsxNX0gLz4g5L+d55WZ5Lya6K+d44CB55+l6K+G5bqT5ZKM5Lu75Yqh54q25oCB55qE5omp5bGV5L2N572uXG4gICAgICAgICAgICA8L2xpPlxuICAgICAgICAgICAgPGxpPuS4i+S4gOatpeWPr+S7peaOpeWFpeecn+WunuS8muivneWIl+ihqOS4jua2iOaBr+a1geOAgjwvbGk+XG4gICAgICAgICAgPC91bD5cbiAgICAgICAgPC9kaXY+XG4gICAgICA8L2FydGljbGU+XG4gICAgPC9kaXY+XG4gICk7XG59XG5cbmZ1bmN0aW9uIENvbXBvc2VyKCkge1xuICByZXR1cm4gKFxuICAgIDxkaXYgY2xhc3NOYW1lPSdjb21wb3Nlci1kb2NrJz5cbiAgICAgIDxmb3JtIGNsYXNzTmFtZT0nY29tcG9zZXInIG9uU3VibWl0PXsoZXZlbnQpID0+IGV2ZW50LnByZXZlbnREZWZhdWx0KCl9PlxuICAgICAgICA8bGFiZWwgY2xhc3NOYW1lPSdzci1vbmx5JyBodG1sRm9yPSdjaGF0LXByb21wdCc+XG4gICAgICAgICAg6L6T5YWl5raI5oGvXG4gICAgICAgIDwvbGFiZWw+XG4gICAgICAgIDx0ZXh0YXJlYVxuICAgICAgICAgIGlkPSdjaGF0LXByb21wdCdcbiAgICAgICAgICBuYW1lPSdwcm9tcHQnXG4gICAgICAgICAgcm93cz17Mn1cbiAgICAgICAgICBwbGFjZWhvbGRlcj0n57uZIEV0ZXJpb24g5Y+R6YCB5raI5oGvJ1xuICAgICAgICAgIG9uSW5wdXQ9e3Jlc2l6ZUNvbXBvc2VyVGV4dGFyZWF9XG4gICAgICAgIC8+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPSdjb21wb3Nlci10b29sYmFyJz5cbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nY29tcG9zZXItdG9vbHMnPlxuICAgICAgICAgICAgPGJ1dHRvbiB0eXBlPSdidXR0b24nIGFyaWEtbGFiZWw9J+a3u+WKoOmZhOS7tic+XG4gICAgICAgICAgICAgIDxQYXBlcmNsaXAgc2l6ZT17MTh9IC8+XG4gICAgICAgICAgICA8L2J1dHRvbj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nY29tcG9zZXItYWN0aW9ucyc+XG4gICAgICAgICAgICA8YnV0dG9uIGNsYXNzTmFtZT0nbW9kZWwtYnV0dG9uJyB0eXBlPSdidXR0b24nPlxuICAgICAgICAgICAgICBFdGVyaW9uIEFnZW50XG4gICAgICAgICAgICAgIDxDaGV2cm9uRG93biBzaXplPXsxNH0gLz5cbiAgICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICAgICAgPGJ1dHRvbiBjbGFzc05hbWU9J3NlbmQtYnV0dG9uJyB0eXBlPSdzdWJtaXQnIGFyaWEtbGFiZWw9J+WPkemAgea2iOaBryc+XG4gICAgICAgICAgICAgIDxBcnJvd1VwIHNpemU9ezE5fSBzdHJva2VXaWR0aD17Mi4zfSAvPlxuICAgICAgICAgICAgPC9idXR0b24+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIDwvZGl2PlxuICAgICAgPC9mb3JtPlxuICAgIDwvZGl2PlxuICApO1xufVxuIl19

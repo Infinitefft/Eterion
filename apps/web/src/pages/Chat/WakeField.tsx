@@ -1,90 +1,8 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
-const maxParticles = 2800;
 const targetFrameDuration = 1000 / 45;
 const maxDevicePixelRatio = 1.5;
-
-const particleVertexShader = /* glsl */ `
-  uniform float uPixelRatio;
-
-  attribute float aAlpha;
-  attribute float aAngle;
-  attribute float aKind;
-  attribute float aSeed;
-  attribute float aSize;
-
-  varying float vAlpha;
-  varying float vAngle;
-  varying float vKind;
-  varying float vSeed;
-  varying vec3 vColor;
-
-  void main() {
-    vAlpha = aAlpha;
-    vAngle = aAngle;
-    vKind = aKind;
-    vSeed = aSeed;
-    vColor = color;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = aSize * uPixelRatio;
-  }
-`;
-
-const particleFragmentShader = /* glsl */ `
-  varying float vAlpha;
-  varying float vAngle;
-  varying float vKind;
-  varying float vSeed;
-  varying vec3 vColor;
-
-  void main() {
-    vec2 point = gl_PointCoord - 0.5;
-    float distanceToCenter = length(point);
-    float angle = atan(point.y, point.x);
-    float angleCosine = cos(vAngle);
-    float angleSine = sin(vAngle);
-    vec2 localPoint = vec2(
-      angleCosine * point.x + angleSine * point.y,
-      -angleSine * point.x + angleCosine * point.y
-    );
-    float irregularity = sin(angle * 5.0 + vSeed * 8.0) * 0.022;
-    irregularity += sin((point.x * 17.0 + point.y * 13.0 + vSeed) * 4.0) * 0.012;
-    float softCloud = 1.0 - smoothstep(0.12, 0.49 + irregularity, distanceToCenter);
-    float jetAxis = localPoint.x + 0.035;
-    float widthNoise = sin(jetAxis * 22.0 + vSeed * 9.0) * 0.5;
-    widthNoise += sin(jetAxis * 49.0 - vSeed * 13.0) * 0.22;
-    float jetHalfWidth = 0.058 + (widthNoise * 0.5 + 0.5) * 0.052;
-    float jetLength = 1.0 - smoothstep(0.36, 0.5, abs(jetAxis));
-    float jetCrossSection = 1.0 - smoothstep(jetHalfWidth * 0.42, jetHalfWidth, abs(localPoint.y));
-    float jetWisp = jetLength * jetCrossSection;
-    float filamentCrossSection = 1.0 - smoothstep(
-      jetHalfWidth * 0.12,
-      jetHalfWidth * 0.4,
-      abs(localPoint.y)
-    );
-    float jetFilament = jetLength * filamentCrossSection;
-    float brightCore = 1.0 - smoothstep(0.06, 0.46, distanceToCenter);
-    float pulseDistance = length(vec2(localPoint.x * 0.78, localPoint.y * 1.3));
-    float pressureRing = 1.0 - smoothstep(0.035, 0.11, abs(pulseDistance - 0.32));
-    float pressureOpening = mix(0.32, 1.0, smoothstep(-0.34, 0.36, localPoint.x));
-    float shape = softCloud * softCloud;
-
-    if (vKind > 0.5 && vKind < 1.5) {
-      shape = max(jetWisp * jetWisp, jetFilament * 0.88);
-    } else if (vKind >= 1.5 && vKind < 2.5) {
-      shape = brightCore * brightCore;
-    } else if (vKind >= 2.5) {
-      shape = pressureRing * pressureOpening;
-    }
-
-    if (shape <= 0.001) {
-      discard;
-    }
-
-    gl_FragColor = vec4(vColor, shape * vAlpha);
-  }
-`;
 
 const backgroundVertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -97,19 +15,64 @@ const backgroundVertexShader = /* glsl */ `
 
 const backgroundFragmentShader = /* glsl */ `
   uniform float uTime;
+  uniform vec4 uAuroraA;
+  uniform vec4 uAuroraB;
+  uniform vec4 uAuroraC;
+  uniform vec4 uAuroraMotionA;
+  uniform vec4 uAuroraMotionB;
+  uniform vec4 uAuroraMotionC;
+  uniform vec4 uAuroraRangeA;
+  uniform vec4 uAuroraRangeB;
+  uniform vec4 uAuroraRangeC;
+  uniform float uAuroraBoundary;
+  uniform float uAuroraAspect;
+
   varying vec2 vUv;
+
+  vec4 auroraRibbon(vec2 uv, vec4 shape, vec4 motion, vec4 range) {
+    float seed = shape.w;
+    float phase = motion.x + uTime * motion.y;
+    float primaryWave = sin(uv.x * motion.w + phase) * motion.z;
+    float secondaryWave = sin(uv.x * motion.w * 2.17 - phase * 0.63 + seed * 6.283) * motion.z * 0.34;
+    float slowDrift = sin(uTime * 0.12 + seed * 8.0) * 0.026;
+    float directionalSlope = (uv.x - 0.5) * range.z * uAuroraAspect;
+    float center = shape.x + primaryWave + secondaryWave + slowDrift + directionalSlope;
+    float ribbonDistance = abs(uv.y - center);
+
+    float widthFlow = sin(uv.x * 13.0 - phase * 0.7 + seed * 11.0) * 0.5 + 0.5;
+    float ribbonWidth = shape.y * mix(0.78, 1.14, widthFlow);
+    float outerGlow = exp(-pow(ribbonDistance / ribbonWidth, 2.0));
+    float innerGlow = exp(-pow(ribbonDistance / (ribbonWidth * 0.43), 2.0));
+
+    float strandOffset = sin(uv.x * 21.0 + phase * 1.25 + seed * 17.0) * ribbonWidth * 0.16;
+    float strandDistance = abs(uv.y - center - strandOffset);
+    float fineStrand = exp(-pow(strandDistance / (ribbonWidth * 0.115), 2.0));
+
+    float horizontalFade = smoothstep(range.x - 0.08, range.x + 0.04, uv.x);
+    horizontalFade *= 1.0 - smoothstep(range.y - 0.04, range.y + 0.08, uv.x);
+    float shimmer = 0.82 + 0.18 * sin(uv.x * 28.0 - phase * 0.82 + seed * 23.0);
+    float opacity = shape.z * horizontalFade * shimmer;
+    float alpha = opacity * (outerGlow * 0.18 + innerGlow * 0.24 + fineStrand * 0.1);
+
+    vec3 blue = vec3(0.46, 0.62, 0.87);
+    vec3 cyan = vec3(0.48, 0.79, 0.76);
+    vec3 violet = vec3(0.64, 0.53, 0.85);
+    vec3 ribbonColor = mix(blue, cyan, 0.28 + widthFlow * 0.42);
+    ribbonColor = mix(ribbonColor, violet, 0.08 + 0.13 * sin(seed * 19.0) * 0.5 + 0.065);
+
+    return vec4(ribbonColor, alpha);
+  }
 
   void main() {
     float edgeX = smoothstep(0.0, 0.15, vUv.x) * smoothstep(0.0, 0.15, 1.0 - vUv.x);
     float edgeY = smoothstep(0.0, 0.18, vUv.y) * smoothstep(0.0, 0.18, 1.0 - vUv.y);
     float edgeFade = edgeX * edgeY;
 
-    float centerA = 0.52 + sin(vUv.x * 6.2 + uTime * 0.28) * 0.035;
-    float centerB = 0.49 + sin(vUv.x * 9.0 - uTime * 0.2 + 1.7) * 0.055;
-    float bandA = exp(-pow((vUv.y - centerA) * 8.5, 2.0));
-    float bandB = exp(-pow((vUv.y - centerB) * 13.0, 2.0));
-    float airNoise = sin(vUv.x * 18.0 + vUv.y * 7.0 + uTime * 0.22) * 0.5 + 0.5;
-    float density = bandA * 0.58 + bandB * 0.25 + airNoise * bandA * 0.12;
+    vec2 flowOffset = vec2(
+      sin(vUv.y * 4.2 + uTime * 0.13),
+      cos(vUv.x * 3.6 - uTime * 0.11)
+    ) * 0.026;
+    vec2 flowUv = vUv + flowOffset;
 
     vec2 roamingCenterA = vec2(
       0.5 + sin(uTime * 0.17 + 0.8) * 0.29,
@@ -123,11 +86,6 @@ const backgroundFragmentShader = /* glsl */ `
       0.5 + cos(uTime * 0.14 + 5.1) * 0.31,
       0.5 + sin(uTime * 0.16 + 1.2) * 0.22
     );
-    vec2 flowOffset = vec2(
-      sin(vUv.y * 4.2 + uTime * 0.13),
-      cos(vUv.x * 3.6 - uTime * 0.11)
-    ) * 0.026;
-    vec2 flowUv = vUv + flowOffset;
     vec2 cloudVectorA = (flowUv - roamingCenterA) * vec2(3.0, 5.5);
     vec2 cloudVectorB = (flowUv - roamingCenterB) * vec2(3.8, 6.2);
     vec2 cloudVectorC = (flowUv - roamingCenterC) * vec2(3.35, 5.8);
@@ -143,122 +101,85 @@ const backgroundFragmentShader = /* glsl */ `
     mistColor = mix(mistColor, vec3(0.97, 0.985, 0.99), roamingCloudA * 0.52);
     mistColor = mix(mistColor, vec3(0.89, 0.93, 0.95), roamingCloudB * 0.38);
     mistColor = mix(mistColor, vec3(0.94, 0.98, 0.94), roamingCloudC * 0.5);
+
+    vec4 ribbonA = auroraRibbon(vUv, uAuroraA, uAuroraMotionA, uAuroraRangeA);
+    vec4 ribbonB = auroraRibbon(vUv, uAuroraB, uAuroraMotionB, uAuroraRangeB);
+    vec4 ribbonC = auroraRibbon(vUv, uAuroraC, uAuroraMotionC, uAuroraRangeC);
+    float auroraRegion = 1.0 - smoothstep(
+      uAuroraBoundary - 0.1,
+      uAuroraBoundary - 0.025,
+      vUv.y
+    );
+    float auroraAlpha = (ribbonA.a + ribbonB.a + ribbonC.a) * edgeFade * auroraRegion;
+    vec3 auroraColor = vec3(0.0);
+    float colorWeight = 0.0;
+    auroraColor += ribbonA.rgb * ribbonA.a;
+    colorWeight += ribbonA.a;
+    auroraColor += ribbonB.rgb * ribbonB.a;
+    colorWeight += ribbonB.a;
+    auroraColor += ribbonC.rgb * ribbonC.a;
+    colorWeight += ribbonC.a;
+    auroraColor /= max(colorWeight, 0.001);
+
     float ambientFlow = 0.026 + wholeFlow * 0.018;
-    float alpha = (ambientFlow + density * 0.075 + roamingDensity * 0.058) * edgeFade;
-    gl_FragColor = vec4(mistColor, alpha);
+    float alpha = (ambientFlow + roamingDensity * 0.058) * edgeFade + auroraAlpha * 0.8;
+    vec3 finalColor = mix(mistColor, auroraColor, clamp(auroraAlpha * 1.65, 0.0, 0.76));
+    gl_FragColor = vec4(finalColor, clamp(alpha, 0.0, 0.56));
   }
 `;
 
-type ParticleKind = 0 | 1 | 2 | 3;
-
-type Particle = {
-  active: boolean;
-  alpha: number;
-  angle: number;
-  curl: number;
-  kind: ParticleKind;
-  life: number;
-  maxLife: number;
-  seed: number;
-  size: number;
-  velocityX: number;
-  velocityY: number;
-  x: number;
-  y: number;
+type AuroraSlot = {
+  age: number;
+  baseIntensity: number;
+  duration: number;
+  motion: THREE.Vector4;
+  range: THREE.Vector4;
+  shape: THREE.Vector4;
 };
 
-function getParticleAppearance(kind: ParticleKind, speedFactor: number) {
-  switch (kind) {
-    case 0:
-      return {
-        alpha: 0.115 + Math.random() * 0.065,
-        curlRange: 1.15,
-        jitter: 5,
-        maxLife: 1.2 + Math.random() * 0.95 + speedFactor * 0.7,
-        size: 19 + Math.random() * 22 + speedFactor * 28,
-      };
-    case 1:
-      return {
-        alpha: 0.16 + Math.random() * 0.075,
-        curlRange: 0.5,
-        jitter: 3,
-        maxLife: 1.05 + Math.random() * 0.65 + speedFactor * 0.55,
-        size: 7 + Math.random() * 8 + speedFactor * 16,
-      };
-    case 2:
-      return {
-        alpha: 0.18 + Math.random() * 0.08,
-        curlRange: 0.5,
-        jitter: 3,
-        maxLife: 0.4 + Math.random() * 0.28 + speedFactor * 0.22,
-        size: 4 + Math.random() * 5 + speedFactor * 5,
-      };
-    case 3:
-      return {
-        alpha: 0.08 + Math.random() * 0.045,
-        curlRange: 0.08,
-        jitter: 3,
-        maxLife: 0.58 + Math.random() * 0.3 + speedFactor * 0.28,
-        size: 22 + Math.random() * 14 + speedFactor * 24,
-      };
-  }
+function smoothStep(value: number) {
+  const clampedValue = THREE.MathUtils.clamp(value, 0, 1);
+  return clampedValue * clampedValue * (3 - 2 * clampedValue);
 }
 
-function getParticleExpansion(kind: ParticleKind) {
-  switch (kind) {
-    case 0:
-      return 0.95;
-    case 1:
-      return 0.48;
-    case 2:
-      return 0.22;
-    case 3:
-      return 1.05;
-  }
+function createAuroraSlot() {
+  return {
+    age: 0,
+    baseIntensity: 0,
+    duration: 0,
+    motion: new THREE.Vector4(),
+    range: new THREE.Vector4(0, 1, 0, 0),
+    shape: new THREE.Vector4(0.5, 0.1, 0, Math.random()),
+  } satisfies AuroraSlot;
 }
 
-function getParticleDamping(kind: ParticleKind) {
-  switch (kind) {
-    case 0:
-      return 0.975;
-    case 1:
-      return 0.968;
-    case 2:
-      return 0.955;
-    case 3:
-      return 0.98;
-  }
-}
-
-function getParticleColor(kind: ParticleKind): readonly [number, number, number] {
-  switch (kind) {
-    case 0:
-      return [0.62, 0.72, 0.86];
-    case 1:
-      return [0.27, 0.34, 0.64];
-    case 2:
-      return [0.31, 0.44, 0.77];
-    case 3:
-      return [0.48, 0.58, 0.77];
-  }
-}
-
-function createParticles(): Particle[] {
-  return Array.from({ length: maxParticles }, () => ({
-    active: false,
-    alpha: 0,
-    angle: 0,
-    curl: 0,
-    kind: 0,
-    life: 0,
-    maxLife: 1,
-    seed: 0,
-    size: 1,
-    velocityX: 0,
-    velocityY: 0,
-    x: 0,
-    y: 0,
-  }));
+function spawnAurora(slot: AuroraSlot, initialProgress = 0) {
+  const duration = 7.5 + Math.random() * 5.5;
+  const isShortRibbon = Math.random() < 0.3;
+  const ribbonLength = isShortRibbon ? 0.45 + Math.random() * 0.15 : 0.65 + Math.random() * 0.25;
+  const ribbonStart = Math.random() * (1 - ribbonLength);
+  const isAngledRibbon = Math.random() < 0.3;
+  const angleDegrees = isAngledRibbon
+    ? (3 + Math.random() * 4) * (Math.random() > 0.5 ? 1 : -1)
+    : (Math.random() - 0.5) * 2;
+  Object.assign(slot, {
+    age: duration * initialProgress,
+    baseIntensity: 0.8 + Math.random() * 0.15,
+    duration,
+  });
+  slot.shape.set(0.16 + Math.random() * 0.28, 0.045 + Math.random() * 0.03, 0, Math.random());
+  slot.range.set(
+    ribbonStart,
+    ribbonStart + ribbonLength,
+    Math.tan(THREE.MathUtils.degToRad(angleDegrees)),
+    0,
+  );
+  slot.motion.set(
+    Math.random() * Math.PI * 2,
+    (0.11 + Math.random() * 0.1) * (Math.random() > 0.5 ? 1 : -1),
+    0.024 + Math.random() * 0.032,
+    5.2 + Math.random() * 3.8,
+  );
 }
 
 export default function WakeField() {
@@ -272,7 +193,6 @@ export default function WakeField() {
     }
 
     const interactionElement = container.parentElement ?? container;
-
     let renderer: THREE.WebGLRenderer;
 
     try {
@@ -294,13 +214,29 @@ export default function WakeField() {
     const camera = new THREE.OrthographicCamera(0, 1, 0, 1, 0.1, 10);
     camera.position.z = 4;
 
+    const auroraSlots = [createAuroraSlot(), createAuroraSlot(), createAuroraSlot()];
+    spawnAurora(auroraSlots[0], 0.22);
+    spawnAurora(auroraSlots[1], 0.54);
+
     const backgroundUniforms = {
       uTime: { value: 1.8 },
+      uAuroraA: { value: auroraSlots[0].shape },
+      uAuroraB: { value: auroraSlots[1].shape },
+      uAuroraC: { value: auroraSlots[2].shape },
+      uAuroraMotionA: { value: auroraSlots[0].motion },
+      uAuroraMotionB: { value: auroraSlots[1].motion },
+      uAuroraMotionC: { value: auroraSlots[2].motion },
+      uAuroraRangeA: { value: auroraSlots[0].range },
+      uAuroraRangeB: { value: auroraSlots[1].range },
+      uAuroraRangeC: { value: auroraSlots[2].range },
+      uAuroraAspect: { value: 1 },
+      uAuroraBoundary: { value: 0.5 },
     };
     const backgroundGeometry = new THREE.PlaneGeometry(1, 1);
     const backgroundMaterial = new THREE.ShaderMaterial({
       depthWrite: false,
       fragmentShader: backgroundFragmentShader,
+      side: THREE.DoubleSide,
       transparent: true,
       uniforms: backgroundUniforms,
       vertexShader: backgroundVertexShader,
@@ -309,237 +245,74 @@ export default function WakeField() {
     backgroundPlane.position.z = -0.08;
     scene.add(backgroundPlane);
 
-    const particlePositions = new Float32Array(maxParticles * 3);
-    const particleColors = new Float32Array(maxParticles * 3);
-    const particleSizes = new Float32Array(maxParticles);
-    const particleAlphas = new Float32Array(maxParticles);
-    const particleAngles = new Float32Array(maxParticles);
-    const particleSeeds = new Float32Array(maxParticles);
-    const particleKinds = new Float32Array(maxParticles);
-    const particleGeometry = new THREE.BufferGeometry();
-    particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-    particleGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
-    particleGeometry.setAttribute('aSize', new THREE.BufferAttribute(particleSizes, 1));
-    particleGeometry.setAttribute('aAlpha', new THREE.BufferAttribute(particleAlphas, 1));
-    particleGeometry.setAttribute('aAngle', new THREE.BufferAttribute(particleAngles, 1));
-    particleGeometry.setAttribute('aSeed', new THREE.BufferAttribute(particleSeeds, 1));
-    particleGeometry.setAttribute('aKind', new THREE.BufferAttribute(particleKinds, 1));
-
-    const particleUniforms = {
-      uPixelRatio: { value: 1 },
-    };
-    const particleMaterial = new THREE.ShaderMaterial({
-      blending: THREE.NormalBlending,
-      depthWrite: false,
-      fragmentShader: particleFragmentShader,
-      transparent: true,
-      uniforms: particleUniforms,
-      vertexColors: true,
-      vertexShader: particleVertexShader,
-    });
-    const particlePoints = new THREE.Points(particleGeometry, particleMaterial);
-    particlePoints.frustumCulled = false;
-    scene.add(particlePoints);
-
-    const particles = createParticles();
-    const freeParticleIndices = Array.from(
-      { length: particles.length },
-      (_, index) => particles.length - index - 1,
-    );
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let width = 1;
-    let height = 1;
-    let overflowCursor = 0;
     let animationFrame = 0;
     let lastTimestamp = 0;
     let isIntersecting = true;
-    let pointerInside = false;
-    let previousPointerX = 0;
-    let previousPointerY = 0;
-    let previousPointerTime = 0;
     let hasRendered = false;
     let elapsed = 1.8;
+    let nextAuroraDelay = 2.2 + Math.random() * 1.8;
 
-    const activateParticle = (
-      x: number,
-      y: number,
-      velocityX: number,
-      velocityY: number,
-      speed: number,
-      kind: ParticleKind,
-      angle: number,
-    ) => {
-      const freeParticleIndex = freeParticleIndices.pop();
-      const particleIndex = freeParticleIndex ?? overflowCursor;
-      const particle = particles[particleIndex];
+    const updateAuroras = (delta: number) => {
+      nextAuroraDelay -= delta;
 
-      if (freeParticleIndex === undefined) {
-        overflowCursor = (overflowCursor + 1) % particles.length;
-      }
-
-      const speedFactor = THREE.MathUtils.clamp((speed - 70) / 1000, 0, 1);
-      const appearance = getParticleAppearance(kind, speedFactor);
-      particle.active = true;
-      particle.alpha = appearance.alpha * (0.45 + speedFactor * 0.55);
-      particle.angle = angle;
-      particle.curl = (Math.random() - 0.5) * appearance.curlRange;
-      particle.kind = kind;
-      particle.life = appearance.maxLife;
-      particle.maxLife = appearance.maxLife;
-      particle.seed = Math.random();
-      particle.size = appearance.size;
-      particle.velocityX = velocityX + (Math.random() - 0.5) * appearance.jitter;
-      particle.velocityY = velocityY + (Math.random() - 0.5) * appearance.jitter;
-      particle.x = x;
-      particle.y = y;
-    };
-
-    const emitJet = (
-      x: number,
-      y: number,
-      directionX: number,
-      directionY: number,
-      speed: number,
-    ) => {
-      const normalX = -directionY;
-      const normalY = directionX;
-      const power = THREE.MathUtils.clamp((speed - 70) / 1000, 0, 1);
-      const thrust = 7 + power * 82;
-      const spawnAhead = 2 + power * 10;
-      const lateralDrift = (Math.random() - 0.5) * (2 + power * 4);
-      const jetAngle = Math.atan2(directionY, directionX);
-
-      activateParticle(
-        x + directionX * spawnAhead,
-        y + directionY * spawnAhead,
-        directionX * thrust * 0.66 + normalX * lateralDrift,
-        directionY * thrust * 0.66 + normalY * lateralDrift,
-        speed,
-        0,
-        jetAngle,
-      );
-      activateParticle(
-        x + directionX * (spawnAhead + 2),
-        y + directionY * (spawnAhead + 2),
-        directionX * thrust,
-        directionY * thrust,
-        speed,
-        1,
-        jetAngle,
-      );
-      activateParticle(
-        x + directionX * (spawnAhead + 3),
-        y + directionY * (spawnAhead + 3),
-        directionX * thrust * 1.14,
-        directionY * thrust * 1.14,
-        speed,
-        2,
-        jetAngle,
-      );
-
-      if (Math.random() < 0.025 + power * 0.17) {
-        activateParticle(
-          x + directionX * (spawnAhead + 4),
-          y + directionY * (spawnAhead + 4),
-          directionX * thrust * 0.3,
-          directionY * thrust * 0.3,
-          speed,
-          3,
-          jetAngle,
-        );
-      }
-    };
-
-    const updateParticles = (delta: number) => {
-      for (let index = 0; index < particles.length; index += 1) {
-        const particle = particles[index];
-        const positionIndex = index * 3;
-
-        if (!particle.active) {
-          particleAlphas[index] = 0;
+      for (const slot of auroraSlots) {
+        if (slot.duration <= 0) {
+          slot.shape.z = 0;
           continue;
         }
 
-        particle.life -= delta;
+        slot.age += delta;
 
-        if (particle.life <= 0) {
-          particle.active = false;
-          particleAlphas[index] = 0;
-          freeParticleIndices.push(index);
+        if (slot.age >= slot.duration) {
+          slot.duration = 0;
+          slot.shape.z = 0;
           continue;
         }
 
-        const rotation = particle.curl * delta;
-        const cosine = Math.cos(rotation);
-        const sine = Math.sin(rotation);
-        const nextVelocityX = particle.velocityX * cosine - particle.velocityY * sine;
-        const nextVelocityY = particle.velocityX * sine + particle.velocityY * cosine;
-        const damping = Math.pow(getParticleDamping(particle.kind), delta * 60);
-        particle.velocityX = nextVelocityX * damping;
-        particle.velocityY = nextVelocityY * damping;
-        if (particle.kind === 1) {
-          particle.angle = Math.atan2(particle.velocityY, particle.velocityX);
-        }
-        particle.x += particle.velocityX * delta;
-        particle.y += particle.velocityY * delta;
-
-        const lifeProgress = particle.life / particle.maxLife;
-        const fadeIn = THREE.MathUtils.clamp((1 - lifeProgress) * 6, 0, 1);
-        const fadeOut = THREE.MathUtils.smoothstep(lifeProgress, 0, 0.58);
-        particlePositions[positionIndex] = particle.x;
-        particlePositions[positionIndex + 1] = particle.y;
-        particlePositions[positionIndex + 2] = particle.kind === 0 ? 0 : 0.02;
-        const expansion = getParticleExpansion(particle.kind);
-        particleSizes[index] = particle.size * (1 + (1 - lifeProgress) * expansion);
-        particleAlphas[index] = particle.alpha * fadeOut * fadeIn;
-        particleAngles[index] = particle.angle;
-        particleSeeds[index] = particle.seed;
-        particleKinds[index] = particle.kind;
-
-        const particleColor = getParticleColor(particle.kind);
-        particleColors[positionIndex] = particleColor[0];
-        particleColors[positionIndex + 1] = particleColor[1];
-        particleColors[positionIndex + 2] = particleColor[2];
+        const progress = slot.age / slot.duration;
+        const fadeIn = smoothStep(progress / 0.2);
+        const fadeOut = 1 - smoothStep((progress - 0.62) / 0.38);
+        const breathing = 0.92 + Math.sin(elapsed * 0.72 + slot.shape.w * 10) * 0.08;
+        slot.shape.z = slot.baseIntensity * fadeIn * fadeOut * breathing;
       }
 
-      for (const attributeName of [
-        'position',
-        'color',
-        'aSize',
-        'aAlpha',
-        'aAngle',
-        'aSeed',
-        'aKind',
-      ]) {
-        const attribute = particleGeometry.getAttribute(attributeName);
-        attribute.needsUpdate = true;
+      if (nextAuroraDelay <= 0) {
+        const availableSlot = auroraSlots.find((slot) => slot.duration <= 0);
+
+        if (availableSlot) {
+          spawnAurora(availableSlot);
+          nextAuroraDelay = 2.8 + Math.random() * 2.6;
+        } else {
+          nextAuroraDelay = 0.8;
+        }
       }
     };
 
     const resize = () => {
       const bounds = container.getBoundingClientRect();
       const interactionBounds = interactionElement.getBoundingClientRect();
-      const containerStyles = window.getComputedStyle(container);
-      const visibleOverflowX =
-        Number.parseFloat(containerStyles.getPropertyValue('--wake-visible-overflow-x')) || 0;
-      const visibleOverflowY =
-        Number.parseFloat(containerStyles.getPropertyValue('--wake-visible-overflow-y')) || 0;
-      width = Math.max(1, bounds.width);
-      height = Math.max(1, bounds.height);
+      const width = Math.max(1, bounds.width);
+      const height = Math.max(1, bounds.height);
+      const visiblePlaneWidth = Math.min(width, interactionBounds.width);
+      const visiblePlaneHeight = Math.min(height, interactionBounds.height);
+      const visiblePlaneTop = bounds.top + (height - visiblePlaneHeight) / 2;
+      const composer = interactionElement.querySelector('.composer');
+      const composerTop = composer?.getBoundingClientRect().top ?? interactionBounds.top;
       camera.left = 0;
       camera.right = width;
       camera.top = 0;
       camera.bottom = height;
       camera.updateProjectionMatrix();
       backgroundPlane.position.set(width / 2, height / 2, -0.08);
-      backgroundPlane.scale.set(
-        Math.min(width, interactionBounds.width + visibleOverflowX * 2),
-        Math.min(height, interactionBounds.height + visibleOverflowY * 2),
-        1,
+      backgroundPlane.scale.set(visiblePlaneWidth, visiblePlaneHeight, 1);
+      backgroundUniforms.uAuroraAspect.value = visiblePlaneWidth / visiblePlaneHeight;
+      backgroundUniforms.uAuroraBoundary.value = THREE.MathUtils.clamp(
+        (composerTop - visiblePlaneTop) / visiblePlaneHeight,
+        0.2,
+        0.8,
       );
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, maxDevicePixelRatio);
-      particleUniforms.uPixelRatio.value = pixelRatio;
-      renderer.setPixelRatio(pixelRatio);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDevicePixelRatio));
       renderer.setSize(width, height, false);
       renderer.render(scene, camera);
     };
@@ -556,86 +329,16 @@ export default function WakeField() {
 
       if (!reducedMotion.matches) {
         elapsed += delta;
+        updateAuroras(delta);
       }
 
       backgroundUniforms.uTime.value = elapsed;
-
-      if (!reducedMotion.matches) {
-        updateParticles(delta);
-      }
-
       renderer.render(scene, camera);
 
       if (!hasRendered) {
         hasRendered = true;
         container.classList.add('is-ready');
       }
-    };
-
-    const startInteraction = (event: PointerEvent) => {
-      const bounds = container.getBoundingClientRect();
-      pointerInside = true;
-      previousPointerX = event.clientX - bounds.left;
-      previousPointerY = event.clientY - bounds.top;
-      previousPointerTime = performance.now();
-    };
-    const pressField = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest('.composer-dock')) {
-        pointerInside = false;
-        return;
-      }
-
-      startInteraction(event);
-      interactionElement.setPointerCapture(event.pointerId);
-    };
-    const moveThroughField = (event: PointerEvent) => {
-      if (reducedMotion.matches) {
-        return;
-      }
-
-      if (event.target instanceof Element && event.target.closest('.composer-dock')) {
-        pointerInside = false;
-        return;
-      }
-
-      if (!pointerInside) {
-        startInteraction(event);
-        return;
-      }
-
-      const bounds = container.getBoundingClientRect();
-      const x = event.clientX - bounds.left;
-      const y = event.clientY - bounds.top;
-      const nowMilliseconds = performance.now();
-      const deltaX = x - previousPointerX;
-      const deltaY = y - previousPointerY;
-      const distance = Math.hypot(deltaX, deltaY);
-      const deltaSeconds = Math.max((nowMilliseconds - previousPointerTime) / 1000, 0.008);
-
-      if (distance >= 1.5) {
-        const directionX = deltaX / distance;
-        const directionY = deltaY / distance;
-        const speed = distance / deltaSeconds;
-        const steps = Math.min(8, Math.max(1, Math.ceil(distance / 8)));
-
-        for (let step = 1; step <= steps; step += 1) {
-          const progress = step / steps;
-          emitJet(
-            previousPointerX + deltaX * progress,
-            previousPointerY + deltaY * progress,
-            directionX,
-            directionY,
-            speed,
-          );
-        }
-      }
-
-      previousPointerX = x;
-      previousPointerY = y;
-      previousPointerTime = nowMilliseconds;
-    };
-    const leaveField = () => {
-      pointerInside = false;
     };
 
     const resizeObserver = new ResizeObserver(resize);
@@ -646,12 +349,6 @@ export default function WakeField() {
 
     resizeObserver.observe(container);
     intersectionObserver.observe(container);
-    interactionElement.addEventListener('pointerenter', startInteraction);
-    interactionElement.addEventListener('pointerdown', pressField);
-    interactionElement.addEventListener('pointermove', moveThroughField, { passive: true });
-    interactionElement.addEventListener('pointerleave', leaveField);
-    interactionElement.addEventListener('pointerup', leaveField);
-    interactionElement.addEventListener('pointercancel', leaveField);
     resize();
     animationFrame = window.requestAnimationFrame(renderFrame);
 
@@ -659,16 +356,8 @@ export default function WakeField() {
       window.cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
-      interactionElement.removeEventListener('pointerenter', startInteraction);
-      interactionElement.removeEventListener('pointerdown', pressField);
-      interactionElement.removeEventListener('pointermove', moveThroughField);
-      interactionElement.removeEventListener('pointerleave', leaveField);
-      interactionElement.removeEventListener('pointerup', leaveField);
-      interactionElement.removeEventListener('pointercancel', leaveField);
       backgroundGeometry.dispose();
       backgroundMaterial.dispose();
-      particleGeometry.dispose();
-      particleMaterial.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
