@@ -13,7 +13,8 @@ import (
 )
 
 const minimumJWTSecretLength = 32
-const minimumAgentSecretLength = 32
+
+const defaultSystemPrompt = "你是 Eterion 的 AI 助手。请准确、清晰地回答用户问题。"
 
 type Config struct {
 	AppEnv              string
@@ -30,8 +31,11 @@ type Config struct {
 	RefreshCookieName   string
 	RefreshCookieSecure bool
 	AllowedOrigins      []string
-	AgentGRPCAddress    string
-	AgentSharedSecret   string
+	ModelAPIKey         string
+	ModelBaseURL        string
+	ModelName           string
+	SystemPrompt        string
+	ModelTimeout        time.Duration
 	AgentRunTimeout     time.Duration
 	WebSocketTicketTTL  time.Duration
 }
@@ -50,8 +54,10 @@ func Load() (Config, error) {
 		JWTAudience:       envOrDefault("JWT_AUDIENCE", "eterion-web"),
 		RefreshCookieName: envOrDefault("REFRESH_COOKIE_NAME", "eterion_rt"),
 		AllowedOrigins:    splitCSV(envOrDefault("CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
-		AgentGRPCAddress:  envOrDefault("AGENT_GRPC_ADDR", "127.0.0.1:50051"),
-		AgentSharedSecret: strings.TrimSpace(os.Getenv("AGENT_SHARED_SECRET")),
+		ModelAPIKey:       strings.TrimSpace(os.Getenv("MODEL_API_KEY")),
+		ModelBaseURL:      strings.TrimSpace(os.Getenv("MODEL_BASE_URL")),
+		ModelName:         strings.TrimSpace(os.Getenv("MODEL_NAME")),
+		SystemPrompt:      envOrDefault("SYSTEM_PROMPT", defaultSystemPrompt),
 	}
 
 	var err error
@@ -71,6 +77,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.RefreshCookieSecure, err = boolEnv("REFRESH_COOKIE_SECURE", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.ModelTimeout, err = positiveDurationEnv("MODEL_TIMEOUT", 2*time.Minute); err != nil {
 		return Config{}, err
 	}
 	if cfg.AgentRunTimeout, err = positiveDurationEnv("AGENT_RUN_TIMEOUT", 10*time.Minute); err != nil {
@@ -104,14 +113,11 @@ func (c Config) Validate() error {
 	if strings.EqualFold(c.AppEnv, "production") && !c.RefreshCookieSecure {
 		return errors.New("REFRESH_COOKIE_SECURE must be true in production")
 	}
-	if strings.TrimSpace(c.AgentGRPCAddress) == "" {
-		return errors.New("AGENT_GRPC_ADDR is required")
+	if strings.TrimSpace(c.ModelAPIKey) == "" {
+		return errors.New("MODEL_API_KEY is required")
 	}
-	if len(c.AgentSharedSecret) < minimumAgentSecretLength {
-		return fmt.Errorf(
-			"AGENT_SHARED_SECRET must be at least %d characters",
-			minimumAgentSecretLength,
-		)
+	if strings.TrimSpace(c.ModelName) == "" {
+		return errors.New("MODEL_NAME is required")
 	}
 	return nil
 }

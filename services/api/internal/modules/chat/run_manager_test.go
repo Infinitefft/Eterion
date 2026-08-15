@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Infinitefft/Eterion/services/api/internal/agent"
 	"github.com/google/uuid"
 )
 
@@ -161,14 +162,14 @@ func (r *memoryRunRepository) currentRun() Run {
 }
 
 type scriptedRunner struct {
-	events []AgentEvent
+	events []agent.Event
 	err    error
 }
 
 func (r scriptedRunner) Run(
 	_ context.Context,
-	_ AgentInput,
-	handle func(AgentEvent) error,
+	_ agent.Input,
+	handle func(agent.Event) error,
 ) error {
 	for _, event := range r.events {
 		if err := handle(event); err != nil {
@@ -186,10 +187,10 @@ type cancellingRunner struct {
 
 func (r *cancellingRunner) Run(
 	ctx context.Context,
-	_ AgentInput,
-	handle func(AgentEvent) error,
+	_ agent.Input,
+	handle func(agent.Event) error,
 ) error {
-	if err := handle(AgentEvent{Type: AgentEventStarted}); err != nil {
+	if err := handle(agent.Event{Type: agent.EventStarted}); err != nil {
 		return err
 	}
 	close(r.started)
@@ -202,10 +203,10 @@ func (*cancellingRunner) Close() error { return nil }
 func TestRunManagerPublishesProtocolSnapshotsInSequence(t *testing.T) {
 	repository := newMemoryRunRepository()
 	publisher, connection := capturePublisher(repository.run.UserID.String())
-	runner := scriptedRunner{events: []AgentEvent{
-		{Type: AgentEventStarted},
-		{Type: AgentEventDelta, Delta: "ok"},
-		{Type: AgentEventCompleted, FullText: "**ok**"},
+	runner := scriptedRunner{events: []agent.Event{
+		{Type: agent.EventStarted},
+		{Type: agent.EventDelta, Delta: "ok"},
+		{Type: agent.EventCompleted, FullText: "**ok**"},
 	}}
 	manager := NewRunManager(context.Background(), repository, runner, publisher, nil)
 	manager.Start(repository.run)
@@ -239,8 +240,8 @@ func TestRunManagerPublishesFailedMessageAndRun(t *testing.T) {
 	repository := newMemoryRunRepository()
 	publisher, connection := capturePublisher(repository.run.UserID.String())
 	runner := scriptedRunner{
-		events: []AgentEvent{{Type: AgentEventStarted}},
-		err: &AgentFailure{
+		events: []agent.Event{{Type: agent.EventStarted}},
+		err: &agent.Failure{
 			Code: "MODEL_BUSY", Message: "模型繁忙", Retryable: true,
 		},
 	}
@@ -355,6 +356,6 @@ func assertEventSequence(
 	}
 }
 
-var _ Runner = scriptedRunner{}
-var _ Runner = (*cancellingRunner)(nil)
+var _ agent.Runner = scriptedRunner{}
+var _ agent.Runner = (*cancellingRunner)(nil)
 var _ RunRepository = (*memoryRunRepository)(nil)

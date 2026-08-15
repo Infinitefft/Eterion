@@ -1,4 +1,4 @@
-// 负责创建 Gin 路由，并装配认证、Chat、WebSocket 和 Python Agent 依赖。
+// 负责创建 Gin 路由，并装配认证、Chat、WebSocket 和 Eino Agent 依赖。
 package router
 
 import (
@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Infinitefft/Eterion/services/api/internal/agent/eino"
 	"github.com/Infinitefft/Eterion/services/api/internal/apidocs"
 	"github.com/Infinitefft/Eterion/services/api/internal/config"
 	"github.com/Infinitefft/Eterion/services/api/internal/middleware"
@@ -100,11 +101,14 @@ func New(
 	chatService := chat.NewService(chatRepository)
 	hub := chat.NewHub(logger)
 	publisher := chat.NewPublisher(hub)
-	runner, err := chat.NewGRPCRunner(
-		cfg.AgentGRPCAddress,
-		cfg.AgentSharedSecret,
-		cfg.AgentRunTimeout,
-	)
+	runner, err := eino.NewRunner(appContext, eino.Config{
+		APIKey:       cfg.ModelAPIKey,
+		BaseURL:      cfg.ModelBaseURL,
+		Model:        cfg.ModelName,
+		SystemPrompt: cfg.SystemPrompt,
+		ModelTimeout: cfg.ModelTimeout,
+		RunTimeout:   cfg.AgentRunTimeout,
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("initialize agent runner: %w", err)
 	}

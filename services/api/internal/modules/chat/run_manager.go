@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Infinitefft/Eterion/services/api/internal/agent"
 	"github.com/google/uuid"
 )
 
@@ -68,7 +69,7 @@ type RunRepository interface {
 type RunManager struct {
 	appContext context.Context
 	repository RunRepository
-	runner     Runner
+	runner     agent.Runner
 	publisher  *Publisher
 	logger     *slog.Logger
 	now        func() time.Time
@@ -81,7 +82,7 @@ type RunManager struct {
 func NewRunManager(
 	appContext context.Context,
 	repository RunRepository,
-	runner Runner,
+	runner agent.Runner,
 	publisher *Publisher,
 	logger *slog.Logger,
 ) *RunManager {
@@ -186,7 +187,7 @@ func (m *RunManager) Cancel(
 	return false, nil
 }
 
-// Close 等待所有后台 Run 结束，并关闭 gRPC 连接。
+// Close 等待所有后台 Run 结束，并关闭 Agent Runner。
 func (m *RunManager) Close() error {
 	m.cancelAll()
 	m.runs.Wait()
@@ -247,17 +248,17 @@ func (m *RunManager) execute(
 	run.StartedAt = timePointer(now)
 	m.publisher.RunSnapshot(*run, EventRunStatus)
 
-	input := AgentInput{
+	input := agent.Input{
 		RunID:  run.ID.String(),
 		ChatID: run.ChatID.String(),
 		Messages: make(
-			[]AgentMessage,
+			[]agent.Message,
 			0,
 			len(execution.Messages),
 		),
 	}
 	for _, message := range execution.Messages {
-		input.Messages = append(input.Messages, AgentMessage{
+		input.Messages = append(input.Messages, agent.Message{
 			Role:    string(message.Role),
 			Content: message.Content,
 		})
@@ -297,11 +298,11 @@ func (m *RunManager) execute(
 		return nil
 	}
 
-	err = m.runner.Run(ctx, input, func(event AgentEvent) error {
+	err = m.runner.Run(ctx, input, func(event agent.Event) error {
 		switch event.Type {
-		case AgentEventStarted:
+		case agent.EventStarted:
 			return ensureStarted()
-		case AgentEventDelta:
+		case agent.EventDelta:
 			if err := ensureStarted(); err != nil {
 				return err
 			}
@@ -344,7 +345,7 @@ func (m *RunManager) execute(
 			run.UpdatedAt = deltaAt
 			m.publisher.MessageDelta(*run, deltaSeq, event.Delta)
 			return nil
-		case AgentEventCompleted:
+		case agent.EventCompleted:
 			if err := ensureStarted(); err != nil {
 				return err
 			}
@@ -427,7 +428,7 @@ func (m *RunManager) finishWithError(
 			Code: code, Message: message, Retryable: true,
 		}
 	} else {
-		var agentFailure *AgentFailure
+		var agentFailure *agent.Failure
 		if errors.As(runError, &agentFailure) {
 			code = agentFailure.Code
 			message = agentFailure.Message
