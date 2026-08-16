@@ -1,13 +1,58 @@
 import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/types/api';
 
-import type { Chat, ChatId, ChatSnapshot } from './types';
+import type { Chat, ChatId, ChatSnapshot, ModelId } from './types';
 
 interface ChatListItemResponse {
   id: ChatId;
   title: string;
   created_at: string;
   updated_at: string;
+}
+
+/** 后端模型目录中的单个模型。网络层保留后端的 snake_case 字段。 */
+interface ChatModelResponse {
+  id: ModelId;
+  display_name: string;
+  provider: string;
+  /** 后端暂未返回图标时允许缺省，组件会展示文字兜底图标。 */
+  icon_url?: string | null;
+}
+
+interface ChatModelCatalogResponse {
+  default_model_id: ModelId;
+  models: ChatModelResponse[];
+}
+
+/** 前端组件使用的模型数据。 */
+export interface ChatModel {
+  id: ModelId;
+  name: string;
+  provider: string;
+  iconUrl: string | null;
+}
+
+export interface ChatModelCatalog {
+  defaultModelId: ModelId;
+  models: ChatModel[];
+}
+
+/** 获取服务端当前真正可用的模型目录；缓存和重新请求策略交给 TanStack Query。 */
+export async function fetchChatModels(): Promise<ChatModelCatalog> {
+  const response = await apiClient.get<ApiResponse<ChatModelCatalogResponse>>(
+    '/chat/models',
+  );
+  const catalog = response.data.data;
+
+  return {
+    defaultModelId: catalog.default_model_id,
+    models: catalog.models.map((model) => ({
+      id: model.id,
+      name: model.display_name,
+      provider: model.provider,
+      iconUrl: model.icon_url?.trim() || null,
+    })),
+  };
 }
 
 function parseServerTime(value: string, field: string): number {

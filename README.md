@@ -157,7 +157,7 @@ pnpm dev
 
 ## 初始化并启动 Go API
 
-后端的本地隐私配置保存在 `services/api/.env`，该文件不会提交到 Git。首次运行时从示例文件复制一份，并填写数据库密码、随机 JWT 密钥、模型 API Key 和模型名称：
+后端的本地隐私配置保存在 `services/api/.env`，该文件不会提交到 Git。首次运行时从示例文件复制一份，并填写数据库密码、随机 JWT 密钥，以及豆包、DeepSeek、MiniMax 中至少一个模型的 API Key 和模型名称。`DEFAULT_MODEL_ID` 指定前端没有选择模型时使用的默认项：
 
 ```powershell
 Set-Location services/api
@@ -180,6 +180,7 @@ Go API 默认监听 `http://localhost:8080`，当前接口包括：
 - `POST /api/auth/refresh`
 - `GET /api/auth/me`（需要 Bearer Access Token）
 - `POST /api/auth/logout`（需要 Bearer Access Token）
+- `GET /api/chat/models`（返回已启用模型及默认模型，需要 Bearer Access Token）
 
 ## 查看 Swagger 接口文档
 

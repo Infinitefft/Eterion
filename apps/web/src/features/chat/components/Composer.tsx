@@ -1,13 +1,14 @@
-import { ArrowUp, ChevronDown, LoaderCircle, Paperclip, Square } from 'lucide-react';
+import { ArrowUp, LoaderCircle, Paperclip, Square } from 'lucide-react';
 import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useStore } from 'zustand';
 
 import { getIMService, imStore } from '@/service/im';
-import type { ChatId, RunId } from '@/service/im/types';
+import type { ChatId, ModelId, RunId } from '@/service/im/types';
 import { useAuthStore } from '@/store/authStore';
 
 import { selectActiveRunId, selectIsChatBusy } from '../model/chatSelectors';
 import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';
+import ModelList from './ModelList/ModelList';
 
 interface ComposerProps {
   chatId: ChatId;
@@ -24,6 +25,7 @@ export function Composer({ chatId }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedModelId, setSelectedModelId] = useState<ModelId | null>(null);
   const [cancelRequestedRunId, setCancelRequestedRunId] = useState<RunId | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -50,7 +52,11 @@ export function Composer({ chatId }: ComposerProps) {
     setSubmitError(null);
 
     /** submitMessage 会在第一次 await 前乐观写入用户消息，因此页面立即可见。 */
-    const submission = getIMService().submitMessage({ chatId, content });
+    const submission = getIMService().submitMessage({
+      chatId,
+      content,
+      modelId: selectedModelId ?? undefined,
+    });
 
     setPrompt('');
     if (textareaRef.current) {
@@ -126,15 +132,11 @@ export function Composer({ chatId }: ComposerProps) {
         </button>
 
         <div className='chat-detail-composer-actions'>
-          <button
-            className='chat-detail-model-button'
-            type='button'
-            disabled
-            title='模型选择稍后接入'
-          >
-            Eterion Agent
-            <ChevronDown size={14} />
-          </button>
+          <ModelList
+            value={selectedModelId}
+            onChange={setSelectedModelId}
+            disabled={isChatBusy || isSubmitting}
+          />
 
           {activeRunId ? (
             <button

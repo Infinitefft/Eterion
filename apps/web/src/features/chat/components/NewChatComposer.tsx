@@ -1,15 +1,17 @@
-import { ArrowUp, ChevronDown, Paperclip } from 'lucide-react';
+import { ArrowUp, Paperclip } from 'lucide-react';
 import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { createChatDetailPath } from '@/app/routePaths';
 import { getIMService } from '@/service/im';
+import type { ModelId } from '@/service/im/types';
 import { useAuthStore } from '@/store/authStore';
 
 import {
   resizeComposerTextarea,
   submitComposerOnEnter,
 } from '../utils/composerInput';
+import ModelList from './ModelList/ModelList';
 
 const TEXTAREA_MIN_HEIGHT = 58;
 const TEXTAREA_MAX_HEIGHT = 154;
@@ -21,6 +23,7 @@ const TEXTAREA_MAX_HEIGHT = 154;
 export function NewChatComposer() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const [selectedModelId, setSelectedModelId] = useState<ModelId | null>(null);
   const [prompt, setPrompt] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const normalizedPrompt = prompt.trim();
@@ -44,6 +47,7 @@ export function NewChatComposer() {
       /** prepareNewChat 会同步写入 Zustand，侧边栏会在导航前得到新会话。 */
       const chatId = getIMService().prepareNewChat({
         prompt: normalizedPrompt,
+        modelId: selectedModelId ?? undefined,
       });
 
       void navigate(createChatDetailPath(chatId));
@@ -88,10 +92,10 @@ export function NewChatComposer() {
           </div>
 
           <div className='composer-actions'>
-            <button className='model-button' type='button'>
-              Eterion Agent
-              <ChevronDown size={14} />
-            </button>
+            <ModelList
+              value={selectedModelId}
+              onChange={setSelectedModelId}
+            />
 
             <button
               className='send-button'
