@@ -12,6 +12,7 @@ import type {
   IdempotencyKey,
   IMError,
   MessageId,
+  ModelId,
   RequestId,
   RunId,
   StepId,
@@ -19,11 +20,7 @@ import type {
 } from './types';
 
 /** 新会话首条 Prompt 的本地发送状态。 */
-export type InitialPromptStatus =
-  | 'pending'
-  | 'sending'
-  | 'delivery_unknown'
-  | 'rejected';
+export type InitialPromptStatus = 'pending' | 'sending' | 'delivery_unknown' | 'rejected';
 
 /**
  * 新会话跳转前登记的一次性发送意图。
@@ -40,6 +37,9 @@ export interface InitialPromptIntent {
 
   /** 用户在首页输入的原始 Prompt。 */
   prompt: string;
+
+  /** 首次发送使用的模型；null 表示服务端默认模型。 */
+  modelId: ModelId | null;
 
   /** 新 Chat 的初始标题；暂时没有标题时为 null。 */
   title: string | null;
@@ -155,6 +155,9 @@ export interface IMStoreActions {
    */
   upsertChat(chat: Chat): void;
 
+  /** 删除一个 Chat 及 Store 中所有归属它的实体和发送意图。 */
+  removeChat(chatId: ChatId): void;
+
   /**
    * 使用服务端权威快照替换一个 Chat 的本地数据。
    *
@@ -208,10 +211,7 @@ export interface IMStoreActions {
    * 例如从 pending 更新为 sending，
    * 或记录 ACK 超时、服务端拒绝和最近一次 Request ID。
    */
-  updateInitialPromptIntent(
-    chatId: ChatId,
-    patch: InitialPromptIntentUpdate,
-  ): void;
+  updateInitialPromptIntent(chatId: ChatId, patch: InitialPromptIntentUpdate): void;
 
   /**
    * 删除已经完成处理的首条 Prompt 意图。
@@ -237,9 +237,7 @@ export type IMStore = IMStoreState & IMStoreActions;
 export type IMStoreApi = StoreApi<IMStore>;
 
 /** 创建一份干净的 IM Store 数据状态。 */
-export function createInitialIMStoreState(
-  connection: Readonly<IMConnectionState>,
-): IMStoreState {
+export function createInitialIMStoreState(connection: Readonly<IMConnectionState>): IMStoreState {
   return {
     connection: { ...connection },
     session: {
@@ -264,9 +262,7 @@ export function createInitialIMStoreState(
  * 使用 zustand/vanilla，而不是直接使用 React Hook，
  * 使 imService 可以在 React 组件之外处理 WebSocket 事件。
  */
-export function createIMStore(
-  initialConnection: Readonly<IMConnectionState>,
-): IMStoreApi {
+export function createIMStore(initialConnection: Readonly<IMConnectionState>): IMStoreApi {
   return createStore<IMStore>()((set) => ({
     ...createInitialIMStoreState(initialConnection),
 
@@ -295,6 +291,52 @@ export function createIMStore(
             ...state.chatsById,
             [chat.id]: chat,
           },
+        };
+      });
+    },
+
+    removeChat: (chatId) => {
+      set((state) => {
+        const chatsById = { ...state.chatsById };
+        const messageIdsByChatId = { ...state.messageIdsByChatId };
+        const messagesById = { ...state.messagesById };
+        const runIdsByChatId = { ...state.runIdsByChatId };
+        const runsById = { ...state.runsById };
+        const stepsById = { ...state.stepsById };
+        const initialPromptIntentsByChatId = {
+          ...state.initialPromptIntentsByChatId,
+        };
+
+        delete chatsById[chatId];
+        delete messageIdsByChatId[chatId];
+        delete runIdsByChatId[chatId];
+        delete initialPromptIntentsByChatId[chatId];
+
+        for (const [messageId, message] of Object.entries(messagesById)) {
+          if (message.chatId === chatId) {
+            delete messagesById[messageId];
+          }
+        }
+        for (const [runId, run] of Object.entries(runsById)) {
+          if (run.chatId === chatId) {
+            delete runsById[runId];
+          }
+        }
+        for (const [stepId, step] of Object.entries(stepsById)) {
+          if (step.chatId === chatId) {
+            delete stepsById[stepId];
+          }
+        }
+
+        return {
+          chatIds: state.chatIds.filter((id) => id !== chatId),
+          chatsById,
+          messageIdsByChatId,
+          messagesById,
+          runIdsByChatId,
+          runsById,
+          stepsById,
+          initialPromptIntentsByChatId,
         };
       });
     },
@@ -352,9 +394,7 @@ export function createIMStore(
             ...state.session,
             cursor: snapshot.cursor ?? state.session.cursor,
           },
-          chatIds: chatExists
-            ? state.chatIds
-            : [...state.chatIds, chatId],
+          chatIds: chatExists ? state.chatIds : [...state.chatIds, chatId],
           chatsById: {
             ...state.chatsById,
             [chatId]: snapshot.chat,

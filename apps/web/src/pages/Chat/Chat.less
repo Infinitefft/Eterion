@@ -273,13 +273,11 @@
   border-radius: 50%;
   color: #ffffff;
   background: var(--ink);
-  transition:
-    background-color 140ms ease,
-    transform 140ms ease;
+  transition: background-color 140ms ease;
 
-  &:hover {
-    background: var(--accent);
-    transform: translateY(-1px);
+  &:disabled {
+    cursor: not-allowed;
+    background: #c4c6cb;
   }
 }
 

@@ -5,6 +5,7 @@ import { routePaths } from '@/app/routePaths';
 import { Chat } from '@/pages/Chat/Chat';
 import { NotFound } from '@/pages/NotFound/NotFound';
 import { Repository } from '@/pages/Repository/Repository';
+import { ChatDetail } from '@/pages/ChatDetail/ChatDetail';
 
 export const router = createBrowserRouter([
   {
@@ -20,8 +21,8 @@ export const router = createBrowserRouter([
         element: <Chat />,
       },
       {
-        path: routePaths.conversation,
-        element: <Chat />,
+        path: routePaths.chatDetail,
+        element: <ChatDetail />,
       },
       {
         path: routePaths.repository,

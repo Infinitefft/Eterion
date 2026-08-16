@@ -9,6 +9,7 @@ import type {
   IdempotencyKey,
   IMError,
   MessageId,
+  ModelId,
   RequestId,
   RunId,
   StepId,
@@ -41,6 +42,8 @@ export interface ClientCommandEnvelope<
 export interface ChatStartPayload {
   /** 前端生成的用户消息 ID，用于本地乐观展示和服务端去重。 */
   message_id: MessageId;
+  /** null 表示使用服务端配置的默认模型。 */
+  model_id: ModelId | null;
   title: string | null;
   content: TextContent;
 }
@@ -56,6 +59,8 @@ export interface ChatStartCommand
 export interface ChatSubmitPayload {
   /** 前端生成的用户消息 ID。 */
   message_id: MessageId;
+  /** null 表示使用服务端配置的默认模型。 */
+  model_id: ModelId | null;
   content: TextContent;
 }
 
@@ -152,6 +157,7 @@ export interface WireChatMessage {
 export interface WireAgentRun {
   run_id: RunId;
   chat_id: ChatId;
+  model_id: ModelId;
   input_message_id: MessageId;
   output_message_id: MessageId;
   status: AgentRunStatus;

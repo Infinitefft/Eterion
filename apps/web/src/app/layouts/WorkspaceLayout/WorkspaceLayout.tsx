@@ -7,19 +7,13 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { logout } from '@/api/auth';
 import { clearAuthSession, retryAuthInitialization } from '@/api/client';
 import { getApiError } from '@/api/errors';
-import { createConversationPath, routePaths } from '@/app/routePaths';
+import { routePaths } from '@/app/routePaths';
 import { AuthDialog } from '@/components/AuthDialog/AuthDialog';
 import { useAuthStore } from '@/store/authStore';
 import type { AuthUser } from '@/types/auth';
 
+import { ChatHistoryList } from './ChatHistoryList';
 import './WorkspaceLayout.less';
-
-const recentConversations = [
-  { id: 'agent-runtime', title: 'Agent 运行时架构' },
-  { id: 'ui-layout', title: '工作台界面布局' },
-  { id: 'rag-design', title: '知识库检索设计' },
-  { id: 'realtime-events', title: '实时事件协议梳理' },
-];
 
 function getInitialSidebarState() {
   return !window.matchMedia('(max-width: 800px)').matches;
@@ -28,7 +22,7 @@ function getInitialSidebarState() {
 function RoundedComposeIcon() {
   return (
     <svg
-      className='rounded-nav-svg'
+      className='compose-nav-icon'
       viewBox='0 0 24 24'
       fill='none'
       stroke='currentColor'
@@ -38,9 +32,8 @@ function RoundedComposeIcon() {
       aria-hidden='true'
       focusable='false'
     >
-      <path d='M11.1 4H7.25A3.25 3.25 0 0 0 4 7.25v9.5A3.25 3.25 0 0 0 7.25 20h9.5A3.25 3.25 0 0 0 20 16.75V13' />
-      <path d='m10.3 14.6.6-3.2 6.45-6.45a1.85 1.85 0 0 1 2.7 2.55l-.08.08-6.45 6.45-3.22.57Z' />
-      <path d='m16.1 6.2 2.65 2.65' />
+      <path d='M10 3H8a5 5 0 0 0-5 5v8a5 5 0 0 0 5 5h8a5 5 0 0 0 5-5v-2' />
+      <path d='M17.625 3.375a1 1 0 0 1 3 3l-8.263 8.264a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852Z' />
     </svg>
   );
 }
@@ -52,7 +45,7 @@ function RoundedBookIcon() {
       viewBox='0 0 24 24'
       fill='none'
       stroke='currentColor'
-      strokeWidth='2'
+      strokeWidth='1.75'
       strokeLinecap='round'
       strokeLinejoin='round'
       aria-hidden='true'
@@ -92,7 +85,7 @@ export function WorkspaceLayout() {
             aria-label='返回新会话'
             onClick={closeSidebarOnMobile}
           >
-            <img className='product-logo' src='/eterion-logo-black-transparent.png' alt='' />
+            <span className='product-name'>Eterion</span>
           </NavLink>
           <div className='sidebar-header-actions'>
             <button
@@ -131,23 +124,7 @@ export function WorkspaceLayout() {
             </NavLink>
           </nav>
 
-          <section className='recent-section' aria-labelledby='recent-title'>
-            <div className='section-heading-row'>
-              <h2 id='recent-title'>最近会话</h2>
-            </div>
-            <nav className='conversation-nav' aria-label='最近会话'>
-              {recentConversations.map((conversation) => (
-                <NavLink
-                  key={conversation.id}
-                  className={({ isActive }) => `conversation-link ${isActive ? 'is-active' : ''}`}
-                  to={createConversationPath(conversation.id)}
-                  onClick={closeSidebarOnMobile}
-                >
-                  <span>{conversation.title}</span>
-                </NavLink>
-              ))}
-            </nav>
-          </section>
+          <ChatHistoryList onNavigate={closeSidebarOnMobile} />
         </div>
 
         <footer className='sidebar-footer'>

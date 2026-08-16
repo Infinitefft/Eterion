@@ -1,16 +1,16 @@
 :root {
   --font-sans:
-    Inter, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
-    'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+    'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC',
+    'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   --font-display:
-    'SF Pro Display', Inter, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', system-ui,
-    sans-serif;
+    'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC',
+    'Segoe UI Variable Display', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   font-family: var(--font-sans);
   color: #202123;
   background: #ffffff;
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
   --ink: #202123;
   --muted: #71757d;
   --quiet: #9a9da3;
@@ -21,7 +21,7 @@
   --accent: #405cf5;
   --accent-soft: #eef0ff;
   --success: #20a66a;
-  --sidebar-width: 282px;
+  --sidebar-width: 272px;
 }
 
 * {
@@ -40,7 +40,7 @@ body {
   min-height: 100vh;
   overflow: hidden;
   background: var(--canvas);
-  font-weight: 480;
+  font-weight: 400;
 }
 
 button,

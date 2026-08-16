@@ -16,6 +16,9 @@ export type RunId = string;
 /** Agent 执行过程中某一个步骤的唯一标识。 */
 export type StepId = string;
 
+/** 后端模型注册表中的稳定模型 ID，例如 doubao、deepseek、minimax。 */
+export type ModelId = string;
+
 /**
  * 一次客户端指令发送的标识。
  * 用于把客户端请求和服务端 ACK 关联起来。
@@ -186,6 +189,9 @@ export interface AgentRun {
 
   /** 当前 Run 所属的 Chat。 */
   chatId: ChatId;
+
+  /** 本次 Run 实际使用的稳定模型 ID。 */
+  modelId: ModelId;
 
   /** 触发当前 Run 的用户消息。 */
   inputMessageId: MessageId;

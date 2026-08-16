@@ -2,6 +2,7 @@ import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/types/api';
 
 import { IMService } from './imService';
+import { deleteChat, fetchChats, fetchChatSnapshot, updateChatTitle } from './rest';
 import { createIMStore } from './store';
 import { WebSocketTransport } from './transport';
 
@@ -54,7 +55,14 @@ function createIMRuntime() {
   const store = createIMStore(transport.getState());
 
   /** Service 只依赖抽象 Transport 和 Store，不直接依赖 React。 */
-  const service = new IMService({ transport, store });
+  const service = new IMService({
+    transport,
+    store,
+    fetchChats,
+    fetchChatSnapshot,
+    updateChatTitle,
+    deleteChat,
+  });
 
   return {
     service,
@@ -103,6 +111,7 @@ export type {
   IMServiceOptions,
   IMServicePublicApi,
   PrepareNewChatInput,
+  RenameChatInput,
   SubmitMessageInput,
 } from './imService';
 export type { IMStore, IMStoreApi, IMStoreState } from './store';
