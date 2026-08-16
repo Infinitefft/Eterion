@@ -19,12 +19,14 @@ const defaultSystemPrompt = "你是 Eterion 的 AI 助手。请准确、清晰�
 // ModelConfig 描述一个可以由前端选择的 OpenAI 兼容文本模型。
 // APIKey 只在服务端使用，不会通过模型列表或 IM 协议返回给浏览器。
 type ModelConfig struct {
-	ID          string
-	DisplayName string
-	Provider    string
-	APIKey      string
-	BaseURL     string
-	Model       string
+	ID           string
+	ModelName    string
+	Provider     string
+	ProviderName string
+	IconURL      string
+	APIKey       string
+	BaseURL      string
+	Model        string
 }
 
 type Config struct {
@@ -163,6 +165,9 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(model.Model) == "" {
 			return fmt.Errorf("%s provider model name is required", id)
 		}
+		if strings.TrimSpace(model.ModelName) == "" {
+			return fmt.Errorf("%s public model name is required", id)
+		}
 		if id == strings.TrimSpace(c.DefaultModelID) {
 			defaultFound = true
 		}
@@ -175,51 +180,67 @@ func (c Config) Validate() error {
 
 func loadModelConfigs() []ModelConfig {
 	definitions := []struct {
-		id          string
-		displayName string
-		provider    string
-		prefix      string
-		baseURL     string
+		id             string
+		provider       string
+		providerName   string
+		modelPrefix    string
+		providerPrefix string
+		modelName      string
+		baseURL        string
+		iconURL        string
 	}{
 		{
-			id:          "doubao",
-			displayName: "豆包",
-			provider:    "doubao",
-			prefix:      "DOUBAO",
-			baseURL:     "https://ark.cn-beijing.volces.com/api/v3",
+			id:             "doubao-seed-2-1-pro",
+			provider:       "doubao",
+			providerName:   "豆包",
+			modelPrefix:    "DOUBAO_SEED_2_1_PRO",
+			providerPrefix: "DOUBAO",
+			modelName:      "Doubao-Seed-2.1-pro",
+			baseURL:        "https://ark.cn-beijing.volces.com/api/v3",
+			iconURL:        "/model-icons/doubao-seed-2-1-pro.png",
 		},
 		{
-			id:          "deepseek",
-			displayName: "DeepSeek",
-			provider:    "deepseek",
-			prefix:      "DEEPSEEK",
-			baseURL:     "https://api.deepseek.com",
+			id:             "deepseek-v4-pro",
+			provider:       "deepseek",
+			providerName:   "DeepSeek",
+			modelPrefix:    "DEEPSEEK_V4_PRO",
+			providerPrefix: "DEEPSEEK",
+			modelName:      "DeepSeek-V4-Pro",
+			baseURL:        "https://api.deepseek.com",
+			iconURL:        "/model-icons/deepseek-v4-pro.png",
 		},
 		{
-			id:          "minimax",
-			displayName: "MiniMax",
-			provider:    "minimax",
-			prefix:      "MINIMAX",
-			baseURL:     "https://api.minimaxi.com/v1",
+			id:             "minimax-m2-7",
+			provider:       "minimax",
+			providerName:   "MiniMax",
+			modelPrefix:    "MINIMAX_M2_7",
+			providerPrefix: "MINIMAX",
+			modelName:      "MiniMax M2.7",
+			baseURL:        "https://api.minimaxi.com/v1",
+			iconURL:        "/model-icons/minimax-m2-7.png",
 		},
 	}
 
 	models := make([]ModelConfig, 0, len(definitions))
 	for _, definition := range definitions {
-		apiKey := strings.TrimSpace(os.Getenv(definition.prefix + "_API_KEY"))
-		providerModel := strings.TrimSpace(os.Getenv(definition.prefix + "_MODEL"))
-		// 完全没有填写时视为未启用；只填写一部分时保留配置，交给
-		// Validate 给出明确错误，避免服务悄悄隐藏拼写错误的模型。
-		if apiKey == "" && providerModel == "" {
+		providerModel := strings.TrimSpace(os.Getenv(definition.modelPrefix + "_MODEL"))
+		// 模型实例变量决定是否启用；同一厂商的 API Key、Base URL 和图标可以复用。
+		// 填写模型实例但遗漏厂商凭证时，Validate 会返回明确错误。
+		if providerModel == "" {
 			continue
 		}
 		models = append(models, ModelConfig{
-			ID:          definition.id,
-			DisplayName: definition.displayName,
-			Provider:    definition.provider,
-			APIKey:      apiKey,
+			ID:           definition.id,
+			ModelName:    envOrDefault(definition.modelPrefix+"_NAME", definition.modelName),
+			Provider:     definition.provider,
+			ProviderName: definition.providerName,
+			IconURL: envOrDefault(
+				definition.providerPrefix+"_ICON_URL",
+				definition.iconURL,
+			),
+			APIKey: strings.TrimSpace(os.Getenv(definition.providerPrefix + "_API_KEY")),
 			BaseURL: envOrDefault(
-				definition.prefix+"_BASE_URL",
+				definition.providerPrefix+"_BASE_URL",
 				definition.baseURL,
 			),
 			Model: providerModel,

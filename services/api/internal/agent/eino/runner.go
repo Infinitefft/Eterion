@@ -23,8 +23,10 @@ const (
 // Config configures the Eino model and the maximum duration of one Agent run.
 type Config struct {
 	ID           string
-	DisplayName  string
+	ModelName    string
 	Provider     string
+	ProviderName string
+	IconURL      string
 	APIKey       string
 	BaseURL      string
 	Model        string

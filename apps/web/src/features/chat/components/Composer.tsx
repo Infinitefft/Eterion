@@ -14,7 +14,7 @@ interface ComposerProps {
   chatId: ChatId;
 }
 
-const TEXTAREA_MIN_HEIGHT = 52;
+const TEXTAREA_MIN_HEIGHT = 44;
 const TEXTAREA_MAX_HEIGHT = 160;
 
 /**
@@ -105,7 +105,7 @@ export function Composer({ chatId }: ComposerProps) {
         ref={textareaRef}
         id='chat-detail-prompt'
         name='prompt'
-        rows={2}
+        rows={1}
         value={prompt}
         placeholder={placeholder}
         disabled={user === null}
@@ -136,6 +136,7 @@ export function Composer({ chatId }: ComposerProps) {
             value={selectedModelId}
             onChange={setSelectedModelId}
             disabled={isChatBusy || isSubmitting}
+            side='top'
           />
 
           {activeRunId ? (

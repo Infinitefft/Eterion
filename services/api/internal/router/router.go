@@ -111,8 +111,10 @@ func New(
 	for _, modelConfig := range cfg.Models {
 		modelConfigs = append(modelConfigs, eino.Config{
 			ID:           modelConfig.ID,
-			DisplayName:  modelConfig.DisplayName,
+			ModelName:    modelConfig.ModelName,
 			Provider:     modelConfig.Provider,
+			ProviderName: modelConfig.ProviderName,
+			IconURL:      modelConfig.IconURL,
 			APIKey:       modelConfig.APIKey,
 			BaseURL:      modelConfig.BaseURL,
 			Model:        modelConfig.Model,
@@ -126,8 +128,9 @@ func New(
 		defaultModelID = "default"
 		modelConfigs = append(modelConfigs, eino.Config{
 			ID:           defaultModelID,
-			DisplayName:  "默认模型",
+			ModelName:    cfg.ModelName,
 			Provider:     "openai-compatible",
+			ProviderName: "OpenAI 兼容",
 			APIKey:       cfg.ModelAPIKey,
 			BaseURL:      cfg.ModelBaseURL,
 			Model:        cfg.ModelName,

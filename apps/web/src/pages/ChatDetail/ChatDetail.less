@@ -8,7 +8,7 @@
 }
 
 .chat-detail-alert {
-  width: min(820px, calc(100% - 40px));
+  width: min(880px, calc(100% - 40px));
   margin: 12px auto 0;
   padding: 10px 13px;
   color: #9f2d20;
@@ -33,7 +33,7 @@
 
 .chat-message-list,
 .chat-message-empty {
-  width: min(760px, calc(100% - 40px));
+  width: min(880px, calc(100% - 40px));
   margin: 0 auto;
 }
 
@@ -266,7 +266,7 @@
 .chat-detail-composer {
   position: relative;
   z-index: 2;
-  width: min(760px, calc(100% - 40px));
+  width: min(880px, calc(100% - 40px));
   margin: 10px auto max(14px, env(safe-area-inset-bottom));
   padding: 11px 12px 9px;
   background: #fff;
@@ -290,7 +290,7 @@
 .chat-detail-composer textarea {
   display: block;
   width: 100%;
-  min-height: 52px;
+  min-height: 44px;
   max-height: 160px;
   padding: 4px 7px;
   color: var(--ink);
@@ -448,6 +448,10 @@
 }
 
 @media (max-width: 640px) {
+  .chat-detail-page {
+    height: var(--app-viewport-height, 100dvh);
+  }
+
   .chat-detail-alert,
   .chat-message-list,
   .chat-message-empty {
@@ -481,7 +485,7 @@
 
   .chat-detail-composer {
     width: min(100% - 24px, 760px);
-    margin-bottom: max(12px, env(safe-area-inset-bottom));
+    margin-bottom: max(18px, env(safe-area-inset-bottom));
     border-radius: 18px;
   }
 

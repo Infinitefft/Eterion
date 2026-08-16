@@ -7,13 +7,10 @@ import { getIMService } from '@/service/im';
 import type { ModelId } from '@/service/im/types';
 import { useAuthStore } from '@/store/authStore';
 
-import {
-  resizeComposerTextarea,
-  submitComposerOnEnter,
-} from '../utils/composerInput';
+import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';
 import ModelList from './ModelList/ModelList';
 
-const TEXTAREA_MIN_HEIGHT = 58;
+const TEXTAREA_MIN_HEIGHT = 44;
 const TEXTAREA_MAX_HEIGHT = 154;
 
 /**
@@ -52,9 +49,7 @@ export function NewChatComposer() {
 
       void navigate(createChatDetailPath(chatId));
     } catch (error) {
-      setSubmitError(
-        error instanceof Error ? error.message : '创建新会话失败',
-      );
+      setSubmitError(error instanceof Error ? error.message : '创建新会话失败');
     }
   }
 
@@ -68,13 +63,11 @@ export function NewChatComposer() {
         <textarea
           id='chat-prompt'
           name='prompt'
-          rows={2}
+          rows={1}
           placeholder='给 Eterion 发送消息'
           value={prompt}
           onChange={handlePromptChange}
-          onKeyDown={(event) =>
-            submitComposerOnEnter(event, normalizedPrompt.length > 0)
-          }
+          onKeyDown={(event) => submitComposerOnEnter(event, normalizedPrompt.length > 0)}
           onInput={(event) =>
             resizeComposerTextarea(event.currentTarget, {
               minHeight: TEXTAREA_MIN_HEIGHT,
@@ -92,10 +85,7 @@ export function NewChatComposer() {
           </div>
 
           <div className='composer-actions'>
-            <ModelList
-              value={selectedModelId}
-              onChange={setSelectedModelId}
-            />
+            <ModelList value={selectedModelId} onChange={setSelectedModelId} />
 
             <button
               className='send-button'

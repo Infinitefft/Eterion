@@ -1,4 +1,4 @@
-@chat-mobile-breakpoint: 620px;
+@chat-mobile-breakpoint: 640px;
 
 .chat-page {
   position: relative;
@@ -34,7 +34,7 @@
 
 .chat-interaction-shell {
   position: relative;
-  width: min(792px, calc(100% - 24px));
+  width: min(912px, calc(100% - 24px));
   margin: 0 auto;
   padding: clamp(120px, 16vh, 146px) 16px 36px;
   overflow: visible;
@@ -153,7 +153,7 @@
 }
 
 .composer-dock {
-  width: min(760px, calc(100% - 40px));
+  width: min(880px, calc(100% - 40px));
   margin: 0 auto;
   padding: 12px 0 16px;
 }
@@ -200,7 +200,7 @@
   textarea {
     display: block;
     width: 100%;
-    min-height: 58px;
+    min-height: 44px;
     max-height: 154px;
     padding: 4px 7px;
     resize: none;
@@ -282,7 +282,7 @@
 }
 
 .conversation-thread {
-  width: min(760px, calc(100% - 40px));
+  width: min(880px, calc(100% - 40px));
   min-height: 0;
   margin: 0 auto;
   padding: 58px 0 32px;
@@ -400,13 +400,17 @@
 
 @media (max-width: @chat-mobile-breakpoint) {
   .chat-page {
-    min-height: 500px;
+    height: var(--app-viewport-height, 100dvh);
+    min-height: 0;
   }
 
   .new-conversation {
-    padding-top: 24px;
-    padding-bottom: 24px;
-    transform: translateY(-16px);
+    display: flex;
+    align-self: stretch;
+    align-items: flex-end;
+    min-height: 0;
+    padding: 0 0 max(18px, env(safe-area-inset-bottom));
+    transform: none;
 
     .composer-dock {
       padding-bottom: 0;
@@ -415,7 +419,8 @@
 
   .chat-interaction-shell {
     width: calc(100% - 12px);
-    padding: 100px 8px 26px;
+    margin: auto auto 0;
+    padding: 100px 8px 0;
 
     &::before {
       right: 5px;

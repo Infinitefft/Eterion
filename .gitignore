@@ -6,7 +6,7 @@
 
 # Non-core repository directories
 /docs/
-/services/api/docs/
+/services/api/docs/*
 !/services/api/docs/openapi.yaml
 !/services/api/docs/spec.go
 /scripts/

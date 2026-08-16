@@ -50,9 +50,11 @@ func NewRoutingRunner(
 		}
 		routing.runners[config.ID] = runner
 		routing.models = append(routing.models, agent.ModelInfo{
-			ID:          config.ID,
-			DisplayName: strings.TrimSpace(config.DisplayName),
-			Provider:    strings.TrimSpace(config.Provider),
+			ID:           config.ID,
+			ModelName:    strings.TrimSpace(config.ModelName),
+			Provider:     strings.TrimSpace(config.Provider),
+			ProviderName: strings.TrimSpace(config.ProviderName),
+			IconURL:      strings.TrimSpace(config.IconURL),
 		})
 	}
 

@@ -1,0 +1,589 @@
+openapi: 3.0.3
+info:
+  title: Eterion API
+  version: current
+  description: |
+    Eterion Go 后端当前公开的 HTTP API 契约。
+
+    API 路径不使用版本号。受保护接口通过 Authorization 请求头携带
+    Bearer JWT Access Token，并同时校验数据库中的会话和用户状态。
+servers:
+  - url: /
+    description: 当前 API 服务
+tags:
+  - name: Health
+    description: 服务健康状态
+  - name: Auth
+    description: 注册、登录、JWT 鉴权、Refresh Token 轮换和退出登录
+  - name: Chat
+    description: 对话、模型目录和实时消息接口
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: 检查 API 和数据库状态
+      security: []
+      responses:
+        "200":
+          description: API 与 PostgreSQL 均可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthSuccessResponse"
+              example:
+                data:
+                  status: ok
+                request_id: 67b64aaa-5608-46c3-b7db-a7484576cf23
+        "503":
+          description: PostgreSQL 暂时不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: DATABASE_UNAVAILABLE
+                  message: 数据库暂时不可用
+                  next_action: RETRY_LATER
+                request_id: 67b64aaa-5608-46c3-b7db-a7484576cf23
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: 使用手机号、昵称和密码注册
+      description: 注册成功后自动创建认证会话，通过 JSON 返回 AT，并通过 HttpOnly Cookie 返回 RT。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+            example:
+              phone: "13800138000"
+              nickname: Eterion用户
+              password: example-password
+      responses:
+        "201":
+          description: 注册并登录成功
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/RefreshTokenCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSuccessResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          description: 手机号或昵称已被使用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                phoneExists:
+                  summary: 手机号已注册
+                  value:
+                    error:
+                      code: AUTH_PHONE_EXISTS
+                      message: 该手机号已被注册
+                      next_action: LOGIN_OR_USE_ANOTHER_PHONE
+                nicknameExists:
+                  summary: 昵称已使用
+                  value:
+                    error:
+                      code: AUTH_NICKNAME_EXISTS
+                      message: 该昵称已被使用
+                      next_action: CHOOSE_ANOTHER_NICKNAME
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: 使用手机号和密码登录
+      description: 验证成功后创建独立认证会话，通过 JSON 返回 AT，并通过 HttpOnly Cookie 返回 RT。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              phone: "13800138000"
+              password: example-password
+      responses:
+        "200":
+          description: 登录成功
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/RefreshTokenCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSuccessResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: 手机号或密码错误，或账号不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: AUTH_INVALID_CREDENTIALS
+                  message: 账号或密码错误
+                  next_action: CHECK_CREDENTIALS
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshAccessToken
+      summary: 使用 RT 刷新 AT
+      description: |
+        从 `eterion_rt` HttpOnly Cookie 读取 RT。在数据库事务中消费旧 RT、
+        创建替代 RT 并签发新 AT。Swagger UI 与 API 同源，注册或登录成功后
+        浏览器会自动保存 Cookie，可直接调用此接口。
+      security:
+        - refreshCookie: []
+      responses:
+        "200":
+          description: Token 轮换成功
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/RefreshTokenCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSuccessResponse"
+        "401":
+          description: RT 缺失、无效、过期、已撤销或发生重放
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missing:
+                  value:
+                    error:
+                      code: AUTH_REFRESH_MISSING
+                      message: 缺少刷新凭证，请重新登录
+                      next_action: LOGIN_AGAIN
+                invalid:
+                  value:
+                    error:
+                      code: AUTH_REFRESH_INVALID
+                      message: 刷新凭证无效，请重新登录
+                      next_action: LOGIN_AGAIN
+                expired:
+                  value:
+                    error:
+                      code: AUTH_REFRESH_EXPIRED
+                      message: 登录状态已过期，请重新登录
+                      next_action: LOGIN_AGAIN
+                reused:
+                  value:
+                    error:
+                      code: AUTH_REFRESH_REUSED
+                      message: 刷新凭证已被重复使用，请重新登录
+                      next_action: LOGIN_AGAIN
+        "403":
+          description: 请求 Origin 不受信任，或用户已被禁用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                originForbidden:
+                  value:
+                    error:
+                      code: AUTH_ORIGIN_FORBIDDEN
+                      message: 请求来源不受信任
+                      next_action: USE_ALLOWED_ORIGIN
+                accountDisabled:
+                  value:
+                    error:
+                      code: AUTH_ACCOUNT_DISABLED
+                      message: 账号当前不可用，请联系管理员
+                      next_action: CONTACT_SUPPORT
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: 获取当前登录用户
+      description: 校验 Bearer AT、JWT Claims、数据库会话状态和用户状态后返回当前用户。
+      security:
+        - accessBearer: []
+      responses:
+        "200":
+          description: 当前用户信息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSuccessResponse"
+        "401":
+          $ref: "#/components/responses/AccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/AccountForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: 退出当前登录会话
+      description: 撤销 AT 中 sid 对应的会话及其全部 RT，并清除 RT Cookie；当前会话签发的旧 AT 会立即失效。
+      security:
+        - accessBearer: []
+      responses:
+        "204":
+          description: 退出成功
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/ClearedRefreshTokenCookie"
+        "401":
+          $ref: "#/components/responses/AccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/AccountForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/chat/models:
+    get:
+      tags: [Chat]
+      operationId: listChatModels
+      summary: 获取当前可用的文本模型目录
+      description: |
+        返回服务端环境变量中完整配置的模型。`id` 是客户端和 IM 协议使用的稳定标识，
+        `modelName` 来自模型实例级 `*_NAME` 环境变量，仅用于前端展示；模型厂商请求参数
+        则来自对应的 `*_MODEL` 环境变量。API Key 和 Base URL 不会返回。
+      security:
+        - accessBearer: []
+      responses:
+        "200":
+          description: 已启用模型及默认模型
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatModelCatalogSuccessResponse"
+              example:
+                data:
+                  default_model_id: deepseek-v4-pro
+                  models:
+                    - id: doubao-seed-2-1-pro
+                      modelName: Doubao-Seed-2.1-pro
+                      provider: doubao
+                      providerName: 豆包
+                      icon_url: /model-icons/doubao-seed-2-1-pro.png
+                    - id: deepseek-v4-pro
+                      modelName: DeepSeek-V4-Pro
+                      provider: deepseek
+                      providerName: DeepSeek
+                      icon_url: /model-icons/deepseek-v4-pro.png
+                    - id: minimax-m2-7
+                      modelName: MiniMax M2.7
+                      provider: minimax
+                      providerName: MiniMax
+                      icon_url: /model-icons/minimax-m2-7.png
+                request_id: 67b64aaa-5608-46c3-b7db-a7484576cf23
+        "401":
+          $ref: "#/components/responses/AccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/AccountForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    accessBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 注册、登录或刷新成功后，通过 JSON 返回的 Access Token。
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: eterion_rt
+      description: 登录或注册成功后由服务端设置的 HttpOnly Refresh Token Cookie。
+
+  headers:
+    RefreshTokenCookie:
+      description: HttpOnly Refresh Token Cookie；Path 为 `/api/auth`，SameSite 为 Lax。
+      schema:
+        type: string
+        example: eterion_rt=opaque-token; Path=/api/auth; HttpOnly; SameSite=Lax
+    ClearedRefreshTokenCookie:
+      description: 清除当前浏览器中的 Refresh Token Cookie。
+      schema:
+        type: string
+        example: eterion_rt=; Path=/api/auth; Max-Age=0; HttpOnly; SameSite=Lax
+
+  responses:
+    AccessUnauthorized:
+      description: AT 缺失、无效、过期，或登录会话已失效
+      headers:
+        WWW-Authenticate:
+          description: Bearer 认证方案提示。
+          schema:
+            type: string
+            example: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missing:
+              value:
+                error:
+                  code: AUTH_ACCESS_MISSING
+                  message: 缺少访问凭证
+                  next_action: LOGIN_REQUIRED
+            expired:
+              value:
+                error:
+                  code: AUTH_ACCESS_EXPIRED
+                  message: 访问凭证已过期
+                  next_action: REFRESH_ACCESS_TOKEN
+            invalid:
+              value:
+                error:
+                  code: AUTH_ACCESS_INVALID
+                  message: 访问凭证无效
+                  next_action: LOGIN_AGAIN
+            sessionInvalid:
+              value:
+                error:
+                  code: AUTH_SESSION_INVALID
+                  message: 登录会话已失效，请重新登录
+                  next_action: LOGIN_AGAIN
+    AccountForbidden:
+      description: 当前用户已被禁用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: AUTH_ACCOUNT_DISABLED
+              message: 账号当前不可用，请联系管理员
+              next_action: CONTACT_SUPPORT
+    ValidationError:
+      description: 请求 JSON 或字段不符合约束
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: 请求参数不合法
+              next_action: FIX_INPUT
+              fields:
+                phone: 手机号须为有效的中国大陆 11 位手机号码
+            request_id: 67b64aaa-5608-46c3-b7db-a7484576cf23
+    InternalError:
+      description: 服务内部错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: 服务暂时不可用
+              next_action: RETRY_LATER
+            request_id: 67b64aaa-5608-46c3-b7db-a7484576cf23
+
+  schemas:
+    ChatModel:
+      type: object
+      required: [id, modelName, provider, providerName, icon_url]
+      properties:
+        id:
+          type: string
+          description: 客户端提交 `model_id` 时使用的稳定模型标识。
+          example: deepseek-v4-pro
+        modelName:
+          type: string
+          description: 模型实例级 `*_NAME` 环境变量提供的前端展示名称。
+          example: DeepSeek-V4-Pro
+        provider:
+          type: string
+          description: 程序使用的稳定提供方标识。
+          example: deepseek
+        providerName:
+          type: string
+          description: 面向用户展示的提供方名称。
+          example: DeepSeek
+        icon_url:
+          type: string
+          description: 前端可访问的品牌图标 URL 或站内静态资源路径。
+          example: /model-icons/deepseek-v4-pro.png
+
+    ChatModelCatalogData:
+      type: object
+      required: [default_model_id, models]
+      properties:
+        default_model_id:
+          type: string
+          description: 前端未显式提交 `model_id` 时使用的稳定模型标识。
+          example: deepseek-v4-pro
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatModel"
+
+    ChatModelCatalogSuccessResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/ChatModelCatalogData"
+        request_id:
+          type: string
+          format: uuid
+
+    RegisterRequest:
+      type: object
+      required: [phone, nickname, password]
+      properties:
+        phone:
+          type: string
+          pattern: "^1[3-9][0-9]{9}$"
+          description: 中国大陆 11 位手机号码。
+          example: "13800138000"
+        nickname:
+          type: string
+          minLength: 2
+          maxLength: 32
+          description: 昵称会执行 Unicode NFKC 规范化并按不区分大小写的值判重。
+          example: Eterion用户
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          description: UTF-8 编码后必须为 8–72 字节。
+          example: example-password
+
+    LoginRequest:
+      type: object
+      required: [phone, password]
+      properties:
+        phone:
+          type: string
+          pattern: "^1[3-9][0-9]{9}$"
+          example: "13800138000"
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          description: UTF-8 编码后必须为 8–72 字节。
+          example: example-password
+
+    UserResponse:
+      type: object
+      required: [id, phone, nickname]
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+          example: "13800138000"
+        nickname:
+          type: string
+          example: Eterion用户
+
+    AuthResponseData:
+      type: object
+      required: [access_token, token_type, expires_in, user]
+      properties:
+        access_token:
+          type: string
+          description: HS256 签名的 JWT Access Token。
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 900
+        user:
+          $ref: "#/components/schemas/UserResponse"
+
+    AuthSuccessResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/AuthResponseData"
+        request_id:
+          type: string
+          format: uuid
+
+    UserSuccessResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/UserResponse"
+        request_id:
+          type: string
+          format: uuid
+
+    HealthData:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+
+    HealthSuccessResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/HealthData"
+        request_id:
+          type: string
+          format: uuid
+
+    ErrorBody:
+      type: object
+      required: [code, message, next_action]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        next_action:
+          type: string
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+        request_id:
+          type: string
+          format: uuid

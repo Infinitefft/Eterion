@@ -18,11 +18,13 @@ type Input struct {
 }
 
 // ModelInfo 是可以安全返回给前端的模型目录信息。
-// 厂商 API Key、Base URL 和真实模型名只保留在服务端配置中。
+// 完整模型名用于下拉展示；厂商 API Key 和 Base URL 始终只保留在服务端。
 type ModelInfo struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name"`
-	Provider    string `json:"provider"`
+	ID           string `json:"id"`
+	ModelName    string `json:"modelName"`
+	Provider     string `json:"provider"`
+	ProviderName string `json:"providerName"`
+	IconURL      string `json:"icon_url"`
 }
 
 // ModelCatalog 负责解析前端提交的稳定模型 ID。

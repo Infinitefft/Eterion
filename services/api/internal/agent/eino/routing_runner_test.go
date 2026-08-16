@@ -42,33 +42,56 @@ func TestRoutingRunnerSelectsConfiguredTextModel(t *testing.T) {
 
 	runner, err := NewRoutingRunner(context.Background(), []Config{
 		{
-			ID:           "doubao",
-			DisplayName:  "豆包",
+			ID:           "doubao-seed-2-1-pro",
+			ModelName:    "Doubao-Seed-2.1-pro",
 			Provider:     "doubao",
+			ProviderName: "豆包",
+			IconURL:      "https://www.doubao.com/favicon.ico",
 			APIKey:       "doubao-key",
 			BaseURL:      server.URL + "/v1",
 			Model:        "doubao-model",
 			SystemPrompt: "system",
 		},
 		{
-			ID:           "deepseek",
-			DisplayName:  "DeepSeek",
+			ID:           "deepseek-v4-pro",
+			ModelName:    "DeepSeek-V4-Pro",
 			Provider:     "deepseek",
+			ProviderName: "DeepSeek",
+			IconURL:      "https://www.deepseek.com/favicon.ico",
 			APIKey:       "deepseek-key",
 			BaseURL:      server.URL + "/v1",
 			Model:        "deepseek-model",
 			SystemPrompt: "system",
 		},
-	}, "doubao")
+	}, "doubao-seed-2-1-pro")
 	if err != nil {
 		t.Fatalf("create routing runner: %v", err)
+	}
+	models := runner.Models()
+	if len(models) != 2 {
+		t.Fatalf("unexpected model count: %d", len(models))
+	}
+	var deepseekInfo *agent.ModelInfo
+	for index := range models {
+		if models[index].ID == "deepseek-v4-pro" {
+			deepseekInfo = &models[index]
+			break
+		}
+	}
+	if deepseekInfo == nil {
+		t.Fatal("deepseek model info is missing")
+	}
+	if deepseekInfo.ModelName != "DeepSeek-V4-Pro" ||
+		deepseekInfo.ProviderName != "DeepSeek" ||
+		deepseekInfo.IconURL != "https://www.deepseek.com/favicon.ico" {
+		t.Fatalf("unexpected public model info: %+v", *deepseekInfo)
 	}
 
 	var text strings.Builder
 	err = runner.Run(context.Background(), agent.Input{
 		RunID:   "run-1",
 		ChatID:  "chat-1",
-		ModelID: "deepseek",
+		ModelID: "deepseek-v4-pro",
 		Messages: []agent.Message{
 			{Role: "user", Content: "你好"},
 		},

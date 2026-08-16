@@ -19,9 +19,32 @@ const queryClient = new QueryClient({
 // 在模块初始化阶段只启动一次登录恢复，避免 React StrictMode 重复轮换 Refresh Token。
 void ensureAuthInitialized();
 
+function useVisualViewportHeight() {
+  useEffect(() => {
+    const visualViewport = window.visualViewport;
+
+    function updateViewportHeight() {
+      const viewportHeight = visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty('--app-viewport-height', `${viewportHeight}px`);
+    }
+
+    updateViewportHeight();
+    window.addEventListener('resize', updateViewportHeight);
+    visualViewport?.addEventListener('resize', updateViewportHeight);
+
+    return () => {
+      window.removeEventListener('resize', updateViewportHeight);
+      visualViewport?.removeEventListener('resize', updateViewportHeight);
+      document.documentElement.style.removeProperty('--app-viewport-height');
+    };
+  }, []);
+}
+
 /** 注册应用级 Provider；后续全局 Provider 也统一从这里组合。 */
 export function AppProviders({ children }: PropsWithChildren) {
   const userId = useAuthStore((state) => state.user?.id ?? null);
+
+  useVisualViewportHeight();
 
   useEffect(() => {
     const service = getIMService();
