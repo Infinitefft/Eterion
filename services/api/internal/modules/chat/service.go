@@ -28,6 +28,7 @@ func (s *Service) StartChat(
 	chatID uuid.UUID,
 	messageID uuid.UUID,
 	idempotencyKey string,
+	modelID string,
 	title *string,
 	content string,
 	format TextFormat,
@@ -54,6 +55,7 @@ func (s *Service) StartChat(
 		chatID,
 		messageID,
 		idempotencyKey,
+		modelID,
 		normalizedTitle,
 		content,
 		format,
@@ -119,6 +121,81 @@ func (s *Service) ListChats(
 		result = append(result, chatResponse(chat))
 	}
 	return result, nil
+}
+
+func (s *Service) UpdateChat(
+	ctx context.Context,
+	userID uuid.UUID,
+	chatID uuid.UUID,
+	request UpdateChatRequest,
+) (*ChatResponse, error) {
+	title := strings.TrimSpace(request.Title)
+	if title == "" {
+		return nil, newBusinessError(
+			ErrorInvalidEnvelope,
+			"Chat 标题不能为空",
+			false,
+			http.StatusBadRequest,
+		)
+	}
+	if utf8.RuneCountInString(title) > maxChatTitleRunes {
+		return nil, newBusinessError(
+			ErrorInvalidEnvelope,
+			"Chat 标题不能超过 120 个字符",
+			false,
+			http.StatusBadRequest,
+		)
+	}
+
+	chat, err := s.repository.UpdateChatTitle(
+		ctx,
+		userID,
+		chatID,
+		title,
+		s.now(),
+	)
+	if errors.Is(err, ErrRepositoryChatNotFound) {
+		return nil, newBusinessError(
+			ErrorChatNotFound,
+			"Chat 不存在或无权访问",
+			false,
+			http.StatusNotFound,
+		)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	result := chatResponse(*chat)
+	return &result, nil
+}
+
+func (s *Service) DeleteChat(
+	ctx context.Context,
+	userID uuid.UUID,
+	chatID uuid.UUID,
+) error {
+	err := s.repository.DeleteChat(ctx, userID, chatID)
+	switch {
+	case errors.Is(err, ErrRepositoryChatNotFound):
+		return newBusinessError(
+			ErrorChatNotFound,
+			"Chat 不存在或无权访问",
+			false,
+			http.StatusNotFound,
+		)
+	case errors.Is(err, ErrRepositoryRunActive):
+		return newBusinessError(
+			ErrorRunActive,
+			"Agent 正在回答，请等待完成或停止生成后再删除会话",
+			true,
+			http.StatusConflict,
+		)
+	case err != nil:
+		return err
+	default:
+		return nil
+	}
 }
 
 func (s *Service) RequireChat(
@@ -201,6 +278,7 @@ func (s *Service) Submit(
 	chatID uuid.UUID,
 	messageID uuid.UUID,
 	idempotencyKey string,
+	modelID string,
 	content string,
 	format TextFormat,
 ) (*SubmitRecord, error) {
@@ -210,6 +288,7 @@ func (s *Service) Submit(
 		chatID,
 		messageID,
 		idempotencyKey,
+		modelID,
 		content,
 		format,
 		s.now(),

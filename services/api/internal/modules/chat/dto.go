@@ -7,6 +7,10 @@ type CreateChatRequest struct {
 	Title string `json:"title"`
 }
 
+type UpdateChatRequest struct {
+	Title string `json:"title"`
+}
+
 type ChatResponse struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
@@ -37,6 +41,7 @@ type SnapshotMessage struct {
 type SnapshotRun struct {
 	ID              string        `json:"id"`
 	ChatID          string        `json:"chatId"`
+	ModelID         string        `json:"modelId"`
 	InputMessageID  string        `json:"inputMessageId"`
 	OutputMessageID string        `json:"outputMessageId"`
 	Status          RunStatus     `json:"status"`

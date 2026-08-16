@@ -22,6 +22,9 @@ const (
 
 // Config configures the Eino model and the maximum duration of one Agent run.
 type Config struct {
+	ID           string
+	DisplayName  string
+	Provider     string
 	APIKey       string
 	BaseURL      string
 	Model        string
@@ -34,7 +37,7 @@ type Config struct {
 // The model is created once and is safe to reuse across concurrent chat runs.
 type Runner struct {
 	model        model.BaseChatModel
-	modelName    string
+	modelID      string
 	systemPrompt string
 	runTimeout   time.Duration
 }
@@ -62,9 +65,13 @@ func NewRunner(ctx context.Context, config Config) (*Runner, error) {
 }
 
 func newRunner(chatModel model.BaseChatModel, config Config) *Runner {
+	modelID := strings.TrimSpace(config.ID)
+	if modelID == "" {
+		modelID = config.Model
+	}
 	return &Runner{
 		model:        chatModel,
-		modelName:    config.Model,
+		modelID:      modelID,
 		systemPrompt: config.SystemPrompt,
 		runTimeout:   config.RunTimeout,
 	}
@@ -90,7 +97,7 @@ func (r *Runner) Run(
 
 	if err := handle(agent.Event{
 		Type:  agent.EventStarted,
-		Model: r.modelName,
+		Model: r.modelID,
 	}); err != nil {
 		return err
 	}

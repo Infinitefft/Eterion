@@ -69,6 +69,7 @@ type Run struct {
 	ID              uuid.UUID `gorm:"type:uuid;primaryKey"`
 	ChatID          uuid.UUID `gorm:"type:uuid;index"`
 	UserID          uuid.UUID `gorm:"type:uuid;index"`
+	ModelID         string    `gorm:"column:model_id"`
 	InputMessageID  uuid.UUID `gorm:"type:uuid"`
 	OutputMessageID uuid.UUID `gorm:"type:uuid"`
 	Status          RunStatus

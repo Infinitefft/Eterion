@@ -51,8 +51,14 @@ func New(
 		middleware.Logging(logger),
 		middleware.Recovery(logger),
 		cors.New(cors.Config{
-			AllowOrigins:     cfg.AllowedOrigins,
-			AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodOptions},
+			AllowOrigins: cfg.AllowedOrigins,
+			AllowMethods: []string{
+				http.MethodGet,
+				http.MethodPost,
+				http.MethodPatch,
+				http.MethodDelete,
+				http.MethodOptions,
+			},
 			AllowHeaders:     []string{"Accept", "Authorization", "Content-Type", "Origin"},
 			ExposeHeaders:    []string{"X-Request-ID"},
 			AllowCredentials: true,
@@ -101,14 +107,40 @@ func New(
 	chatService := chat.NewService(chatRepository)
 	hub := chat.NewHub(logger)
 	publisher := chat.NewPublisher(hub)
-	runner, err := eino.NewRunner(appContext, eino.Config{
-		APIKey:       cfg.ModelAPIKey,
-		BaseURL:      cfg.ModelBaseURL,
-		Model:        cfg.ModelName,
-		SystemPrompt: cfg.SystemPrompt,
-		ModelTimeout: cfg.ModelTimeout,
-		RunTimeout:   cfg.AgentRunTimeout,
-	})
+	modelConfigs := make([]eino.Config, 0, len(cfg.Models))
+	for _, modelConfig := range cfg.Models {
+		modelConfigs = append(modelConfigs, eino.Config{
+			ID:           modelConfig.ID,
+			DisplayName:  modelConfig.DisplayName,
+			Provider:     modelConfig.Provider,
+			APIKey:       modelConfig.APIKey,
+			BaseURL:      modelConfig.BaseURL,
+			Model:        modelConfig.Model,
+			SystemPrompt: cfg.SystemPrompt,
+			ModelTimeout: cfg.ModelTimeout,
+			RunTimeout:   cfg.AgentRunTimeout,
+		})
+	}
+	defaultModelID := cfg.DefaultModelID
+	if len(modelConfigs) == 0 {
+		defaultModelID = "default"
+		modelConfigs = append(modelConfigs, eino.Config{
+			ID:           defaultModelID,
+			DisplayName:  "默认模型",
+			Provider:     "openai-compatible",
+			APIKey:       cfg.ModelAPIKey,
+			BaseURL:      cfg.ModelBaseURL,
+			Model:        cfg.ModelName,
+			SystemPrompt: cfg.SystemPrompt,
+			ModelTimeout: cfg.ModelTimeout,
+			RunTimeout:   cfg.AgentRunTimeout,
+		})
+	}
+	runner, err := eino.NewRoutingRunner(
+		appContext,
+		modelConfigs,
+		defaultModelID,
+	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("initialize agent runner: %w", err)
 	}
@@ -124,6 +156,7 @@ func New(
 		runManager,
 		publisher,
 		logger,
+		runner,
 	)
 	chatHandler := chat.NewHandler(
 		chatService,
@@ -133,6 +166,7 @@ func New(
 		commandRouter,
 		cfg,
 		logger,
+		runner,
 	)
 
 	api := engine.Group("/api")

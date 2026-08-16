@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Infinitefft/Eterion/services/api/internal/agent"
 	"github.com/Infinitefft/Eterion/services/api/internal/config"
 	"github.com/Infinitefft/Eterion/services/api/internal/modules/auth"
 	apperrors "github.com/Infinitefft/Eterion/services/api/internal/shared/errors"
@@ -30,6 +31,7 @@ type Handler struct {
 	hub       *Hub
 	publisher *Publisher
 	commands  *CommandRouter
+	models    agent.ModelCatalog
 	config    config.Config
 	logger    *slog.Logger
 	upgrader  websocket.Upgrader
@@ -43,6 +45,7 @@ func NewHandler(
 	commands *CommandRouter,
 	cfg config.Config,
 	logger *slog.Logger,
+	modelCatalog ...agent.ModelCatalog,
 ) *Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -56,6 +59,9 @@ func NewHandler(
 		commands:  commands,
 		config:    cfg,
 		logger:    logger,
+	}
+	if len(modelCatalog) > 0 {
+		handler.models = modelCatalog[0]
 	}
 	handler.upgrader = websocket.Upgrader{
 		ReadBufferSize:  4096,
@@ -73,6 +79,9 @@ func (h *Handler) RegisterRoutes(
 
 	group.POST("", requireAccessToken, h.CreateChat)
 	group.GET("", requireAccessToken, h.ListChats)
+	group.PATCH("/:id", requireAccessToken, h.UpdateChat)
+	group.DELETE("/:id", requireAccessToken, h.DeleteChat)
+	group.GET("/models", requireAccessToken, h.ListModels)
 	group.GET(
 		"/:id/snapshot",
 		requireAccessToken,
@@ -87,6 +96,24 @@ func (h *Handler) RegisterRoutes(
 	// 原生 WebSocket 无法方便地设置 Authorization Header，
 	// 因此连接入口使用前一步申请的一次性 Ticket。
 	group.GET("/ws", h.Connect)
+}
+
+// ListModels 返回当前服务端已经配置完成、可以用于文本对话的模型。
+func (h *Handler) ListModels(c *gin.Context) {
+	if _, ok := h.identity(c); !ok {
+		return
+	}
+	if h.models == nil {
+		response.JSON(c, http.StatusOK, gin.H{
+			"default_model_id": "",
+			"models":           []agent.ModelInfo{},
+		})
+		return
+	}
+	response.JSON(c, http.StatusOK, gin.H{
+		"default_model_id": h.models.DefaultModelID(),
+		"models":           h.models.Models(),
+	})
 }
 
 func (h *Handler) CreateChat(c *gin.Context) {
@@ -133,6 +160,53 @@ func (h *Handler) ListChats(c *gin.Context) {
 		return
 	}
 	response.JSON(c, http.StatusOK, result)
+}
+
+func (h *Handler) UpdateChat(c *gin.Context) {
+	identity, chatID, ok := h.identityAndChatID(c)
+	if !ok {
+		return
+	}
+
+	var request UpdateChatRequest
+	c.Request.Body = http.MaxBytesReader(
+		c.Writer,
+		c.Request.Body,
+		maxCreateChatBodyBytes,
+	)
+	if err := c.ShouldBindJSON(&request); err != nil {
+		h.writeError(c, invalidEnvelope("请求体必须是合法的 JSON 对象"))
+		return
+	}
+
+	result, err := h.service.UpdateChat(
+		c.Request.Context(),
+		identity.UserID,
+		chatID,
+		request,
+	)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	response.JSON(c, http.StatusOK, result)
+}
+
+func (h *Handler) DeleteChat(c *gin.Context) {
+	identity, chatID, ok := h.identityAndChatID(c)
+	if !ok {
+		return
+	}
+
+	if err := h.service.DeleteChat(
+		c.Request.Context(),
+		identity.UserID,
+		chatID,
+	); err != nil {
+		h.writeError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) Snapshot(c *gin.Context) {

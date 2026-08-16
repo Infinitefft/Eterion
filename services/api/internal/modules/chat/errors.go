@@ -4,14 +4,15 @@ package chat
 import "fmt"
 
 const (
-	ErrorInvalidEnvelope = "INVALID_ENVELOPE"
-	ErrorForbidden       = "FORBIDDEN"
-	ErrorChatNotFound    = "CHAT_NOT_FOUND"
-	ErrorRunNotFound     = "RUN_NOT_FOUND"
-	ErrorRunActive       = "RUN_ACTIVE"
-	ErrorInvalidRunState = "INVALID_RUN_STATE"
-	ErrorPayloadTooLarge = "PAYLOAD_TOO_LARGE"
-	ErrorInternal        = "INTERNAL_ERROR"
+	ErrorInvalidEnvelope   = "INVALID_ENVELOPE"
+	ErrorForbidden         = "FORBIDDEN"
+	ErrorChatNotFound      = "CHAT_NOT_FOUND"
+	ErrorRunNotFound       = "RUN_NOT_FOUND"
+	ErrorRunActive         = "RUN_ACTIVE"
+	ErrorInvalidRunState   = "INVALID_RUN_STATE"
+	ErrorPayloadTooLarge   = "PAYLOAD_TOO_LARGE"
+	ErrorModelNotAvailable = "MODEL_NOT_AVAILABLE"
+	ErrorInternal          = "INTERNAL_ERROR"
 )
 
 // BusinessError 使用稳定的 Code 供前端判断，Message 只用于用户展示。

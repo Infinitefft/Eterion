@@ -13,7 +13,23 @@ type Message struct {
 type Input struct {
 	RunID    string
 	ChatID   string
+	ModelID  string
 	Messages []Message
+}
+
+// ModelInfo 是可以安全返回给前端的模型目录信息。
+// 厂商 API Key、Base URL 和真实模型名只保留在服务端配置中。
+type ModelInfo struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Provider    string `json:"provider"`
+}
+
+// ModelCatalog 负责解析前端提交的稳定模型 ID。
+type ModelCatalog interface {
+	DefaultModelID() string
+	ResolveModelID(modelID string) (string, bool)
+	Models() []ModelInfo
 }
 
 // EventType identifies an event produced during Agent execution.

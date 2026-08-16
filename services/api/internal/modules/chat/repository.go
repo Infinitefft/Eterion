@@ -42,6 +42,14 @@ type Repository interface {
 	CreateChat(ctx context.Context, chat *Chat) error
 	ListChats(ctx context.Context, userID uuid.UUID) ([]Chat, error)
 	FindChatOwned(ctx context.Context, userID, chatID uuid.UUID) (*Chat, error)
+	UpdateChatTitle(
+		ctx context.Context,
+		userID uuid.UUID,
+		chatID uuid.UUID,
+		title string,
+		now time.Time,
+	) (*Chat, error)
+	DeleteChat(ctx context.Context, userID, chatID uuid.UUID) error
 	Snapshot(ctx context.Context, userID, chatID uuid.UUID) (*Chat, []Message, []Run, error)
 	StartChat(
 		ctx context.Context,
@@ -49,6 +57,7 @@ type Repository interface {
 		chatID uuid.UUID,
 		messageID uuid.UUID,
 		idempotencyKey string,
+		modelID string,
 		title string,
 		content string,
 		format TextFormat,
@@ -60,6 +69,7 @@ type Repository interface {
 		chatID uuid.UUID,
 		messageID uuid.UUID,
 		idempotencyKey string,
+		modelID string,
 		content string,
 		format TextFormat,
 		now time.Time,
@@ -166,6 +176,88 @@ func (r *GormRepository) FindChatOwned(
 	return &chat, nil
 }
 
+func (r *GormRepository) UpdateChatTitle(
+	ctx context.Context,
+	userID uuid.UUID,
+	chatID uuid.UUID,
+	title string,
+	now time.Time,
+) (*Chat, error) {
+	var chat Chat
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ?", chatID, userID).
+			First(&chat).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrRepositoryChatNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock chat for title update: %w", err)
+		}
+
+		if err := tx.Model(&chat).Updates(map[string]any{
+			"title":      title,
+			"updated_at": now,
+		}).Error; err != nil {
+			return fmt.Errorf("update chat title: %w", err)
+		}
+		chat.Title = title
+		chat.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &chat, nil
+}
+
+func (r *GormRepository) DeleteChat(
+	ctx context.Context,
+	userID uuid.UUID,
+	chatID uuid.UUID,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var chat Chat
+		err := tx.
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ?", chatID, userID).
+			First(&chat).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrRepositoryChatNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock chat for deletion: %w", err)
+		}
+
+		var activeRunCount int64
+		if err := tx.Model(&Run{}).
+			Where(
+				"chat_id = ? AND status IN ?",
+				chatID,
+				[]RunStatus{RunStatusCreated, RunStatusRunning, RunStatusStreaming},
+			).
+			Count(&activeRunCount).Error; err != nil {
+			return fmt.Errorf("check active runs before deleting chat: %w", err)
+		}
+		if activeRunCount > 0 {
+			return ErrRepositoryRunActive
+		}
+
+		// runs 引用 messages，按依赖顺序显式删除，避免 RESTRICT 外键阻止级联。
+		if err := tx.Where("chat_id = ?", chatID).Delete(&Run{}).Error; err != nil {
+			return fmt.Errorf("delete chat runs: %w", err)
+		}
+		if err := tx.Where("chat_id = ?", chatID).Delete(&Message{}).Error; err != nil {
+			return fmt.Errorf("delete chat messages: %w", err)
+		}
+		if err := tx.Delete(&chat).Error; err != nil {
+			return fmt.Errorf("delete chat: %w", err)
+		}
+		return nil
+	})
+}
+
 func (r *GormRepository) Snapshot(
 	ctx context.Context,
 	userID uuid.UUID,
@@ -201,6 +293,7 @@ func (r *GormRepository) StartChat(
 	chatID uuid.UUID,
 	messageID uuid.UUID,
 	idempotencyKey string,
+	modelID string,
 	title string,
 	content string,
 	format TextFormat,
@@ -213,7 +306,7 @@ func (r *GormRepository) StartChat(
 			return err
 		}
 		if duplicate != nil {
-			if !sameSubmitIntent(duplicate, chatID, messageID, content, format) ||
+			if !sameSubmitIntent(duplicate, chatID, messageID, modelID, content, format) ||
 				duplicate.Chat.Title != title {
 				return ErrRepositoryIdempotencyConflict
 			}
@@ -248,6 +341,7 @@ func (r *GormRepository) StartChat(
 			chat,
 			messageID,
 			idempotencyKey,
+			modelID,
 			content,
 			format,
 			now,
@@ -269,7 +363,7 @@ func (r *GormRepository) StartChat(
 				return nil, lookupErr
 			}
 			if duplicate != nil &&
-				sameSubmitIntent(duplicate, chatID, messageID, content, format) &&
+				sameSubmitIntent(duplicate, chatID, messageID, modelID, content, format) &&
 				duplicate.Chat.Title == title {
 				duplicate.Duplicate = true
 				return duplicate, nil
@@ -294,6 +388,7 @@ func (r *GormRepository) Submit(
 	chatID uuid.UUID,
 	messageID uuid.UUID,
 	idempotencyKey string,
+	modelID string,
 	content string,
 	format TextFormat,
 	now time.Time,
@@ -323,7 +418,7 @@ func (r *GormRepository) Submit(
 			return err
 		}
 		if duplicate != nil {
-			if !sameSubmitIntent(duplicate, chatID, messageID, content, format) {
+			if !sameSubmitIntent(duplicate, chatID, messageID, modelID, content, format) {
 				return ErrRepositoryIdempotencyConflict
 			}
 			duplicate.Duplicate = true
@@ -354,6 +449,7 @@ func (r *GormRepository) Submit(
 			lockedChat,
 			messageID,
 			idempotencyKey,
+			modelID,
 			content,
 			format,
 			now,
@@ -755,6 +851,7 @@ func createRunRecord(
 	chat Chat,
 	messageID uuid.UUID,
 	idempotencyKey string,
+	modelID string,
 	content string,
 	format TextFormat,
 	now time.Time,
@@ -797,6 +894,7 @@ func createRunRecord(
 		ID:              runID,
 		ChatID:          chat.ID,
 		UserID:          chat.UserID,
+		ModelID:         modelID,
 		InputMessageID:  userMessage.ID,
 		OutputMessageID: assistantMessage.ID,
 		Status:          RunStatusCreated,
@@ -842,11 +940,13 @@ func sameSubmitIntent(
 	record *SubmitRecord,
 	chatID uuid.UUID,
 	messageID uuid.UUID,
+	modelID string,
 	content string,
 	format TextFormat,
 ) bool {
 	return record.Run.ChatID == chatID &&
 		record.UserMessage.ID == messageID &&
+		record.Run.ModelID == modelID &&
 		record.UserMessage.Content == content &&
 		record.UserMessage.ContentFormat == format
 }

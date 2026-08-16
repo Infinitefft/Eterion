@@ -12,12 +12,14 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Infinitefft/Eterion/services/api/internal/agent"
 	"github.com/google/uuid"
 )
 
 const (
 	maxRequestIDLength      = 128
 	maxIdempotencyKeyLength = 128
+	maxModelIDLength        = 64
 	maxUserMessageRunes     = 32 * 1024
 )
 
@@ -25,6 +27,7 @@ type CommandRouter struct {
 	service   *Service
 	runs      *RunManager
 	publisher *Publisher
+	models    agent.ModelCatalog
 	logger    *slog.Logger
 }
 
@@ -33,13 +36,18 @@ func NewCommandRouter(
 	runs *RunManager,
 	publisher *Publisher,
 	logger *slog.Logger,
+	modelCatalog ...agent.ModelCatalog,
 ) *CommandRouter {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &CommandRouter{
+	router := &CommandRouter{
 		service: service, runs: runs, publisher: publisher, logger: logger,
 	}
+	if len(modelCatalog) > 0 {
+		router.models = modelCatalog[0]
+	}
+	return router
 }
 
 func (r *CommandRouter) HandleFrame(
@@ -91,6 +99,11 @@ func (r *CommandRouter) handleStart(
 		r.reject(connection, envelope, invalidEnvelope("chat.start payload 不合法"))
 		return
 	}
+	modelID, businessError := r.resolveModelID(payload.ModelID)
+	if businessError != nil {
+		r.reject(connection, envelope, businessError)
+		return
+	}
 	messageID, businessError := validateMessagePayload(payload.MessageID, payload.Content)
 	if businessError != nil {
 		r.reject(connection, envelope, businessError)
@@ -111,6 +124,7 @@ func (r *CommandRouter) handleStart(
 		chatID,
 		messageID,
 		key,
+		modelID,
 		payload.Title,
 		strings.TrimSpace(payload.Content.Content),
 		payload.Content.Format,
@@ -137,6 +151,11 @@ func (r *CommandRouter) handleSubmit(
 		r.reject(connection, envelope, invalidEnvelope("chat.submit payload 不合法"))
 		return
 	}
+	modelID, businessError := r.resolveModelID(payload.ModelID)
+	if businessError != nil {
+		r.reject(connection, envelope, businessError)
+		return
+	}
 	messageID, businessError := validateMessagePayload(payload.MessageID, payload.Content)
 	if businessError != nil {
 		r.reject(connection, envelope, businessError)
@@ -153,6 +172,7 @@ func (r *CommandRouter) handleSubmit(
 		chatID,
 		messageID,
 		key,
+		modelID,
 		strings.TrimSpace(payload.Content.Content),
 		payload.Content.Format,
 	)
@@ -161,6 +181,29 @@ func (r *CommandRouter) handleSubmit(
 		return
 	}
 	r.acceptAndStart(connection, envelope, record)
+}
+
+func (r *CommandRouter) resolveModelID(rawModelID *string) (string, *BusinessError) {
+	modelID := ""
+	if rawModelID != nil {
+		modelID = strings.TrimSpace(*rawModelID)
+	}
+	if len(modelID) > maxModelIDLength {
+		return "", invalidEnvelope("model_id 不能超过 64 字节")
+	}
+	if r.models == nil {
+		return modelID, nil
+	}
+	resolved, ok := r.models.ResolveModelID(modelID)
+	if !ok {
+		return "", newBusinessError(
+			ErrorModelNotAvailable,
+			"所选模型不可用",
+			false,
+			http.StatusBadRequest,
+		)
+	}
+	return resolved, nil
 }
 
 func (r *CommandRouter) acceptAndStart(

@@ -74,12 +74,14 @@ type TextContent struct {
 
 type ChatStartPayload struct {
 	MessageID string      `json:"message_id"`
+	ModelID   *string     `json:"model_id"`
 	Title     *string     `json:"title"`
 	Content   TextContent `json:"content"`
 }
 
 type ChatSubmitPayload struct {
 	MessageID string      `json:"message_id"`
+	ModelID   *string     `json:"model_id"`
 	Content   TextContent `json:"content"`
 }
 
@@ -128,6 +130,7 @@ type WireChatMessage struct {
 type WireAgentRun struct {
 	RunID           string        `json:"run_id"`
 	ChatID          string        `json:"chat_id"`
+	ModelID         string        `json:"model_id"`
 	InputMessageID  string        `json:"input_message_id"`
 	OutputMessageID string        `json:"output_message_id"`
 	Status          RunStatus     `json:"status"`

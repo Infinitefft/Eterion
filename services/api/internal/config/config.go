@@ -16,6 +16,17 @@ const minimumJWTSecretLength = 32
 
 const defaultSystemPrompt = "你是 Eterion 的 AI 助手。请准确、清晰地回答用户问题。"
 
+// ModelConfig 描述一个可以由前端选择的 OpenAI 兼容文本模型。
+// APIKey 只在服务端使用，不会通过模型列表或 IM 协议返回给浏览器。
+type ModelConfig struct {
+	ID          string
+	DisplayName string
+	Provider    string
+	APIKey      string
+	BaseURL     string
+	Model       string
+}
+
 type Config struct {
 	AppEnv              string
 	HTTPAddr            string
@@ -34,6 +45,8 @@ type Config struct {
 	ModelAPIKey         string
 	ModelBaseURL        string
 	ModelName           string
+	DefaultModelID      string
+	Models              []ModelConfig
 	SystemPrompt        string
 	ModelTimeout        time.Duration
 	AgentRunTimeout     time.Duration
@@ -58,6 +71,11 @@ func Load() (Config, error) {
 		ModelBaseURL:      strings.TrimSpace(os.Getenv("MODEL_BASE_URL")),
 		ModelName:         strings.TrimSpace(os.Getenv("MODEL_NAME")),
 		SystemPrompt:      envOrDefault("SYSTEM_PROMPT", defaultSystemPrompt),
+	}
+	cfg.Models = loadModelConfigs()
+	cfg.DefaultModelID = strings.TrimSpace(os.Getenv("DEFAULT_MODEL_ID"))
+	if cfg.DefaultModelID == "" && len(cfg.Models) > 0 {
+		cfg.DefaultModelID = cfg.Models[0].ID
 	}
 
 	var err error
@@ -113,13 +131,101 @@ func (c Config) Validate() error {
 	if strings.EqualFold(c.AppEnv, "production") && !c.RefreshCookieSecure {
 		return errors.New("REFRESH_COOKIE_SECURE must be true in production")
 	}
-	if strings.TrimSpace(c.ModelAPIKey) == "" {
-		return errors.New("MODEL_API_KEY is required")
+	// 保留旧的单模型环境变量作为兼容入口；配置了新的模型注册表后，
+	// DEFAULT_MODEL_ID 必须指向其中一个完整配置的模型。
+	if len(c.Models) == 0 {
+		if strings.TrimSpace(c.ModelAPIKey) == "" {
+			return errors.New("at least one model API key is required")
+		}
+		if strings.TrimSpace(c.ModelName) == "" {
+			return errors.New("at least one model name is required")
+		}
+		return nil
 	}
-	if strings.TrimSpace(c.ModelName) == "" {
-		return errors.New("MODEL_NAME is required")
+
+	seen := make(map[string]struct{}, len(c.Models))
+	defaultFound := false
+	for _, model := range c.Models {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			return errors.New("model ID is required")
+		}
+		if _, exists := seen[id]; exists {
+			return fmt.Errorf("duplicate model ID: %s", id)
+		}
+		seen[id] = struct{}{}
+		if strings.TrimSpace(model.APIKey) == "" {
+			return fmt.Errorf("%s API key is required", id)
+		}
+		if strings.TrimSpace(model.BaseURL) == "" {
+			return fmt.Errorf("%s base URL is required", id)
+		}
+		if strings.TrimSpace(model.Model) == "" {
+			return fmt.Errorf("%s provider model name is required", id)
+		}
+		if id == strings.TrimSpace(c.DefaultModelID) {
+			defaultFound = true
+		}
+	}
+	if !defaultFound {
+		return fmt.Errorf("DEFAULT_MODEL_ID %q is not configured", c.DefaultModelID)
 	}
 	return nil
+}
+
+func loadModelConfigs() []ModelConfig {
+	definitions := []struct {
+		id          string
+		displayName string
+		provider    string
+		prefix      string
+		baseURL     string
+	}{
+		{
+			id:          "doubao",
+			displayName: "豆包",
+			provider:    "doubao",
+			prefix:      "DOUBAO",
+			baseURL:     "https://ark.cn-beijing.volces.com/api/v3",
+		},
+		{
+			id:          "deepseek",
+			displayName: "DeepSeek",
+			provider:    "deepseek",
+			prefix:      "DEEPSEEK",
+			baseURL:     "https://api.deepseek.com",
+		},
+		{
+			id:          "minimax",
+			displayName: "MiniMax",
+			provider:    "minimax",
+			prefix:      "MINIMAX",
+			baseURL:     "https://api.minimaxi.com/v1",
+		},
+	}
+
+	models := make([]ModelConfig, 0, len(definitions))
+	for _, definition := range definitions {
+		apiKey := strings.TrimSpace(os.Getenv(definition.prefix + "_API_KEY"))
+		providerModel := strings.TrimSpace(os.Getenv(definition.prefix + "_MODEL"))
+		// 完全没有填写时视为未启用；只填写一部分时保留配置，交给
+		// Validate 给出明确错误，避免服务悄悄隐藏拼写错误的模型。
+		if apiKey == "" && providerModel == "" {
+			continue
+		}
+		models = append(models, ModelConfig{
+			ID:          definition.id,
+			DisplayName: definition.displayName,
+			Provider:    definition.provider,
+			APIKey:      apiKey,
+			BaseURL: envOrDefault(
+				definition.prefix+"_BASE_URL",
+				definition.baseURL,
+			),
+			Model: providerModel,
+		})
+	}
+	return models
 }
 
 func (c Config) IsAllowedOrigin(origin string) bool {

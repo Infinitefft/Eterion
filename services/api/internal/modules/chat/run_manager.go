@@ -249,8 +249,9 @@ func (m *RunManager) execute(
 	m.publisher.RunSnapshot(*run, EventRunStatus)
 
 	input := agent.Input{
-		RunID:  run.ID.String(),
-		ChatID: run.ChatID.String(),
+		RunID:   run.ID.String(),
+		ChatID:  run.ChatID.String(),
+		ModelID: run.ModelID,
 		Messages: make(
 			[]agent.Message,
 			0,

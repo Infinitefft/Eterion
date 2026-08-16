@@ -37,6 +37,7 @@ func wireAgentRun(run Run) WireAgentRun {
 	return WireAgentRun{
 		RunID:           run.ID.String(),
 		ChatID:          run.ChatID.String(),
+		ModelID:         run.ModelID,
 		InputMessageID:  run.InputMessageID.String(),
 		OutputMessageID: run.OutputMessageID.String(),
 		Status:          run.Status,
@@ -93,6 +94,7 @@ func snapshotRun(run WireAgentRun) SnapshotRun {
 	return SnapshotRun{
 		ID:              run.RunID,
 		ChatID:          run.ChatID,
+		ModelID:         run.ModelID,
 		InputMessageID:  run.InputMessageID,
 		OutputMessageID: run.OutputMessageID,
 		Status:          run.Status,
