@@ -1,25 +1,14 @@
-import {
-  Ban,
-  Check,
-  CircleAlert,
-  LoaderCircle,
-  Search,
-  Sparkles,
-  Wrench,
-} from 'lucide-react';
+import { Ban, Check, CircleAlert, LoaderCircle, Search, Sparkles, Wrench } from 'lucide-react';
 import { useStore } from 'zustand';
 
 import { imStore } from '@/service/im';
-import type {
-  AgentRun,
-  AgentRunStatus,
-  AgentStep,
-  RunId,
-  StepId,
-} from '@/service/im/types';
+import type { AgentRun, AgentRunStatus, AgentStep, RunId, StepId } from '@/service/im/types';
+
+import { ThinkingIndicator } from './ThinkingIndicator';
 
 interface AgentRunTraceProps {
   runId: RunId;
+  hideThinkingIndicator?: boolean;
 }
 
 interface AgentStepItemProps {
@@ -93,7 +82,7 @@ function StepStatusIcon({ step }: { step: AgentStep }) {
   switch (step.status) {
     case 'pending':
     case 'running':
-      return <LoaderCircle className="chat-run-spinner" size={13} />;
+      return <LoaderCircle className='chat-run-spinner' size={13} />;
     case 'completed':
       return <Check size={13} />;
     case 'failed':
@@ -110,12 +99,12 @@ function AgentStepItem({ stepId }: AgentStepItemProps) {
   if (!step) return null;
 
   return (
-    <li className="chat-run-step" data-status={step.status}>
-      <span className="chat-run-step-kind" aria-hidden="true">
+    <li className='chat-run-step' data-status={step.status}>
+      <span className='chat-run-step-kind' aria-hidden='true'>
         <StepKindIcon step={step} />
       </span>
-      <span className="chat-run-step-label">{getStepLabel(step)}</span>
-      <span className="chat-run-step-status" aria-hidden="true">
+      <span className='chat-run-step-label'>{getStepLabel(step)}</span>
+      <span className='chat-run-step-status' aria-hidden='true'>
         <StepStatusIcon step={step} />
       </span>
     </li>
@@ -126,7 +115,7 @@ function AgentStepList({ stepIds }: { stepIds: StepId[] }) {
   if (stepIds.length === 0) return null;
 
   return (
-    <ul className="chat-run-steps">
+    <ul className='chat-run-steps'>
       {stepIds.map((stepId) => (
         <AgentStepItem key={stepId} stepId={stepId} />
       ))}
@@ -138,7 +127,7 @@ function AgentStepList({ stepIds }: { stepIds: StepId[] }) {
  * Agent Run 的轻量过程视图。
  * 当前只展示公开摘要、工具名、Skill 名和检索关键词，不展示隐藏思维链。
  */
-export function AgentRunTrace({ runId }: AgentRunTraceProps) {
+export function AgentRunTrace({ runId, hideThinkingIndicator = false }: AgentRunTraceProps) {
   const run = useStore(imStore, (state) => state.runsById[runId]);
 
   if (!run) return null;
@@ -146,13 +135,25 @@ export function AgentRunTrace({ runId }: AgentRunTraceProps) {
   const isActive = ACTIVE_RUN_STATUSES.has(run.status);
   const statusLabel = getRunStatusLabel(run);
 
+  if (hideThinkingIndicator && (run.status === 'running' || run.status === 'streaming')) {
+    return null;
+  }
+
+  if (run.status === 'streaming') {
+    return (
+      <div className='chat-assistant-thinking'>
+        <ThinkingIndicator />
+      </div>
+    );
+  }
+
   if (!isActive && run.status === 'completed' && run.stepIds.length === 0) {
     return null;
   }
 
   if (!isActive && run.status === 'completed') {
     return (
-      <details className="chat-run-trace chat-run-trace-completed">
+      <details className='chat-run-trace chat-run-trace-completed'>
         <summary>
           <span>{statusLabel}</span>
           <small>{run.stepIds.length} 个步骤</small>
@@ -163,14 +164,14 @@ export function AgentRunTrace({ runId }: AgentRunTraceProps) {
   }
 
   return (
-    <div className="chat-run-trace" data-status={run.status}>
-      <div className="chat-run-heading">
-        {isActive ? (
-          <LoaderCircle className="chat-run-spinner" size={14} aria-hidden="true" />
+    <div className='chat-run-trace' data-status={run.status}>
+      <div className='chat-run-heading'>
+        {run.status === 'running' ? null : isActive ? (
+          <LoaderCircle className='chat-run-spinner' size={14} aria-hidden='true' />
         ) : (
-          <CircleAlert size={14} aria-hidden="true" />
+          <CircleAlert size={14} aria-hidden='true' />
         )}
-        <span>{statusLabel}</span>
+        {run.status === 'running' ? <ThinkingIndicator /> : <span>{statusLabel}</span>}
       </div>
       <AgentStepList stepIds={run.stepIds} />
     </div>

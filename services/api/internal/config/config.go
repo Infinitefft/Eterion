@@ -50,6 +50,7 @@ type Config struct {
 	DefaultModelID      string
 	Models              []ModelConfig
 	SystemPrompt        string
+	BraveSearchAPIKey   string
 	ModelTimeout        time.Duration
 	AgentRunTimeout     time.Duration
 	WebSocketTicketTTL  time.Duration
@@ -73,6 +74,7 @@ func Load() (Config, error) {
 		ModelBaseURL:      strings.TrimSpace(os.Getenv("MODEL_BASE_URL")),
 		ModelName:         strings.TrimSpace(os.Getenv("MODEL_NAME")),
 		SystemPrompt:      envOrDefault("SYSTEM_PROMPT", defaultSystemPrompt),
+		BraveSearchAPIKey: strings.TrimSpace(os.Getenv("BRAVE_SEARCH_API_KEY")),
 	}
 	cfg.Models = loadModelConfigs()
 	cfg.DefaultModelID = strings.TrimSpace(os.Getenv("DEFAULT_MODEL_ID"))

@@ -10,6 +10,7 @@ import { getIMService, imStore } from '@/service/im';
 import type { ChatId, ChatMessage, MessageId } from '@/service/im/types';
 
 import { AgentRunTrace } from './agent/AgentRunTrace';
+import { ThinkingIndicator } from './agent/ThinkingIndicator';
 
 /**
  * 稳定的空数组，避免 selector 每次返回新的 []，导致无意义的重新渲染。
@@ -58,24 +59,19 @@ function UserMessage({ message }: MessageProps) {
     try {
       await getIMService().retryMessage(message.id);
     } catch (error) {
-      setRetryError(
-        error instanceof Error ? error.message : '重新发送失败，请稍后再试',
-      );
+      setRetryError(error instanceof Error ? error.message : '重新发送失败，请稍后再试');
     } finally {
       setIsRetrying(false);
     }
   }
 
   return (
-    <article
-      className="chat-message-row chat-message-row-user"
-      data-status={message.status}
-    >
-      <div className="chat-user-message">
-        <p className="chat-message-text">{message.content.content}</p>
+    <article className='chat-message-row chat-message-row-user' data-status={message.status}>
+      <div className='chat-user-message'>
+        <p className='chat-message-text'>{message.content.content}</p>
 
         {statusText || retryError ? (
-          <div className="chat-user-message-feedback">
+          <div className='chat-user-message-feedback'>
             <span
               className={isError ? 'chat-message-status is-error' : 'chat-message-status'}
               role={isError ? 'alert' : undefined}
@@ -85,15 +81,15 @@ function UserMessage({ message }: MessageProps) {
 
             {canRetry ? (
               <button
-                className="chat-message-retry"
-                type="button"
+                className='chat-message-retry'
+                type='button'
                 disabled={isRetrying}
                 onClick={() => {
                   void handleRetry();
                 }}
               >
                 {isRetrying ? (
-                  <LoaderCircle className="chat-run-spinner" size={13} />
+                  <LoaderCircle className='chat-run-spinner' size={13} />
                 ) : (
                   <RotateCcw size={13} />
                 )}
@@ -110,9 +106,8 @@ function UserMessage({ message }: MessageProps) {
 function getAssistantStatus(message: ChatMessage): string | null {
   switch (message.status) {
     case 'pending':
-      return '正在准备回答';
     case 'streaming':
-      return '正在生成';
+      return null;
     case 'failed':
       return message.error?.message || '回答生成失败';
     case 'cancelled':
@@ -131,29 +126,31 @@ function AssistantMessage({ message }: MessageProps) {
   const content = message.content.content;
   const statusText = getAssistantStatus(message);
   const isStreaming = message.status === 'pending' || message.status === 'streaming';
+  const isWaitingForContent = isStreaming && !content;
   const isError = message.status === 'failed';
 
   return (
     <article
-      className="chat-message-row chat-message-row-assistant"
+      className='chat-message-row chat-message-row-assistant'
       data-status={message.status}
       aria-busy={isStreaming}
     >
-      <div className="chat-assistant-avatar" aria-hidden="true">
-        <img src="/eterion-icon-transparent.png" alt="" />
+      <div className='chat-assistant-avatar' aria-hidden='true'>
+        <img src='/eterion-icon-transparent.png' alt='' />
       </div>
 
-      <div className="chat-assistant-content">
-        {message.runId ? <AgentRunTrace runId={message.runId} /> : null}
+      <div className='chat-assistant-content'>
+        {message.runId && !(isStreaming && content) ? (
+          <AgentRunTrace runId={message.runId} hideThinkingIndicator={isWaitingForContent} />
+        ) : null}
 
-        {content ? (
-          <p className="chat-message-text">{content}</p>
-        ) : isStreaming ? (
-          <p className="chat-assistant-thinking">
-            <span className="chat-thinking-dot" aria-hidden="true" />
-            正在组织回答
+        {isWaitingForContent ? (
+          <p className='chat-assistant-thinking'>
+            <ThinkingIndicator />
           </p>
         ) : null}
+
+        {content ? <p className='chat-message-text'>{content}</p> : null}
 
         {statusText ? (
           <span
@@ -171,7 +168,7 @@ function AssistantMessage({ message }: MessageProps) {
 /** 系统消息不使用问答气泡布局，只负责展示会话级提示。 */
 function SystemMessage({ message }: MessageProps) {
   return (
-    <div className="chat-message-row chat-message-row-system" role="status">
+    <div className='chat-message-row chat-message-row-system' role='status'>
       {message.content.content}
     </div>
   );
@@ -181,22 +178,19 @@ function SystemMessage({ message }: MessageProps) {
  * 用户消息和 Run 已出现、但 Assistant 消息尚未出现时的过渡反馈。
  */
 function PendingAssistantMessage({ chatId }: { chatId: ChatId }) {
-  const pendingKey = useStore(imStore, (state) =>
-    selectPendingAssistantKey(state, chatId),
-  );
+  const pendingKey = useStore(imStore, (state) => selectPendingAssistantKey(state, chatId));
 
   if (!pendingKey) return null;
 
   return (
-    <article className="chat-message-row chat-message-row-assistant" aria-live="polite">
-      <div className="chat-assistant-avatar" aria-hidden="true">
-        <img src="/eterion-icon-transparent.png" alt="" />
+    <article className='chat-message-row chat-message-row-assistant' aria-live='polite'>
+      <div className='chat-assistant-avatar' aria-hidden='true'>
+        <img src='/eterion-icon-transparent.png' alt='' />
       </div>
-      <div className="chat-assistant-content">
+      <div className='chat-assistant-content'>
         {pendingKey === PENDING_ASSISTANT_WAITING_FOR_RUN ? (
-          <p className="chat-assistant-thinking">
-            <span className="chat-thinking-dot" aria-hidden="true" />
-            正在等待 Agent 响应
+          <p className='chat-assistant-thinking'>
+            <ThinkingIndicator />
           </p>
         ) : (
           <AgentRunTrace runId={pendingKey} />
@@ -239,7 +233,7 @@ export function ChatMessageList({ chatId }: ChatMessageListProps) {
 
   if (messageIds.length === 0) {
     return (
-      <div className="chat-message-empty">
+      <div className='chat-message-empty'>
         <span>等待第一条消息</span>
         <p>新对话的首条消息会在这里自动出现。</p>
       </div>
@@ -247,7 +241,7 @@ export function ChatMessageList({ chatId }: ChatMessageListProps) {
   }
 
   return (
-    <div className="chat-message-list" role="log" aria-label="会话消息">
+    <div className='chat-message-list' role='log' aria-label='会话消息'>
       {messageIds.map((messageId) => (
         <ChatMessageItem key={messageId} messageId={messageId} />
       ))}

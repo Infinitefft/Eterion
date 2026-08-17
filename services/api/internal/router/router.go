@@ -110,33 +110,35 @@ func New(
 	modelConfigs := make([]eino.Config, 0, len(cfg.Models))
 	for _, modelConfig := range cfg.Models {
 		modelConfigs = append(modelConfigs, eino.Config{
-			ID:           modelConfig.ID,
-			ModelName:    modelConfig.ModelName,
-			Provider:     modelConfig.Provider,
-			ProviderName: modelConfig.ProviderName,
-			IconURL:      modelConfig.IconURL,
-			APIKey:       modelConfig.APIKey,
-			BaseURL:      modelConfig.BaseURL,
-			Model:        modelConfig.Model,
-			SystemPrompt: cfg.SystemPrompt,
-			ModelTimeout: cfg.ModelTimeout,
-			RunTimeout:   cfg.AgentRunTimeout,
+			ID:                modelConfig.ID,
+			ModelName:         modelConfig.ModelName,
+			Provider:          modelConfig.Provider,
+			ProviderName:      modelConfig.ProviderName,
+			IconURL:           modelConfig.IconURL,
+			APIKey:            modelConfig.APIKey,
+			BaseURL:           modelConfig.BaseURL,
+			Model:             modelConfig.Model,
+			SystemPrompt:      cfg.SystemPrompt,
+			BraveSearchAPIKey: cfg.BraveSearchAPIKey,
+			ModelTimeout:      cfg.ModelTimeout,
+			RunTimeout:        cfg.AgentRunTimeout,
 		})
 	}
 	defaultModelID := cfg.DefaultModelID
 	if len(modelConfigs) == 0 {
 		defaultModelID = "default"
 		modelConfigs = append(modelConfigs, eino.Config{
-			ID:           defaultModelID,
-			ModelName:    cfg.ModelName,
-			Provider:     "openai-compatible",
-			ProviderName: "OpenAI 兼容",
-			APIKey:       cfg.ModelAPIKey,
-			BaseURL:      cfg.ModelBaseURL,
-			Model:        cfg.ModelName,
-			SystemPrompt: cfg.SystemPrompt,
-			ModelTimeout: cfg.ModelTimeout,
-			RunTimeout:   cfg.AgentRunTimeout,
+			ID:                defaultModelID,
+			ModelName:         cfg.ModelName,
+			Provider:          "openai-compatible",
+			ProviderName:      "OpenAI 兼容",
+			APIKey:            cfg.ModelAPIKey,
+			BaseURL:           cfg.ModelBaseURL,
+			Model:             cfg.ModelName,
+			SystemPrompt:      cfg.SystemPrompt,
+			BraveSearchAPIKey: cfg.BraveSearchAPIKey,
+			ModelTimeout:      cfg.ModelTimeout,
+			RunTimeout:        cfg.AgentRunTimeout,
 		})
 	}
 	runner, err := eino.NewRoutingRunner(

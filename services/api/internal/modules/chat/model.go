@@ -82,6 +82,9 @@ type Run struct {
 	StartedAt       *time.Time
 	UpdatedAt       time.Time
 	CompletedAt     *time.Time
+
+	// StepIDs is transient live-run state; tool steps are not persisted yet.
+	StepIDs []string `gorm:"-"`
 }
 
 func (Run) TableName() string {

@@ -128,7 +128,7 @@ func (p *Publisher) MessageDelta(run Run, seq int64, delta string) {
 	p.publish(run.UserID.String(), event)
 }
 
-// StepSnapshot is reserved for the future Agent step pipeline.
+// StepSnapshot publishes one current Agent step to the connected frontend.
 func (p *Publisher) StepSnapshot(
 	run Run,
 	eventType EventType,

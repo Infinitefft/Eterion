@@ -270,6 +270,12 @@ func (m *RunManager) execute(
 	completed := false
 	fullText := ""
 
+	// toolSteps keeps the frontend step created for each Eino tool-call ID.
+	toolSteps := make(map[string]WireToolStep)
+
+	// toolSequence gives tool cards a stable order inside this run.
+	var toolSequence int64
+
 	ensureStarted := func() error {
 		if started {
 			return nil
@@ -303,6 +309,175 @@ func (m *RunManager) execute(
 		switch event.Type {
 		case agent.EventStarted:
 			return ensureStarted()
+		case agent.EventToolStarted:
+			// The Agent contract requires tool details for every tool event.
+			if event.Tool == nil || event.Tool.CallID == "" {
+				return errors.New("agent returned an invalid tool-started event")
+			}
+
+			// Ensure the assistant message exists before its first tool step.
+			if err := ensureStarted(); err != nil {
+				return err
+			}
+
+			// Reserve the next run sequence number for step.started.
+			stepAt := m.now()
+			stepSeq, err := m.repository.NextSeq(
+				ctx,
+				run.ID,
+				[]RunStatus{RunStatusRunning, RunStatusStreaming},
+				stepAt,
+			)
+			if err != nil {
+				return err
+			}
+
+			// Increase the display order once for this new tool call.
+			toolSequence++
+
+			// Generate an application step ID; CallID remains the model-provider ID.
+			stepID := uuid.NewString()
+
+			// Convert the start time to the millisecond wire format.
+			startedAt := stepAt.UnixMilli()
+
+			// Build the exact WireToolStep shape already understood by the frontend.
+			step := WireToolStep{
+				WireAgentStepBase: WireAgentStepBase{
+					StepID:      stepID,
+					ChatID:      run.ChatID.String(),
+					RunID:       run.ID.String(),
+					Kind:        "tool",
+					Title:       "调用工具 · " + event.Tool.Name,
+					Status:      "running",
+					Sequence:    toolSequence,
+					StartedAt:   &startedAt,
+					CompletedAt: nil,
+					Error:       nil,
+				},
+				CallID: event.Tool.CallID,
+				Tool: WireToolReference{
+					ID:   event.Tool.ID,
+					Name: event.Tool.Name,
+				},
+				Input:  event.Tool.Input,
+				Output: nil,
+			}
+
+			// Save the step so its completion updates the same card.
+			toolSteps[event.Tool.CallID] = step
+
+			// Include the step in all later live run snapshots.
+			run.StepIDs = append(run.StepIDs, stepID)
+
+			// Keep the in-memory run sequence synchronized with the database.
+			run.LastSeq = stepSeq
+			run.UpdatedAt = stepAt
+
+			// Push step.started over the existing WebSocket publisher.
+			m.publisher.StepSnapshot(
+				*run,
+				EventStepStarted,
+				stepSeq,
+				stepID,
+				step,
+			)
+
+			return nil
+		case agent.EventToolCompleted:
+			// The completed event must point to the tool call started above.
+			if event.Tool == nil {
+				return errors.New("agent returned an invalid tool-completed event")
+			}
+
+			// Load the existing frontend card instead of creating a duplicate.
+			step, exists := toolSteps[event.Tool.CallID]
+			if !exists {
+				return errors.New("agent completed an unknown tool call")
+			}
+
+			// Reserve the next run sequence number for step.completed.
+			stepAt := m.now()
+			stepSeq, err := m.repository.NextSeq(
+				ctx,
+				run.ID,
+				[]RunStatus{RunStatusRunning, RunStatusStreaming},
+				stepAt,
+			)
+			if err != nil {
+				return err
+			}
+
+			// Update the step with the structured tool output.
+			step.Status = "completed"
+			step.Output = event.Tool.Output
+			completedAt := stepAt.UnixMilli()
+			step.CompletedAt = &completedAt
+			toolSteps[event.Tool.CallID] = step
+
+			// Keep the in-memory run sequence synchronized with the database.
+			run.LastSeq = stepSeq
+			run.UpdatedAt = stepAt
+
+			// Push step.completed so the running card becomes completed.
+			m.publisher.StepSnapshot(
+				*run,
+				EventStepCompleted,
+				stepSeq,
+				step.StepID,
+				step,
+			)
+
+			return nil
+		case agent.EventToolFailed:
+			// The failed event must point to the tool call started above.
+			if event.Tool == nil || event.Tool.Error == nil {
+				return errors.New("agent returned an invalid tool-failed event")
+			}
+
+			// Load the same running frontend card.
+			step, exists := toolSteps[event.Tool.CallID]
+			if !exists {
+				return errors.New("agent failed an unknown tool call")
+			}
+
+			// Reserve the next run sequence number for step.failed.
+			stepAt := m.now()
+			stepSeq, err := m.repository.NextSeq(
+				ctx,
+				run.ID,
+				[]RunStatus{RunStatusRunning, RunStatusStreaming},
+				stepAt,
+			)
+			if err != nil {
+				return err
+			}
+
+			// Copy only safe error fields; the internal Cause never reaches browsers.
+			step.Status = "failed"
+			step.Error = &CommandError{
+				Code:      event.Tool.Error.Code,
+				Message:   event.Tool.Error.Message,
+				Retryable: event.Tool.Error.Retryable,
+			}
+			completedAt := stepAt.UnixMilli()
+			step.CompletedAt = &completedAt
+			toolSteps[event.Tool.CallID] = step
+
+			// Keep the in-memory run sequence synchronized with the database.
+			run.LastSeq = stepSeq
+			run.UpdatedAt = stepAt
+
+			// Push step.failed before the run itself transitions to failed.
+			m.publisher.StepSnapshot(
+				*run,
+				EventStepFailed,
+				stepSeq,
+				step.StepID,
+				step,
+			)
+
+			return nil
 		case agent.EventDelta:
 			if err := ensureStarted(); err != nil {
 				return err

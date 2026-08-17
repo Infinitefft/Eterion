@@ -34,6 +34,9 @@ func wireChatMessage(
 }
 
 func wireAgentRun(run Run) WireAgentRun {
+	// Copy live step IDs so later mutations cannot change an already-built event.
+	stepIDs := append([]string(nil), run.StepIDs...)
+
 	return WireAgentRun{
 		RunID:           run.ID.String(),
 		ChatID:          run.ChatID.String(),
@@ -41,7 +44,7 @@ func wireAgentRun(run Run) WireAgentRun {
 		InputMessageID:  run.InputMessageID.String(),
 		OutputMessageID: run.OutputMessageID.String(),
 		Status:          run.Status,
-		StepIDs:         []string{},
+		StepIDs:         stepIDs,
 		LastSeq:         run.LastSeq,
 		Desynced:        false,
 		CreatedAt:       run.CreatedAt.UnixMilli(),
