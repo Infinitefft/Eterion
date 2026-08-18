@@ -40,7 +40,7 @@ Eterion 优先建设前端交互体验和 Agent 任务处理能力。Go API 负�
 
 ## 当前架构
 
-浏览器通过 REST API 和 WebSocket 访问统一的 Go 服务。PostgreSQL 保存需要持久化的业务数据，AI Agent 由同一进程内的 CloudWeGo Eino 驱动。
+浏览器通过 REST API 和 WebSocket 访问统一的 Go 服务。PostgreSQL 保存业务数据；独立 Python 服务使用 LangChain 调用 OpenAI 兼容模型，并通过内部 HTTP/SSE 将模型回答的 content 增量返回给 Go。
 
 ```text
 React Web
@@ -48,10 +48,13 @@ React Web
     ▼
 Go Gin API
     ├─ PostgreSQL
-    └─ Eino Agent / OpenAI-compatible Model
+    └─ HTTP POST / SSE
+           ▼
+       Python FastAPI Agent
+           └─ LangChain / OpenAI-compatible Model
 ```
 
-普通资源操作使用 REST API。实时消息、Agent 状态和交互请求使用统一的 WebSocket 事件信封，并以服务端状态为最终依据。
+普通资源操作使用 REST API。前端实时消息和 Agent 状态使用统一的 WebSocket 事件信封；Go 负责鉴权、持久化和 Run 状态机。Python Agent 仅开放给 Go，通过 SSE 输出回答增量，模型框架细节不会泄漏到前端协议。当前 Python 服务不注册 tools。
 
 ## 已安装的技术栈
 
@@ -80,9 +83,18 @@ Go Gin API
 | 请求校验 | go-playground/validator 10.30.3 |
 | 认证与安全 | golang-jwt/jwt 5.3.1、x/crypto 0.54.0 |
 | 标识与配置 | google/uuid 1.6.0、godotenv 1.5.1 |
-| AI Agent | CloudWeGo Eino 0.9.14、Eino OpenAI Model 0.1.13 |
+| Agent 通信 | Go 标准库 HTTP 客户端、SSE 事件解析 |
 | 日志 | Go 标准库 `log/slog` |
 | 数据库迁移 | goose 3.27.2 |
+
+### Python Agent
+
+| 用途 | 依赖 |
+| --- | --- |
+| 语言 | Python 3.11 或更高版本 |
+| HTTP/SSE 服务 | FastAPI、Uvicorn |
+| 模型调用 | LangChain OpenAI |
+| HTTP 客户端 | HTTPX |
 
 ### 尚未安装的能力
 
@@ -98,6 +110,10 @@ Go Gin API
 
 ```text
 Eterion/
+├─ agent/                    Python Agent 服务
+│  ├─ eterion_agent/         FastAPI、模型配置与 content 流
+│  ├─ tests/                 Python 单元和协议测试
+│  └─ requirements.txt       Python 依赖清单
 ├─ apps/
 │  └─ web/                  React + TypeScript + Vite 前端
 │     ├─ public/            静态资源
@@ -106,12 +122,11 @@ Eterion/
 │     ├─ package.json       前端依赖清单
 │     └─ pnpm-lock.yaml     前端依赖锁文件
 └─ services/
-   └─ api/                  Go RESTful API
+   └─ api/                  Go RESTful API 与 WebSocket 网关
       ├─ cmd/server/        HTTP 服务入口
       ├─ internal/          配置、路由、中间件、模块和共享能力
-      │  └─ agent/          Eino Agent 契约、模型和工作流
+      │  └─ agent/          应用 Agent 契约与 Python SSE 适配器
       ├─ migrations/        goose 数据库迁移
-      ├─ tests/             后端测试
       ├─ go.mod             Go 模块与直接依赖
       └─ go.sum             Go 依赖校验信息
 ```
@@ -123,19 +138,24 @@ Eterion/
 - Node.js 22.12 或更高版本
 - pnpm 10.20 或更高版本
 - Go 1.26，推荐使用工具链 1.26.5
+- Python 3.11 或更高版本
 - PostgreSQL 16 或更高版本
 - Git
 - Docker Desktop，可选用于运行 PostgreSQL
 
 ## 恢复项目依赖
 
-克隆仓库后，在仓库根目录执行以下命令。进入前端目录安装依赖，再返回根目录下载 Go 模块。
+克隆仓库后，在仓库根目录执行以下命令，分别恢复前端、Go API 和 Python Agent 依赖。
 
 ```powershell
 Set-Location apps/web
 pnpm install
 Set-Location ../..
 go -C services/api mod download
+Set-Location agent
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Set-Location ..
 ```
 
 如需安装与项目版本一致的数据库迁移工具，请执行：
@@ -155,9 +175,25 @@ pnpm dev
 
 默认开发地址为 `http://localhost:5173`。
 
+## 初始化并启动 Python Agent
+
+Python Agent 的模型密钥保存在 `agent/.env`，该文件不会提交到 Git。复制示例配置，至少启用并填写一个模型；`DEFAULT_MODEL_ID` 必须指向已启用的模型：
+
+```powershell
+Set-Location agent
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m eterion_agent
+```
+
+默认地址为 `http://127.0.0.1:8001`。它是内部服务，不应直接暴露给浏览器或公网。内部接口包括：
+
+- `GET /healthz`
+- `GET /models`
+- `POST /runs`（响应为 `text/event-stream`）
+
 ## 初始化并启动 Go API
 
-后端的本地隐私配置保存在 `services/api/.env`，该文件不会提交到 Git。首次运行时从示例文件复制一份，并填写数据库密码、随机 JWT 密钥，以及豆包、DeepSeek、MiniMax 中至少一个模型的 API Key 和模型名称。`DEFAULT_MODEL_ID` 指定前端没有选择模型时使用的默认项：
+Go 后端的本地配置保存在 `services/api/.env`，该文件不会提交到 Git。首次运行时复制示例文件，填写数据库密码和随机 JWT 密钥：
 
 ```powershell
 Set-Location services/api
@@ -172,7 +208,7 @@ goose -dir migrations postgres $apiDatabaseUrl up
 go run ./cmd/server
 ```
 
-Go API 默认监听 `http://localhost:8080`，当前接口包括：
+Go API 默认通过 `http://127.0.0.1:8001` 访问 Python Agent，并在启动时读取模型目录；如果 Python 服务不可访问或没有有效模型，Go 会直接报告启动错误。Go API 默认监听 `http://localhost:8080`，当前接口包括：
 
 - `GET /healthz`
 - `POST /api/auth/register`

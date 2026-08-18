@@ -30,6 +30,13 @@ coverage/
 .cache/
 *.tsbuildinfo
 
+# Python environments, caches, and bytecode
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+
 # Go build and test output
 bin/
 tmp/

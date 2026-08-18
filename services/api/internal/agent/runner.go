@@ -5,8 +5,8 @@ import "context"
 
 // Message is a text message passed to an Agent run.
 type Message struct {
-	Role    string
-	Content string
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 // Input contains the persisted conversation needed to execute a run.
@@ -51,7 +51,7 @@ type ToolEvent struct {
 	// CallID connects the model's request with the matching tool result.
 	CallID string
 
-	// ID is the machine-readable tool name registered with Eino.
+	// ID is the machine-readable tool name registered with the Agent runtime.
 	ID string
 
 	// Name is the human-readable label rendered by the frontend.

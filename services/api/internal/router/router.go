@@ -1,4 +1,4 @@
-// 负责创建 Gin 路由，并装配认证、Chat、WebSocket 和 Eino Agent 依赖。
+// 负责创建 Gin 路由，并装配认证、Chat、WebSocket 和 Python Agent 依赖。
 package router
 
 import (
@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Infinitefft/Eterion/services/api/internal/agent/eino"
+	"github.com/Infinitefft/Eterion/services/api/internal/agent/remote"
 	"github.com/Infinitefft/Eterion/services/api/internal/apidocs"
 	"github.com/Infinitefft/Eterion/services/api/internal/config"
 	"github.com/Infinitefft/Eterion/services/api/internal/middleware"
@@ -107,44 +107,13 @@ func New(
 	chatService := chat.NewService(chatRepository)
 	hub := chat.NewHub(logger)
 	publisher := chat.NewPublisher(hub)
-	modelConfigs := make([]eino.Config, 0, len(cfg.Models))
-	for _, modelConfig := range cfg.Models {
-		modelConfigs = append(modelConfigs, eino.Config{
-			ID:                modelConfig.ID,
-			ModelName:         modelConfig.ModelName,
-			Provider:          modelConfig.Provider,
-			ProviderName:      modelConfig.ProviderName,
-			IconURL:           modelConfig.IconURL,
-			APIKey:            modelConfig.APIKey,
-			BaseURL:           modelConfig.BaseURL,
-			Model:             modelConfig.Model,
-			SystemPrompt:      cfg.SystemPrompt,
-			BraveSearchAPIKey: cfg.BraveSearchAPIKey,
-			ModelTimeout:      cfg.ModelTimeout,
-			RunTimeout:        cfg.AgentRunTimeout,
-		})
-	}
-	defaultModelID := cfg.DefaultModelID
-	if len(modelConfigs) == 0 {
-		defaultModelID = "default"
-		modelConfigs = append(modelConfigs, eino.Config{
-			ID:                defaultModelID,
-			ModelName:         cfg.ModelName,
-			Provider:          "openai-compatible",
-			ProviderName:      "OpenAI 兼容",
-			APIKey:            cfg.ModelAPIKey,
-			BaseURL:           cfg.ModelBaseURL,
-			Model:             cfg.ModelName,
-			SystemPrompt:      cfg.SystemPrompt,
-			BraveSearchAPIKey: cfg.BraveSearchAPIKey,
-			ModelTimeout:      cfg.ModelTimeout,
-			RunTimeout:        cfg.AgentRunTimeout,
-		})
-	}
-	runner, err := eino.NewRoutingRunner(
+	runner, err := remote.NewRunner(
 		appContext,
-		modelConfigs,
-		defaultModelID,
+		remote.Config{
+			BaseURL:        cfg.AgentServiceURL,
+			ConnectTimeout: cfg.AgentConnectTimeout,
+			RunTimeout:     cfg.AgentRunTimeout,
+		},
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("initialize agent runner: %w", err)

@@ -14,21 +14,6 @@ import (
 
 const minimumJWTSecretLength = 32
 
-const defaultSystemPrompt = "你是 Eterion 的 AI 助手。请准确、清晰地回答用户问题。"
-
-// ModelConfig 描述一个可以由前端选择的 OpenAI 兼容文本模型。
-// APIKey 只在服务端使用，不会通过模型列表或 IM 协议返回给浏览器。
-type ModelConfig struct {
-	ID           string
-	ModelName    string
-	Provider     string
-	ProviderName string
-	IconURL      string
-	APIKey       string
-	BaseURL      string
-	Model        string
-}
-
 type Config struct {
 	AppEnv              string
 	HTTPAddr            string
@@ -44,14 +29,8 @@ type Config struct {
 	RefreshCookieName   string
 	RefreshCookieSecure bool
 	AllowedOrigins      []string
-	ModelAPIKey         string
-	ModelBaseURL        string
-	ModelName           string
-	DefaultModelID      string
-	Models              []ModelConfig
-	SystemPrompt        string
-	BraveSearchAPIKey   string
-	ModelTimeout        time.Duration
+	AgentServiceURL     string
+	AgentConnectTimeout time.Duration
 	AgentRunTimeout     time.Duration
 	WebSocketTicketTTL  time.Duration
 }
@@ -70,16 +49,7 @@ func Load() (Config, error) {
 		JWTAudience:       envOrDefault("JWT_AUDIENCE", "eterion-web"),
 		RefreshCookieName: envOrDefault("REFRESH_COOKIE_NAME", "eterion_rt"),
 		AllowedOrigins:    splitCSV(envOrDefault("CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
-		ModelAPIKey:       strings.TrimSpace(os.Getenv("MODEL_API_KEY")),
-		ModelBaseURL:      strings.TrimSpace(os.Getenv("MODEL_BASE_URL")),
-		ModelName:         strings.TrimSpace(os.Getenv("MODEL_NAME")),
-		SystemPrompt:      envOrDefault("SYSTEM_PROMPT", defaultSystemPrompt),
-		BraveSearchAPIKey: strings.TrimSpace(os.Getenv("BRAVE_SEARCH_API_KEY")),
-	}
-	cfg.Models = loadModelConfigs()
-	cfg.DefaultModelID = strings.TrimSpace(os.Getenv("DEFAULT_MODEL_ID"))
-	if cfg.DefaultModelID == "" && len(cfg.Models) > 0 {
-		cfg.DefaultModelID = cfg.Models[0].ID
+		AgentServiceURL:   envOrDefault("AGENT_SERVICE_URL", "http://127.0.0.1:8001"),
 	}
 
 	var err error
@@ -101,7 +71,7 @@ func Load() (Config, error) {
 	if cfg.RefreshCookieSecure, err = boolEnv("REFRESH_COOKIE_SECURE", false); err != nil {
 		return Config{}, err
 	}
-	if cfg.ModelTimeout, err = positiveDurationEnv("MODEL_TIMEOUT", 2*time.Minute); err != nil {
+	if cfg.AgentConnectTimeout, err = positiveDurationEnv("AGENT_CONNECT_TIMEOUT", 5*time.Second); err != nil {
 		return Config{}, err
 	}
 	if cfg.AgentRunTimeout, err = positiveDurationEnv("AGENT_RUN_TIMEOUT", 10*time.Minute); err != nil {
@@ -135,120 +105,10 @@ func (c Config) Validate() error {
 	if strings.EqualFold(c.AppEnv, "production") && !c.RefreshCookieSecure {
 		return errors.New("REFRESH_COOKIE_SECURE must be true in production")
 	}
-	// 保留旧的单模型环境变量作为兼容入口；配置了新的模型注册表后，
-	// DEFAULT_MODEL_ID 必须指向其中一个完整配置的模型。
-	if len(c.Models) == 0 {
-		if strings.TrimSpace(c.ModelAPIKey) == "" {
-			return errors.New("at least one model API key is required")
-		}
-		if strings.TrimSpace(c.ModelName) == "" {
-			return errors.New("at least one model name is required")
-		}
-		return nil
-	}
-
-	seen := make(map[string]struct{}, len(c.Models))
-	defaultFound := false
-	for _, model := range c.Models {
-		id := strings.TrimSpace(model.ID)
-		if id == "" {
-			return errors.New("model ID is required")
-		}
-		if _, exists := seen[id]; exists {
-			return fmt.Errorf("duplicate model ID: %s", id)
-		}
-		seen[id] = struct{}{}
-		if strings.TrimSpace(model.APIKey) == "" {
-			return fmt.Errorf("%s API key is required", id)
-		}
-		if strings.TrimSpace(model.BaseURL) == "" {
-			return fmt.Errorf("%s base URL is required", id)
-		}
-		if strings.TrimSpace(model.Model) == "" {
-			return fmt.Errorf("%s provider model name is required", id)
-		}
-		if strings.TrimSpace(model.ModelName) == "" {
-			return fmt.Errorf("%s public model name is required", id)
-		}
-		if id == strings.TrimSpace(c.DefaultModelID) {
-			defaultFound = true
-		}
-	}
-	if !defaultFound {
-		return fmt.Errorf("DEFAULT_MODEL_ID %q is not configured", c.DefaultModelID)
+	if strings.TrimSpace(c.AgentServiceURL) == "" {
+		return errors.New("AGENT_SERVICE_URL is required")
 	}
 	return nil
-}
-
-func loadModelConfigs() []ModelConfig {
-	definitions := []struct {
-		id             string
-		provider       string
-		providerName   string
-		modelPrefix    string
-		providerPrefix string
-		modelName      string
-		baseURL        string
-		iconURL        string
-	}{
-		{
-			id:             "doubao-seed-2-1-pro",
-			provider:       "doubao",
-			providerName:   "豆包",
-			modelPrefix:    "DOUBAO_SEED_2_1_PRO",
-			providerPrefix: "DOUBAO",
-			modelName:      "Doubao-Seed-2.1-pro",
-			baseURL:        "https://ark.cn-beijing.volces.com/api/v3",
-			iconURL:        "/model-icons/doubao-seed-2-1-pro.png",
-		},
-		{
-			id:             "deepseek-v4-pro",
-			provider:       "deepseek",
-			providerName:   "DeepSeek",
-			modelPrefix:    "DEEPSEEK_V4_PRO",
-			providerPrefix: "DEEPSEEK",
-			modelName:      "DeepSeek-V4-Pro",
-			baseURL:        "https://api.deepseek.com",
-			iconURL:        "/model-icons/deepseek-v4-pro.png",
-		},
-		{
-			id:             "minimax-m2-7",
-			provider:       "minimax",
-			providerName:   "MiniMax",
-			modelPrefix:    "MINIMAX_M2_7",
-			providerPrefix: "MINIMAX",
-			modelName:      "MiniMax M2.7",
-			baseURL:        "https://api.minimaxi.com/v1",
-			iconURL:        "/model-icons/minimax-m2-7.png",
-		},
-	}
-
-	models := make([]ModelConfig, 0, len(definitions))
-	for _, definition := range definitions {
-		providerModel := strings.TrimSpace(os.Getenv(definition.modelPrefix + "_MODEL"))
-		// 模型实例变量决定是否启用；同一厂商的 API Key、Base URL 和图标可以复用。
-		// 填写模型实例但遗漏厂商凭证时，Validate 会返回明确错误。
-		if providerModel == "" {
-			continue
-		}
-		models = append(models, ModelConfig{
-			ID:           definition.id,
-			ModelName:    envOrDefault(definition.modelPrefix+"_NAME", definition.modelName),
-			Provider:     definition.provider,
-			ProviderName: definition.providerName,
-			IconURL: envOrDefault(
-				definition.providerPrefix+"_ICON_URL",
-				definition.iconURL,
-			),
-			APIKey: strings.TrimSpace(os.Getenv(definition.providerPrefix + "_API_KEY")),
-			BaseURL: envOrDefault(
-				definition.providerPrefix+"_BASE_URL",
-				definition.baseURL,
-			),
-			Model: providerModel,
-		})
-	}
-	return models
 }
 
 func (c Config) IsAllowedOrigin(origin string) bool {

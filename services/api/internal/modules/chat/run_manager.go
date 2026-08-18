@@ -270,7 +270,7 @@ func (m *RunManager) execute(
 	completed := false
 	fullText := ""
 
-	// toolSteps keeps the frontend step created for each Eino tool-call ID.
+	// toolSteps keeps the frontend step created for each Agent tool-call ID.
 	toolSteps := make(map[string]WireToolStep)
 
 	// toolSequence gives tool cards a stable order inside this run.
