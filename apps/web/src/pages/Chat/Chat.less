@@ -32,11 +32,17 @@
   transform: translateY(-22px);
 }
 
-.chat-interaction-shell {
+.new-conversation-content {
   position: relative;
   width: min(912px, calc(100% - 24px));
   margin: 0 auto;
-  padding: clamp(120px, 16vh, 146px) 16px 36px;
+}
+
+.chat-interaction-shell {
+  position: relative;
+  width: 100%;
+  margin: 0;
+  padding: clamp(84px, 11vh, 98px) 16px 36px;
   overflow: visible;
   contain: layout style;
   isolation: isolate;
@@ -115,7 +121,7 @@
 
 .chat-welcome {
   position: absolute;
-  top: clamp(42px, 6.2vh, 58px);
+  top: clamp(24px, 3.5vh, 32px);
   right: 34px;
   left: 34px;
   z-index: 2;
@@ -165,9 +171,47 @@
 .chat-interaction-shell > .composer-dock {
   position: relative;
   z-index: 3;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   margin: 0;
   padding: 0;
+}
+
+.prompt-starters {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: 16px;
+  left: 16px;
+  display: grid;
+  gap: 6px;
+}
+
+.prompt-starter {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 14px;
+  color: #666a72;
+  background: transparent;
+  font-size: 0.96rem;
+  font-weight: 450;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid rgba(64, 92, 245, 0.5);
+    outline-offset: 2px;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .prompt-starter:hover {
+    background: #f1f1f1;
+    box-shadow: 0 2px 8px rgba(80, 80, 80, 0.12);
+  }
 }
 
 .chat-interaction-shell .composer {
@@ -212,6 +256,34 @@
     font-size: 16px;
     font-weight: 450;
     line-height: 1.55;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+      background: transparent;
+    }
+
+    &::-webkit-scrollbar-track,
+    &::-webkit-scrollbar-track-piece {
+      background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: #999999;
+    }
+
+    &::-webkit-scrollbar-button,
+    &::-webkit-scrollbar-button:single-button,
+    &::-webkit-scrollbar-button:vertical {
+      display: none !important;
+      min-height: 0 !important;
+      width: 0 !important;
+      height: 0 !important;
+      border: 0 !important;
+      background: transparent !important;
+      appearance: none !important;
+      -webkit-appearance: none !important;
+    }
 
     &::placeholder {
       color: #7f8288;
@@ -421,7 +493,7 @@
   .chat-interaction-shell {
     width: calc(100% - 12px);
     margin: auto auto 0;
-    padding: 100px 8px 0;
+    padding: 70px 8px 0;
 
     &::before {
       right: 5px;
@@ -430,8 +502,20 @@
     }
   }
 
+  .prompt-starters {
+    top: auto;
+    right: 14px;
+    bottom: calc(100% + 12px);
+    left: 14px;
+  }
+
+  .prompt-starter {
+    min-height: 44px;
+    border-radius: 12px;
+  }
+
   .chat-welcome {
-    top: 37px;
+    top: 19px;
     right: 22px;
     left: 22px;
     font-size: clamp(1.3rem, 6.2vw, 1.58rem);

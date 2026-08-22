@@ -31,6 +31,45 @@
   scrollbar-gutter: stable;
 }
 
+.chat-detail-scroll::-webkit-scrollbar {
+  width: 12px;
+  background: transparent;
+}
+
+.chat-detail-composer textarea::-webkit-scrollbar {
+  width: 6px;
+  background: transparent;
+}
+
+.chat-detail-scroll::-webkit-scrollbar-track,
+.chat-detail-scroll::-webkit-scrollbar-track-piece,
+.chat-detail-composer textarea::-webkit-scrollbar-track,
+.chat-detail-composer textarea::-webkit-scrollbar-track-piece {
+  background: transparent;
+}
+
+.chat-detail-scroll::-webkit-scrollbar-thumb,
+.chat-detail-composer textarea::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #999999;
+}
+
+.chat-detail-scroll::-webkit-scrollbar-button,
+.chat-detail-scroll::-webkit-scrollbar-button:single-button,
+.chat-detail-scroll::-webkit-scrollbar-button:vertical,
+.chat-detail-composer textarea::-webkit-scrollbar-button,
+.chat-detail-composer textarea::-webkit-scrollbar-button:single-button,
+.chat-detail-composer textarea::-webkit-scrollbar-button:vertical {
+  display: none !important;
+  min-height: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
+
 .chat-message-list,
 .chat-message-empty {
   width: min(880px, calc(100% - 40px));

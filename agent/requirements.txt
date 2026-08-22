@@ -1,6 +1,0 @@
-fastapi
-httpx
-langchain-openai
-python-dotenv
-pytest
-uvicorn[standard]
