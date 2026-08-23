@@ -40,7 +40,7 @@ Eterion 优先建设前端交互体验和 Agent 任务处理能力。Go API 负�
 
 ## 当前架构
 
-浏览器通过 REST API 和 WebSocket 访问统一的 Go 服务。PostgreSQL 保存业务数据；独立 Python 服务使用 LangChain 调用 OpenAI 兼容模型，并通过内部 HTTP/SSE 将模型回答的 content 增量返回给 Go。
+浏览器通过 REST API 和 WebSocket 访问统一的 Go 服务，PostgreSQL 保存业务数据。独立 Python Agent 负责模型目录、运行时和后续 Agent 编排，通过内部 HTTP/SSE 输出与模型厂商无关的运行事件。
 
 ```text
 React Web
@@ -51,10 +51,15 @@ Go Gin API
     └─ HTTP POST / SSE
            ▼
        Python FastAPI Agent
-           └─ LangChain / OpenAI-compatible Model
+           ├─ Runtime Event Contract
+           ├─ Direct Model Runtime（当前）
+           ├─ Agent Graph / Tools / Skills / RAG / Memory（后续）
+           └─ Model Catalog / Stream Adapter
 ```
 
-普通资源操作使用 REST API。前端实时消息和 Agent 状态使用统一的 WebSocket 事件信封；Go 负责鉴权、持久化和 Run 状态机。Python Agent 仅开放给 Go，通过 SSE 输出回答增量，模型框架细节不会泄漏到前端协议。当前 Python 服务不注册 tools。
+普通资源操作使用 REST API，前端实时消息和 Agent 状态使用统一的 WebSocket 事件信封。Python Agent 不生成 `seqId`、时间戳或前端 Message ID，只输出 `run / thinking / content / tool` 四组语义事件；Go 后续负责补齐 IM envelope，并将 `content.*` 映射为前端 `message.*`。因此 LangChain、DeepAgents 和不同模型厂商的原始 chunk 都不会进入前端协议。
+
+当前 Agent 只实现可运行的 Direct Runtime，能够输出 `run.*` 和 `content.*`；意图路由、Tools、Skills、RAG、Memory 和 DeepAgents 适配层目前只有明确的模块边界，没有模拟实现。由于 Agent 事件契约刚完成重构，现有 Go SSE 适配器需要在后续开发中同步到新事件名。
 
 ## 已安装的技术栈
 
@@ -91,10 +96,12 @@ Go Gin API
 
 | 用途 | 依赖 |
 | --- | --- |
-| 语言 | Python 3.11 或更高版本 |
+| 语言 | Python 3.11–3.13 |
 | HTTP/SSE 服务 | FastAPI、Uvicorn |
-| 模型调用 | LangChain OpenAI |
-| HTTP 客户端 | HTTPX |
+| 模型调用与适配 | LangChain OpenAI、Pydantic |
+| Agent 编排 | DeepAgents 0.7.6（可选依赖，尚未接入 Runtime） |
+| 配置 | python-dotenv |
+| 测试 | pytest、HTTPX |
 
 ### 尚未安装的能力
 
@@ -111,9 +118,16 @@ Go Gin API
 ```text
 Eterion/
 ├─ agent/                    Python Agent 服务
-│  ├─ eterion_agent/         FastAPI、模型配置与 content 流
-│  ├─ tests/                 Python 单元和协议测试
-│  └─ requirements.txt       Python 依赖清单
+│  ├─ eterion_agent/
+│  │  ├─ api/               FastAPI 与 SSE transport
+│  │  ├─ config/            环境与运行配置
+│  │  ├─ models/            模型目录、能力和流归一化
+│  │  ├─ runtime/           事件契约与 Direct Runtime
+│  │  └─ graph、tools、rag、memory 等后续模块
+│  ├─ skills/               后续标准 SKILL.md 资源
+│  ├─ evals/                后续 Agent 评测场景
+│  ├─ tests/                Python 单元和协议测试
+│  └─ pyproject.toml        运行、开发与可选编排依赖
 ├─ apps/
 │  └─ web/                  React + TypeScript + Vite 前端
 │     ├─ public/            静态资源
@@ -138,7 +152,7 @@ Eterion/
 - Node.js 22.12 或更高版本
 - pnpm 10.20 或更高版本
 - Go 1.26，推荐使用工具链 1.26.5
-- Python 3.11 或更高版本
+- Python 3.11–3.13
 - PostgreSQL 16 或更高版本
 - Git
 - Docker Desktop，可选用于运行 PostgreSQL
@@ -154,7 +168,7 @@ Set-Location ../..
 go -C services/api mod download
 Set-Location agent
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 Set-Location ..
 ```
 
@@ -177,12 +191,13 @@ pnpm dev
 
 ## 初始化并启动 Python Agent
 
-Python Agent 的模型密钥保存在 `agent/.env`，该文件不会提交到 Git。复制示例配置，至少启用并填写一个模型；`DEFAULT_MODEL_ID` 必须指向已启用的模型：
+Python Agent 的模型密钥保存在 `agent/.env`，该文件不会提交到 Git。复制示例配置，至少启用并填写一个模型；`DEFAULT_MODEL_ID` 必须指向已启用的模型。
+
+首次运行时，在仓库根目录执行：
 
 ```powershell
-Set-Location agent
-Copy-Item .env.example .env
-.\.venv\Scripts\python.exe -m eterion_agent
+Copy-Item .\agent\.env.example .\agent\.env
+.\agent\.venv\Scripts\python.exe -m eterion_agent
 ```
 
 默认地址为 `http://127.0.0.1:8001`。它是内部服务，不应直接暴露给浏览器或公网。内部接口包括：
@@ -190,6 +205,8 @@ Copy-Item .env.example .env
 - `GET /healthz`
 - `GET /models`
 - `POST /runs`（响应为 `text/event-stream`）
+
+`POST /runs` 当前接收 `run_id`、`thread_id`、`model_id` 和 `messages`，成功时依次输出 `run.started`、`content.started`、若干 `content.delta`、`content.completed` 和 `run.completed`。详细协议和后续 Agent 模块设计见 [`agent/ARCHITECTURE.md`](agent/ARCHITECTURE.md)。
 
 ## 初始化并启动 Go API
 

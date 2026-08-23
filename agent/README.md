@@ -26,9 +26,14 @@ Copy-Item .env.example .env
 
 ## 启动
 
+完成安装和 `.env` 配置后，回到仓库根目录启动 Agent：
+
 ```powershell
-.\.venv\Scripts\python.exe -m eterion_agent
+Set-Location ..
+.\agent\.venv\Scripts\python.exe -m eterion_agent
 ```
+
+后续再次启动时只需要执行第二条命令。
 
 默认监听 `http://127.0.0.1:8001`，内部接口为：
 
