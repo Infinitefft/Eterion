@@ -1,21 +1,23 @@
-"""Request and stream event schemas shared with the Go adapter."""
+"""Stable inputs and events at the execution boundary."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Literal
+from collections.abc import AsyncIterator
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field, model_validator
 
+from .events import AgentEvent
+
 
 class MessageInput(BaseModel):
-    role: Literal["system", "user", "assistant"]
+    role: Literal["user", "assistant"]
     content: str
 
 
 class RunInput(BaseModel):
     run_id: str = Field(min_length=1)
-    chat_id: str = Field(min_length=1)
+    thread_id: str = Field(min_length=1)
     model_id: str = Field(min_length=1)
     messages: list[MessageInput] = Field(min_length=1)
 
@@ -26,14 +28,13 @@ class RunInput(BaseModel):
         return self
 
 
-@dataclass(frozen=True, slots=True)
-class AgentEvent:
-    name: str
-    data: dict[str, Any]
+class AgentRuntime(Protocol):
+    @property
+    def default_model_id(self) -> str: ...
 
+    @property
+    def models(self) -> list[dict[str, str]]: ...
 
-def failure(code: str, message: str, retryable: bool) -> AgentEvent:
-    return AgentEvent(
-        "error",
-        {"error": {"code": code, "message": message, "retryable": retryable}},
-    )
+    def stream(self, request: RunInput) -> AsyncIterator[AgentEvent]: ...
+
+    async def close(self) -> None: ...

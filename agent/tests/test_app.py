@@ -2,9 +2,9 @@ from collections.abc import AsyncIterator
 
 from fastapi.testclient import TestClient
 
-from eterion_agent.app import create_app
+from eterion_agent.api.app import create_app
 from eterion_agent.config import Settings
-from eterion_agent.schema import AgentEvent, RunInput
+from eterion_agent.runtime import AgentEvent, RunInput
 
 
 class FakeRuntime:
@@ -25,9 +25,20 @@ class FakeRuntime:
         ]
 
     async def stream(self, request: RunInput) -> AsyncIterator[AgentEvent]:
-        yield AgentEvent("started", {"model": request.model_id})
-        yield AgentEvent("content_delta", {"delta": "你好"})
-        yield AgentEvent("completed", {"full_text": "你好"})
+        yield AgentEvent("run.started", request.run_id, {"modelId": request.model_id})
+        yield AgentEvent("content.started", request.run_id, {"format": "markdown"})
+        yield AgentEvent("content.delta", request.run_id, {"delta": "你好"})
+        yield AgentEvent(
+            "content.completed",
+            request.run_id,
+            {
+                "content": "你好",
+                "format": "markdown",
+                "status": "completed",
+                "error": None,
+            },
+        )
+        yield AgentEvent("run.completed", request.run_id, {})
 
     async def close(self) -> None:
         return None
@@ -47,17 +58,29 @@ def test_models_and_run_routes_have_no_version_prefix() -> None:
     with TestClient(app) as client:
         models = client.get("/models")
         assert models.status_code == 200
-        assert models.json()["default_model_id"] == "model-a"
+        assert models.json() == {
+            "default_model_id": "model-a",
+            "models": [
+                {
+                    "id": "model-a",
+                    "modelName": "Model A",
+                    "provider": "test",
+                    "providerName": "Test",
+                    "icon_url": "",
+                }
+            ],
+        }
 
         response = client.post(
             "/runs",
             json={
                 "run_id": "run-1",
-                "chat_id": "chat-1",
+                "thread_id": "thread-1",
                 "model_id": "model-a",
                 "messages": [{"role": "user", "content": "hello"}],
             },
         )
         assert response.status_code == 200
-        assert "event: content_delta" in response.text
-        assert '"full_text":"你好"' in response.text
+        assert "event: content.delta" in response.text
+        assert '"runId":"run-1"' in response.text
+        assert '"content":"你好"' in response.text

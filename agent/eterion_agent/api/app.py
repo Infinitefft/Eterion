@@ -2,21 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
-import json
-import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from .config import Settings
-from .runtime import AgentRuntime, ModelRuntime
-from .schema import AgentEvent, RunInput, failure
+from eterion_agent.config import Settings
+from eterion_agent.runtime import AgentRuntime, DirectModelRuntime, RunInput
 
-
-logger = logging.getLogger(__name__)
+from .sse import stream_with_heartbeats
 
 
 def create_app(
@@ -26,7 +21,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         resolved_settings = settings or Settings.from_env()
-        resolved_runtime = runtime or await ModelRuntime.create(resolved_settings)
+        resolved_runtime = runtime or await DirectModelRuntime.create(resolved_settings)
         application.state.settings = resolved_settings
         application.state.runtime = resolved_runtime
         try:
@@ -59,7 +54,11 @@ def create_app(
         agent_runtime: AgentRuntime = request.app.state.runtime
         heartbeat_seconds = request.app.state.settings.heartbeat_seconds
         return StreamingResponse(
-            _stream_with_heartbeats(agent_runtime.stream(payload), heartbeat_seconds),
+            stream_with_heartbeats(
+                agent_runtime.stream(payload),
+                heartbeat_seconds,
+                payload.run_id,
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache, no-transform",
@@ -69,44 +68,6 @@ def create_app(
         )
 
     return application
-
-
-async def _stream_with_heartbeats(
-    events: AsyncIterator[AgentEvent],
-    heartbeat_seconds: float,
-) -> AsyncIterator[str]:
-    iterator = events.__aiter__()
-    pending: asyncio.Task[AgentEvent] | None = asyncio.create_task(anext(iterator))
-    try:
-        while pending is not None:
-            done, _ = await asyncio.wait({pending}, timeout=heartbeat_seconds)
-            if not done:
-                yield ": keepalive\n\n"
-                continue
-            try:
-                event = pending.result()
-            except StopAsyncIteration:
-                pending = None
-                break
-            yield encode_sse(event)
-            pending = asyncio.create_task(anext(iterator))
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("Agent SSE stream failed")
-        yield encode_sse(failure("AGENT_SERVICE_ERROR", "Agent 服务执行失败", True))
-    finally:
-        if pending is not None and not pending.done():
-            pending.cancel()
-            with suppress(asyncio.CancelledError):
-                await pending
-        with suppress(Exception):
-            await iterator.aclose()
-
-
-def encode_sse(event: AgentEvent) -> str:
-    payload = json.dumps(event.data, ensure_ascii=False, separators=(",", ":"))
-    return f"event: {event.name}\ndata: {payload}\n\n"
 
 
 app = create_app()
