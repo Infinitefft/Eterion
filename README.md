@@ -40,7 +40,7 @@ Eterion 优先建设前端交互体验和 Agent 任务处理能力。Go API 负�
 
 ## 当前架构
 
-浏览器通过 REST API 和 WebSocket 访问统一的 Go 服务，PostgreSQL 保存业务数据。独立 Python Agent 负责模型目录、运行时和后续 Agent 编排，通过内部 HTTP/SSE 输出与模型厂商无关的运行事件。
+浏览器通过 REST API 和 WebSocket 访问统一的 Go 服务，PostgreSQL 保存业务数据。独立 Node.js + TypeScript Agent 负责模型目录、运行时和后续 Agent 编排，通过内部 HTTP/SSE 输出与模型厂商无关的运行事件。
 
 ```text
 React Web
@@ -50,16 +50,16 @@ Go Gin API
     ├─ PostgreSQL
     └─ HTTP POST / SSE
            ▼
-       Python FastAPI Agent
+       Node.js Fastify Agent
            ├─ Runtime Event Contract
            ├─ Direct Model Runtime（当前）
            ├─ Agent Graph / Tools / Skills / RAG / Memory（后续）
            └─ Model Catalog / Stream Adapter
 ```
 
-普通资源操作使用 REST API，前端实时消息和 Agent 状态使用统一的 WebSocket 事件信封。Python Agent 不生成 `seqId`、时间戳或前端 Message ID，只输出 `run / thinking / content / tool` 四组语义事件；Go 后续负责补齐 IM envelope，并将 `content.*` 映射为前端 `message.*`。因此 LangChain、DeepAgents 和不同模型厂商的原始 chunk 都不会进入前端协议。
+普通资源操作使用 REST API，前端实时消息和 Agent 状态使用统一的 WebSocket 事件信封。Node Agent 不生成 `seqId`、时间戳或前端 Message ID，只输出 `run / thinking / content / tool` 四组语义事件；Go 后续负责补齐 IM envelope，并将 `content.*` 映射为前端 `message.*`。因此 LangChain、Deep Agents 和不同模型厂商的原始 chunk 都不会进入前端协议。
 
-当前 Agent 只实现可运行的 Direct Runtime，能够输出 `run.*` 和 `content.*`；意图路由、Tools、Skills、RAG、Memory 和 DeepAgents 适配层目前只有明确的模块边界，没有模拟实现。由于 Agent 事件契约刚完成重构，现有 Go SSE 适配器需要在后续开发中同步到新事件名。
+当前 Agent 实现了可运行的 Direct Runtime 和真实 Brave `web_search` Tool；该 Tool 尚未注册进聊天编排。意图路由、Skills、RAG、Memory 和 Deep Agents 适配层目前只有明确边界，没有模拟实现。由于 Agent 事件契约刚完成重构，现有 Go SSE 适配器需要在后续开发中同步到新事件名。
 
 ## 已安装的技术栈
 
@@ -92,16 +92,15 @@ Go Gin API
 | 日志 | Go 标准库 `log/slog` |
 | 数据库迁移 | goose 3.27.2 |
 
-### Python Agent
+### Node Agent
 
 | 用途 | 依赖 |
 | --- | --- |
-| 语言 | Python 3.11–3.13 |
-| HTTP/SSE 服务 | FastAPI、Uvicorn |
-| 模型调用与适配 | LangChain OpenAI、Pydantic |
-| Agent 编排 | DeepAgents 0.7.6（可选依赖，尚未接入 Runtime） |
-| 配置 | python-dotenv |
-| 测试 | pytest、HTTPX |
+| 语言与工具链 | Node.js 22.12+、TypeScript 6.0.3、pnpm 10.20.0 |
+| HTTP/SSE 服务 | Fastify 5.12.1 |
+| 模型调用与适配 | LangChain Core、LangChain OpenAI、Zod |
+| Tool | Node 原生 fetch、LangChain Tool |
+| 配置 | dotenv |
 
 ### 尚未安装的能力
 
@@ -117,17 +116,18 @@ Go Gin API
 
 ```text
 Eterion/
-├─ agent/                    Python Agent 服务
-│  ├─ eterion_agent/
-│  │  ├─ api/               FastAPI 与 SSE transport
+├─ agent/                    Node.js + TypeScript Agent 服务
+│  ├─ src/
+│  │  ├─ api/               Fastify 与 SSE transport
 │  │  ├─ config/            环境与运行配置
 │  │  ├─ models/            模型目录、能力和流归一化
 │  │  ├─ runtime/           事件契约与 Direct Runtime
 │  │  └─ graph、tools、rag、memory 等后续模块
 │  ├─ skills/               后续标准 SKILL.md 资源
 │  ├─ evals/                后续 Agent 评测场景
-│  ├─ tests/                Python 单元和协议测试
-│  └─ pyproject.toml        运行、开发与可选编排依赖
+│  ├─ package.json          pnpm 依赖与脚本
+│  ├─ pnpm-lock.yaml       锁定 Agent 依赖
+│  └─ tsconfig.json        TypeScript 编译配置
 ├─ apps/
 │  └─ web/                  React + TypeScript + Vite 前端
 │     ├─ public/            静态资源
@@ -139,7 +139,7 @@ Eterion/
    └─ api/                  Go RESTful API 与 WebSocket 网关
       ├─ cmd/server/        HTTP 服务入口
       ├─ internal/          配置、路由、中间件、模块和共享能力
-      │  └─ agent/          应用 Agent 契约与 Python SSE 适配器
+      │  └─ agent/          应用 Agent 契约与 Node SSE 适配器
       ├─ migrations/        goose 数据库迁移
       ├─ go.mod             Go 模块与直接依赖
       └─ go.sum             Go 依赖校验信息
@@ -152,14 +152,13 @@ Eterion/
 - Node.js 22.12 或更高版本
 - pnpm 10.20 或更高版本
 - Go 1.26，推荐使用工具链 1.26.5
-- Python 3.11–3.13
 - PostgreSQL 16 或更高版本
 - Git
 - Docker Desktop，可选用于运行 PostgreSQL
 
 ## 恢复项目依赖
 
-克隆仓库后，在仓库根目录执行以下命令，分别恢复前端、Go API 和 Python Agent 依赖。
+克隆仓库后，在仓库根目录执行以下命令，分别恢复前端、Go API 和 Node Agent 依赖。
 
 ```powershell
 Set-Location apps/web
@@ -167,8 +166,7 @@ pnpm install
 Set-Location ../..
 go -C services/api mod download
 Set-Location agent
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+pnpm install
 Set-Location ..
 ```
 
@@ -189,15 +187,15 @@ pnpm dev
 
 默认开发地址为 `http://localhost:5173`。
 
-## 初始化并启动 Python Agent
+## 初始化并启动 Node Agent
 
-Python Agent 的模型密钥保存在 `agent/.env`，该文件不会提交到 Git。复制示例配置，至少启用并填写一个模型；`DEFAULT_MODEL_ID` 必须指向已启用的模型。
+Node Agent 的模型密钥保存在 `agent/.env`，该文件不会提交到 Git。复制示例配置，至少启用并填写一个模型；`DEFAULT_MODEL_ID` 必须指向已启用的模型。
 
 首次运行时，在仓库根目录执行：
 
 ```powershell
 Copy-Item .\agent\.env.example .\agent\.env
-.\agent\.venv\Scripts\python.exe -m eterion_agent
+pnpm --dir .\agent dev
 ```
 
 默认地址为 `http://127.0.0.1:8001`。它是内部服务，不应直接暴露给浏览器或公网。内部接口包括：
@@ -225,7 +223,7 @@ goose -dir migrations postgres $apiDatabaseUrl up
 go run ./cmd/server
 ```
 
-Go API 默认通过 `http://127.0.0.1:8001` 访问 Python Agent，并在启动时读取模型目录；如果 Python 服务不可访问或没有有效模型，Go 会直接报告启动错误。Go API 默认监听 `http://localhost:8080`，当前接口包括：
+Go API 默认通过 `http://127.0.0.1:8001` 访问 Node Agent，并在启动时读取模型目录；如果 Agent 服务不可访问或没有有效模型，Go 会直接报告启动错误。Go API 默认监听 `http://localhost:8080`，当前接口包括：
 
 - `GET /healthz`
 - `POST /api/auth/register`

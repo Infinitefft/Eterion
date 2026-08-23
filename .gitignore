@@ -1,6 +1,7 @@
 # Local agent and editor state
 /.agents/
 /.codex/
+/agent/AGENTS.md
 .idea/
 .vscode/
 
