@@ -1,1 +1,1 @@
-export { webSearch } from './web-search.js';
+export { createWebSearchTool } from './web-search.js';
