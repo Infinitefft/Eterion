@@ -1,30 +1,87 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { useStore } from 'zustand';
 
 import { getApiError } from '@/api/errors';
 import { createChatDetailPath, routePaths } from '@/app/routePaths';
 import deleteIconUrl from '@/assets/icons/chat-delete.png';
 import renameIconUrl from '@/assets/icons/chat-rename.png';
-import { getIMService, imStore } from '@/service/im';
-import type { ChatId } from '@/service/im/types';
+import type { ThreadId } from '@/service/im/types';
+import { useIMStore } from '@/store/imStore';
 
 interface ChatHistoryListProps {
   onNavigate: () => void;
 }
 
-interface ChatHistoryItemProps {
-  chatId: ChatId;
+interface ThreadHistoryItemProps {
+  threadId: ThreadId;
   onNavigate: () => void;
 }
 
-/** 单个会话独立订阅标题，标题变化不会重渲染整份历史列表。 */
-function ChatHistoryItem({ chatId, onNavigate }: ChatHistoryItemProps) {
-  const chat = useStore(imStore, (state) =>
-    Object.hasOwn(state.chatsById, chatId) ? state.chatsById[chatId] : null,
+interface ThreadLinkLabelProps {
+  title: string;
+  isGenerating: boolean;
+  isWaitingForAnswer: boolean;
+  hasUnread: boolean;
+}
+
+function getThreadLinkTitle({
+  title,
+  isGenerating,
+  isWaitingForAnswer,
+  hasUnread,
+}: ThreadLinkLabelProps): string {
+  if (isGenerating) {
+    return `${title} · 正在生成`;
+  }
+
+  if (isWaitingForAnswer) {
+    return `${title} · 待回答`;
+  }
+
+  if (hasUnread) {
+    return `${title} · 有新消息`;
+  }
+
+  return title;
+}
+
+function ThreadLinkLabel({
+  title,
+  isGenerating,
+  isWaitingForAnswer,
+  hasUnread,
+}: ThreadLinkLabelProps) {
+  const prefix = isGenerating ? (
+    <span aria-label='正在生成'>生成中 · </span>
+  ) : isWaitingForAnswer ? (
+    <span aria-label='待回答'>待回答 · </span>
+  ) : hasUnread ? (
+    <span style={{ color: '#e5484d' }} aria-label='有新消息'>
+      ●{' '}
+    </span>
+  ) : null;
+
+  return (
+    <span>
+      {prefix}
+      {title}
+    </span>
   );
+}
+
+/** 单个 Thread 独立订阅自己的元数据和最新 Run，流式正文不会重渲染整份侧栏。 */
+function ThreadHistoryItem({ threadId, onNavigate }: ThreadHistoryItemProps) {
+  const thread = useIMStore(
+    (state) => state.threads.find((current) => current.id === threadId) ?? null,
+  );
+  const latestRunStatus = useIMStore((state) => {
+    const runs = state.detailsByThread[threadId]?.runs;
+    return runs?.[runs.length - 1]?.status ?? null;
+  });
+  const isGenerating = latestRunStatus === 'pending' || latestRunStatus === 'running';
+  const isWaitingForAnswer = latestRunStatus === 'waiting_user';
   const location = useLocation();
   const navigate = useNavigate();
   const saveInFlightRef = useRef(false);
@@ -37,10 +94,10 @@ function ChatHistoryItem({ chatId, onNavigate }: ChatHistoryItemProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  if (!chat) return null;
+  if (!thread) return null;
 
-  const displayTitle = chat.title || '新对话';
-  const chatPath = createChatDetailPath(chat.id);
+  const displayTitle = thread.title || '新对话';
+  const threadPath = createChatDetailPath(thread.id);
 
   function openRenameDialog() {
     setIsMenuOpen(false);
@@ -74,11 +131,11 @@ function ChatHistoryItem({ chatId, onNavigate }: ChatHistoryItemProps) {
     setIsSaving(true);
     setActionError(null);
     try {
-      await getIMService().renameChat({ chatId, title: normalizedTitle });
+      await useIMStore.getState().renameThread(threadId, normalizedTitle);
       setIsRenameDialogOpen(false);
       setDraftTitle('');
     } catch (error) {
-      setActionError(getChatActionError(error, '修改标题失败，请稍后重试'));
+      setActionError(getThreadActionError(error, '修改标题失败，请稍后重试'));
     } finally {
       saveInFlightRef.current = false;
       setIsSaving(false);
@@ -100,12 +157,12 @@ function ChatHistoryItem({ chatId, onNavigate }: ChatHistoryItemProps) {
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      await getIMService().deleteChat(chatId);
-      if (location.pathname === chatPath) {
+      await useIMStore.getState().removeThread(threadId);
+      if (location.pathname === threadPath) {
         void navigate(routePaths.chat, { replace: true });
       }
     } catch (error) {
-      setDeleteError(getChatActionError(error, '删除会话失败，请稍后重试'));
+      setDeleteError(getThreadActionError(error, '删除会话失败，请稍后重试'));
       setIsDeleting(false);
     }
   }
@@ -124,14 +181,30 @@ function ChatHistoryItem({ chatId, onNavigate }: ChatHistoryItemProps) {
   }
 
   return (
-    <div className='conversation-item' data-deleting={isDeleting || undefined}>
+    <div
+      className='conversation-item'
+      data-deleting={isDeleting || undefined}
+      data-generating={isGenerating || undefined}
+      data-waiting-user={isWaitingForAnswer || undefined}
+      data-unread={thread.hasUnread || undefined}
+    >
       <NavLink
         className={({ isActive }) => `conversation-link ${isActive ? 'is-active' : ''}`}
-        to={chatPath}
-        title={displayTitle}
+        to={threadPath}
+        title={getThreadLinkTitle({
+          title: displayTitle,
+          isGenerating,
+          isWaitingForAnswer,
+          hasUnread: thread.hasUnread,
+        })}
         onClick={onNavigate}
       >
-        <span>{displayTitle}</span>
+        <ThreadLinkLabel
+          title={displayTitle}
+          isGenerating={isGenerating}
+          isWaitingForAnswer={isWaitingForAnswer}
+          hasUnread={thread.hasUnread}
+        />
       </NavLink>
 
       <DropdownMenu.Root open={isMenuOpen} onOpenChange={setIsMenuOpen}>
@@ -183,7 +256,7 @@ function ChatHistoryItem({ chatId, onNavigate }: ChatHistoryItemProps) {
       </DropdownMenu.Root>
 
       {isRenameDialogOpen ? (
-        <RenameChatDialog
+        <RenameThreadDialog
           title={draftTitle}
           error={actionError}
           isSaving={isSaving}
@@ -200,7 +273,7 @@ function ChatHistoryItem({ chatId, onNavigate }: ChatHistoryItemProps) {
       ) : null}
 
       {isDeleteDialogOpen ? (
-        <DeleteChatDialog
+        <DeleteThreadDialog
           title={displayTitle}
           error={deleteError}
           isDeleting={isDeleting}
@@ -214,7 +287,7 @@ function ChatHistoryItem({ chatId, onNavigate }: ChatHistoryItemProps) {
   );
 }
 
-interface RenameChatDialogProps {
+interface RenameThreadDialogProps {
   title: string;
   error: string | null;
   isSaving: boolean;
@@ -224,7 +297,7 @@ interface RenameChatDialogProps {
   onConfirm: () => void;
 }
 
-function RenameChatDialog({
+function RenameThreadDialog({
   title,
   error,
   isSaving,
@@ -232,7 +305,7 @@ function RenameChatDialog({
   onInputKeyDown,
   onCancel,
   onConfirm,
-}: RenameChatDialogProps) {
+}: RenameThreadDialogProps) {
   return createPortal(
     <div
       className='conversation-dialog-overlay'
@@ -291,7 +364,7 @@ function RenameChatDialog({
   );
 }
 
-interface DeleteChatDialogProps {
+interface DeleteThreadDialogProps {
   title: string;
   error: string | null;
   isDeleting: boolean;
@@ -299,13 +372,13 @@ interface DeleteChatDialogProps {
   onConfirm: () => void;
 }
 
-function DeleteChatDialog({
+function DeleteThreadDialog({
   title,
   error,
   isDeleting,
   onCancel,
   onConfirm,
-}: DeleteChatDialogProps) {
+}: DeleteThreadDialogProps) {
   return createPortal(
     <div
       className='conversation-dialog-overlay'
@@ -353,17 +426,15 @@ function DeleteChatDialog({
   );
 }
 
-function getChatActionError(error: unknown, fallback: string) {
+function getThreadActionError(error: unknown, fallback: string) {
   return getApiError(error)?.message ?? (error instanceof Error ? error.message : fallback);
 }
 
-/**
- * 侧边栏会话列表。
- * prepareNewChat() 写入全局 IM Store 后，这里会立即出现对应会话。
- */
+/** 侧边栏直接消费 Store 已按 updatedAt 排好序的 Thread 列表。 */
 export function ChatHistoryList({ onNavigate }: ChatHistoryListProps) {
-  const chatIds = useStore(imStore, (state) => state.chatIds);
-  const recentChatIds = useMemo(() => [...chatIds].reverse(), [chatIds]);
+  const threads = useIMStore((state) => state.threads);
+  const listStatus = useIMStore((state) => state.threadListStatus);
+  const listError = useIMStore((state) => state.threadListError);
 
   return (
     <section className='recent-section' aria-labelledby='recent-chat-heading'>
@@ -371,12 +442,18 @@ export function ChatHistoryList({ onNavigate }: ChatHistoryListProps) {
         <h2 id='recent-chat-heading'>最近会话</h2>
       </div>
 
-      {recentChatIds.length > 0 ? (
+      {threads.length > 0 ? (
         <nav className='conversation-nav' aria-label='最近会话'>
-          {recentChatIds.map((chatId) => (
-            <ChatHistoryItem key={chatId} chatId={chatId} onNavigate={onNavigate} />
+          {threads.map((thread) => (
+            <ThreadHistoryItem key={thread.id} threadId={thread.id} onNavigate={onNavigate} />
           ))}
         </nav>
+      ) : listStatus === 'loading' ? (
+        <p className='conversation-empty'>正在加载会话…</p>
+      ) : listStatus === 'error' ? (
+        <p className='conversation-empty' role='alert'>
+          {listError || '无法加载会话列表'}
+        </p>
       ) : (
         <p className='conversation-empty'>发送第一条消息后，会话会显示在这里。</p>
       )}

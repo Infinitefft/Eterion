@@ -35,6 +35,7 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [selectedModelId, setSelectedModelId] = useState<ModelId | null>(null);
     const [prompt, setPrompt] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const normalizedPrompt = prompt.trim();
 
@@ -62,32 +63,49 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
 
     useImperativeHandle(ref, () => ({ applyPromptStarter }));
 
-    function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    async function handleSubmit(event: FormEvent<HTMLFormElement>) {
       event.preventDefault();
 
-      if (!normalizedPrompt) return;
+      if (!normalizedPrompt || isSubmitting) return;
 
       if (!user) {
         setSubmitError('请先登录，再发起新的 AI 对话');
         return;
       }
 
+      setIsSubmitting(true);
+      setSubmitError(null);
+
       try {
-        /** prepareNewChat 会同步写入 Zustand，侧边栏会在导航前得到新会话。 */
-        const chatId = getIMService().prepareNewChat({
-          prompt: normalizedPrompt,
+        const dispatch = getIMService().startThread({
+          content: normalizedPrompt,
           modelId: selectedModelId ?? undefined,
         });
 
-        void navigate(createChatDetailPath(chatId));
+        /** ACK 确认服务端已经接受创建请求，页面数据随后由 Envelope 更新。 */
+        const ack = await dispatch.ack;
+
+        if (!ack.ok) {
+          throw new Error(ack.error.message);
+        }
+
+        setPrompt('');
+        void navigate(createChatDetailPath(dispatch.command.threadId));
       } catch (error) {
         setSubmitError(error instanceof Error ? error.message : '创建新会话失败');
+      } finally {
+        setIsSubmitting(false);
       }
     }
 
     return (
       <div className='composer-dock'>
-        <form className='composer' onSubmit={handleSubmit}>
+        <form
+          className='composer'
+          onSubmit={(event) => {
+            void handleSubmit(event);
+          }}
+        >
           <label className='sr-only' htmlFor='chat-prompt'>
             输入消息
           </label>
@@ -99,6 +117,7 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
             rows={1}
             placeholder='给 Eterion 发送消息'
             value={prompt}
+            disabled={isSubmitting}
             onChange={handlePromptChange}
             onKeyDown={(event) => submitComposerOnEnter(event, normalizedPrompt.length > 0)}
             onInput={(event) =>
@@ -124,7 +143,7 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
                 className='send-button'
                 type='submit'
                 aria-label='发送消息'
-                disabled={normalizedPrompt.length === 0}
+                disabled={normalizedPrompt.length === 0 || isSubmitting}
               >
                 <ArrowUp size={19} strokeWidth={2.3} />
               </button>

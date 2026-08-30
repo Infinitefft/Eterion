@@ -1,53 +1,30 @@
 import { ArrowDown } from 'lucide-react';
 import { useEffect, useRef, useState, type UIEvent } from 'react';
 
-import { imStore } from '@/service/im';
-import type { IMStore } from '@/service/im/store';
-import type { ChatId } from '@/service/im/types';
+import type { ThreadId } from '@/service/im/types';
+import { useIMStore, type IMStore } from '@/store/imStore';
 
 import { ChatMessageList } from './ChatMessageList';
 
 interface ChatConversationProps {
-  chatId: ChatId;
+  threadId: ThreadId;
 }
 
 const BOTTOM_THRESHOLD_PX = 96;
 
-/** 只判断当前 Chat 的最新消息、Run 和 Step 是否发生了可见变化。 */
-function didChatVisualStateChange(
+/** 只判断当前 Thread 中会影响对话高度的数据是否发生变化。 */
+function didThreadVisualStateChange(
   current: IMStore,
   previous: IMStore,
-  chatId: ChatId,
+  threadId: ThreadId,
 ): boolean {
-  const currentMessageIds = current.messageIdsByChatId[chatId] ?? [];
-  const previousMessageIds = previous.messageIdsByChatId[chatId] ?? [];
+  const currentDetail = current.detailsByThread[threadId];
+  const previousDetail = previous.detailsByThread[threadId];
 
-  if (currentMessageIds !== previousMessageIds) return true;
-
-  const latestMessageId = currentMessageIds[currentMessageIds.length - 1];
-  if (
-    latestMessageId &&
-    current.messagesById[latestMessageId] !== previous.messagesById[latestMessageId]
-  ) {
-    return true;
-  }
-
-  const currentRunIds = current.runIdsByChatId[chatId] ?? [];
-  const previousRunIds = previous.runIdsByChatId[chatId] ?? [];
-
-  if (currentRunIds !== previousRunIds) return true;
-
-  const latestRunId = currentRunIds[currentRunIds.length - 1];
-  if (!latestRunId) return false;
-
-  const currentRun = current.runsById[latestRunId];
-  const previousRun = previous.runsById[latestRunId];
-
-  if (currentRun !== previousRun) return true;
-  if (!currentRun || current.stepsById === previous.stepsById) return false;
-
-  return currentRun.stepIds.some(
-    (stepId) => current.stepsById[stepId] !== previous.stepsById[stepId],
+  return (
+    currentDetail?.messages !== previousDetail?.messages ||
+    currentDetail?.runs !== previousDetail?.runs ||
+    currentDetail?.blocks !== previousDetail?.blocks
   );
 }
 
@@ -55,7 +32,7 @@ function didChatVisualStateChange(
  * 对话滚动视口。
  * 用户停留在底部时自动跟随流式内容；主动向上阅读历史后不强制抢回滚动位置。
  */
-export function ChatConversation({ chatId }: ChatConversationProps) {
+export function ChatConversation({ threadId }: ChatConversationProps) {
   const viewportRef = useRef<HTMLElement>(null);
   const followsBottomRef = useRef(true);
   const frameRef = useRef<number | null>(null);
@@ -72,7 +49,6 @@ export function ChatConversation({ chatId }: ChatConversationProps) {
 
   useEffect(() => {
     followsBottomRef.current = true;
-    setShowScrollButton(false);
 
     const scheduleFollow = () => {
       if (frameRef.current !== null) return;
@@ -90,8 +66,12 @@ export function ChatConversation({ chatId }: ChatConversationProps) {
 
     scheduleFollow();
 
-    const unsubscribe = imStore.subscribe((current, previous) => {
-      if (didChatVisualStateChange(current, previous, chatId)) {
+    /**
+     * 这里使用 Store 的原生 subscribe，而不是让组件读取全部详情后重新渲染。
+     * Conversation 自己只关心“内容高度变了”，真正的数据渲染交给 MessageList。
+     */
+    const unsubscribe = useIMStore.subscribe((current, previous) => {
+      if (didThreadVisualStateChange(current, previous, threadId)) {
         scheduleFollow();
       }
     });
@@ -104,12 +84,11 @@ export function ChatConversation({ chatId }: ChatConversationProps) {
         frameRef.current = null;
       }
     };
-  }, [chatId]);
+  }, [threadId]);
 
   function handleScroll(event: UIEvent<HTMLElement>) {
     const viewport = event.currentTarget;
-    const distanceToBottom =
-      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    const distanceToBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     const isNearBottom = distanceToBottom <= BOTTOM_THRESHOLD_PX;
 
     followsBottomRef.current = isNearBottom;
@@ -117,31 +96,29 @@ export function ChatConversation({ chatId }: ChatConversationProps) {
   }
 
   function handleScrollButtonClick() {
-    const reduceMotion = window.matchMedia(
-      '(prefers-reduced-motion: reduce)',
-    ).matches;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     scrollToBottom(reduceMotion ? 'auto' : 'smooth');
   }
 
   return (
-    <div className="chat-conversation">
+    <div className='chat-conversation'>
       <section
         ref={viewportRef}
-        className="chat-detail-scroll"
-        aria-label="对话内容"
+        className='chat-detail-scroll'
+        aria-label='对话内容'
         onScroll={handleScroll}
       >
-        <ChatMessageList chatId={chatId} />
+        <ChatMessageList threadId={threadId} />
       </section>
 
       {showScrollButton ? (
         <button
-          className="chat-scroll-bottom"
-          type="button"
-          aria-label="回到底部"
+          className='chat-scroll-bottom'
+          type='button'
+          aria-label='回到底部'
           onClick={handleScrollButtonClick}
         >
-          <ArrowDown size={22} strokeWidth={2.4} aria-hidden="true" />
+          <ArrowDown size={22} strokeWidth={2.4} aria-hidden='true' />
         </button>
       ) : null}
     </div>

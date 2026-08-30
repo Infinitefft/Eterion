@@ -53,7 +53,7 @@ func (h *Hub) Unregister(connection *Connection) {
 	h.mu.Unlock()
 }
 
-func (h *Hub) PublishToUser(userID string, event ServerEnvelope) int {
+func (h *Hub) PublishToUser(userID string, event ThreadEvent) int {
 	connections := h.userConnections(userID)
 	delivered := 0
 	for _, connection := range connections {

@@ -2,9 +2,9 @@ export const routePaths = {
   root: '/',
   chat: '/chat',
   repository: '/repository',
-  chatDetail: '/chat/:chatId',
+  chatDetail: '/chat/:threadId',
 } as const;
 
-export function createChatDetailPath(chatId: string) {
-  return `${routePaths.chat}/${encodeURIComponent(chatId)}`;
+export function createChatDetailPath(threadId: string) {
+  return `${routePaths.chat}/${encodeURIComponent(threadId)}`;
 }

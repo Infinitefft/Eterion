@@ -1,22 +1,24 @@
-import { apiClient } from '@/api/client';
-import type { ApiResponse } from '@/types/api';
+import { createIMTicket } from '@/api/im';
+import { bindIMStore } from '@/store/imStore';
 
 import { IMService } from './imService';
-import { deleteChat, fetchChats, fetchChatSnapshot, updateChatTitle } from './rest';
-import { createIMStore } from './store';
 import { WebSocketTransport } from './transport';
 
-/**
- * 读取当前 IM WebSocket 地址。
- *
- * 没有配置 VITE_IM_WS_URL 时返回 null，Transport 会进入 disabled。
- * 每次连接都会申请一个新的单次 Ticket，自动重连不会复用旧凭证。
- */
-type IMTicketResponse = {
-  ticket: string;
-  expires_at: number;
-};
+/** 全局 IM Runtime 中真正需要长期持有的对象。 */
+interface IMRuntime {
+  service: IMService;
+  unbindStore: () => void;
+}
 
+/** 当前页面生命周期内唯一的 IM Runtime。 */
+let runtime: IMRuntime | null = null;
+
+/**
+ * 为一次 WebSocket 连接生成完整地址。
+ *
+ * Transport 每次连接和自动重连都会重新调用这个函数，
+ * 因此每次都会申请新的单次 Ticket，不会复用旧凭证。
+ */
 async function resolveIMWebSocketUrl(): Promise<string | null> {
   const configuredUrl = import.meta.env.VITE_IM_WS_URL?.trim();
 
@@ -24,94 +26,72 @@ async function resolveIMWebSocketUrl(): Promise<string | null> {
     return null;
   }
 
-  const response = await apiClient.post<ApiResponse<IMTicketResponse>>('/chat/ticket');
+  const { ticket } = await createIMTicket();
   const url = new URL(configuredUrl, window.location.href);
 
+  /** 允许环境变量使用 http/https，最终统一转换为 WebSocket 协议。 */
   if (url.protocol === 'http:') {
     url.protocol = 'ws:';
   } else if (url.protocol === 'https:') {
     url.protocol = 'wss:';
   }
 
-  url.searchParams.set('ticket', response.data.data.ticket);
+  url.searchParams.set('ticket', ticket);
   return url.toString();
 }
 
-function createIMRuntime() {
-  /**
-   * URL 使用函数而不是固定字符串，后续接入短期 Ticket 时
-   * 每次重连都能重新获取最新地址。
-   */
+/** 创建 Transport、IMService，并把 Service 接入全局 Store。 */
+function createIMRuntime(): IMRuntime {
   const transport = new WebSocketTransport({
     url: resolveIMWebSocketUrl,
-    reconnect: {
-      enabled: true,
-      maxAttempts: 8,
-      initialDelayMs: 1_000,
-      maxDelayMs: 30_000,
-    },
   });
 
-  const store = createIMStore(transport.getState());
-
-  /** Service 只依赖抽象 Transport 和 Store，不直接依赖 React。 */
-  const service = new IMService({
-    transport,
-    store,
-    fetchChats,
-    fetchChatSnapshot,
-    updateChatTitle,
-    deleteChat,
-  });
+  const service = new IMService({ transport });
+  const unbindStore = bindIMStore(service);
 
   return {
     service,
-    store,
+    unbindStore,
   };
 }
 
 /**
- * ES Module 在同一个页面中只执行一次，
- * 因而整个应用只会创建这一套 IM Runtime。
- */
-const runtime = createIMRuntime();
-
-/** 全局唯一的 IM Service。 */
-export const imService = runtime.service;
-
-/** React 页面订阅的全局 Zustand Store。 */
-export const imStore = runtime.store;
-
-/**
- * 获取全局 IM Service。
+ * 在 React 渲染前初始化全局 IM Runtime。
  *
- * 无论调用多少次，返回的都是同一个实例。
+ * 该函数可以重复调用，但只会创建一次实例。
+ * 初始化只完成对象组装和 Store 订阅，不会主动建立 WebSocket 连接。
  */
-export function getIMService(): IMService {
-  return imService;
+export function initializeIMService(): IMService {
+  if (!runtime) {
+    runtime = createIMRuntime();
+  }
+
+  return runtime.service;
 }
 
-/** 在 React 渲染前建立唯一的 Transport 监听关系。 */
-export function initializeIMService(): void {
-  imService.initialize();
+/** 获取全局唯一的 IMService；尚未初始化时会自动完成初始化。 */
+export function getIMService(): IMService {
+  return initializeIMService();
 }
 
 /**
- * Vite 热更新销毁旧模块时释放监听器和连接，
- * 防止开发环境残留多个 WebSocket。
+ * 永久销毁当前 IM Runtime。
+ *
+ * 普通退出登录只需要 disconnect()；这里主要用于 HMR、测试或应用真正卸载。
  */
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => {
-    imService.destroy();
-  });
+export function destroyIMService(): void {
+  const currentRuntime = runtime;
+
+  if (!currentRuntime) {
+    return;
+  }
+
+  runtime = null;
+  currentRuntime.unbindStore();
+  currentRuntime.service.destroy();
 }
 
-export type {
-  CancelRunInput,
-  IMServiceOptions,
-  IMServicePublicApi,
-  PrepareNewChatInput,
-  RenameChatInput,
-  SubmitMessageInput,
-} from './imService';
-export type { IMStore, IMStoreApi, IMStoreState } from './store';
+/** Vite 热更新时释放旧模块持有的订阅和 WebSocket。 */
+if (import.meta.hot) {
+  import.meta.hot.dispose(destroyIMService);
+}

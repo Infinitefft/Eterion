@@ -1,65 +1,98 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 
 import { routePaths } from '@/app/routePaths';
 import { ChatConversation } from '@/features/chat/components/ChatConversation';
 import { Composer } from '@/features/chat/components/Composer';
-import { getIMService } from '@/service/im';
+import type { ThreadId } from '@/service/im/types';
+import { useIMStore } from '@/store/imStore';
 
 import './ChatDetail.less';
+
+/** Snapshot 成功且用户仍停留在这个 Thread 时，才把会话标记为已读。 */
+async function synchronizeVisibleThread(threadId: ThreadId): Promise<void> {
+  await useIMStore.getState().synchronizeThread(threadId);
+
+  const store = useIMStore.getState();
+  if (store.activeThreadId === threadId) {
+    store.markThreadRead(threadId);
+  }
+}
 
 /**
  * 单个会话的承载页面。
  *
- * 新会话和历史会话共用这个页面：
- * - 新会话：Store 中存在 initialPromptIntent，进入页面后自动发送一次。
- * - 历史会话：不存在 initialPromptIntent，因此从后端加载权威快照。
+ * 页面只负责管理当前 Thread 的 React 生命周期：
+ * - 进入页面时把路由参数登记为 activeThreadId；
+ * - 当前 Thread 还没有详情时加载 Snapshot；
+ * - 离开页面时清理 activeThreadId。
+ *
+ * WebSocket、seqId 和 Snapshot 合并逻辑全部留在 IMService 与 Store 中。
  */
 export function ChatDetail() {
-  const { chatId } = useParams<{ chatId: string }>();
-  const [openFailure, setOpenFailure] = useState<{
-    chatId: string;
-    message: string;
-  } | null>(null);
+  const { threadId } = useParams<{ threadId: ThreadId }>();
+
+  /** 页面只订阅自己真正需要的两个字段，消息 delta 不会让整个页面重新渲染。 */
+  const snapshotStatus = useIMStore((state) =>
+    threadId ? (state.detailsByThread[threadId]?.snapshotStatus ?? 'idle') : 'idle',
+  );
+  const snapshotError = useIMStore((state) =>
+    threadId ? (state.detailsByThread[threadId]?.snapshotError ?? null) : null,
+  );
 
   useEffect(() => {
-    if (!chatId) return;
+    if (!threadId) return;
 
-    let active = true;
+    const store = useIMStore.getState();
 
-    /** IMService 会区分本地新会话和需要从数据库恢复的历史会话。 */
-    void getIMService()
-      .openChat(chatId)
-      .catch((error: unknown) => {
-        if (!active) return;
+    /** Store 根据 activeThreadId 判断后台完成事件是否需要显示红点。 */
+    store.setActiveThread(threadId);
 
-        setOpenFailure({
-          chatId,
-          message: error instanceof Error ? error.message : '无法加载会话历史',
-        });
-      });
+    const detail = store.detailsByThread[threadId];
+
+    /** 内存里已有完整详情时可以立刻已读，否则等 Snapshot 成功后再清红点。 */
+    if (detail?.snapshotStatus === 'ready') {
+      store.markThreadRead(threadId);
+    } else {
+      void synchronizeVisibleThread(threadId).catch(() => undefined);
+    }
 
     return () => {
-      active = false;
+      /** 只清理自己，避免快速切换路由时旧页面覆盖新页面的 activeThreadId。 */
+      if (useIMStore.getState().activeThreadId === threadId) {
+        useIMStore.getState().setActiveThread(null);
+      }
     };
-  }, [chatId]);
+  }, [threadId]);
 
-  if (!chatId) {
+  if (!threadId) {
     return <Navigate to={routePaths.chat} replace />;
   }
 
-  const openError = openFailure?.chatId === chatId ? openFailure.message : null;
-
   return (
     <section className='chat-detail-page'>
-      {openError ? (
-        <p className='chat-detail-alert' role='alert'>
-          {openError}
+      {snapshotStatus === 'loading' ? (
+        <p className='chat-detail-alert' role='status'>
+          正在加载会话…
         </p>
       ) : null}
 
-      <ChatConversation chatId={chatId} />
-      <Composer chatId={chatId} />
+      {snapshotError ? (
+        <div className='chat-detail-alert' role='alert'>
+          <span>{snapshotError}</span>
+          <button
+            type='button'
+            onClick={() => {
+              void synchronizeVisibleThread(threadId).catch(() => undefined);
+            }}
+          >
+            重试
+          </button>
+        </div>
+      ) : null}
+
+      <ChatConversation threadId={threadId} />
+      <Composer threadId={threadId} />
     </section>
   );
 }

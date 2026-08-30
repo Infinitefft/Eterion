@@ -10,16 +10,14 @@ export function resizeComposerTextarea(
   textarea: HTMLTextAreaElement,
   options: ResizeComposerTextareaOptions,
 ): void {
-  textarea.style.height = 'auto';
+  const element = textarea;
 
-  const nextHeight = Math.min(
-    Math.max(textarea.scrollHeight, options.minHeight),
-    options.maxHeight,
-  );
+  element.style.height = 'auto';
 
-  textarea.style.height = `${nextHeight}px`;
-  textarea.style.overflowY =
-    textarea.scrollHeight > options.maxHeight ? 'auto' : 'hidden';
+  const nextHeight = Math.min(Math.max(element.scrollHeight, options.minHeight), options.maxHeight);
+
+  element.style.height = `${nextHeight}px`;
+  element.style.overflowY = element.scrollHeight > options.maxHeight ? 'auto' : 'hidden';
 }
 
 /**
@@ -30,11 +28,7 @@ export function submitComposerOnEnter(
   event: KeyboardEvent<HTMLTextAreaElement>,
   canSubmit: boolean,
 ): void {
-  if (
-    event.key !== 'Enter' ||
-    event.shiftKey ||
-    event.nativeEvent.isComposing
-  ) {
+  if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) {
     return;
   }
 

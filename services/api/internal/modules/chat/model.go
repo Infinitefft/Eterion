@@ -2,6 +2,7 @@
 package chat
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,12 +20,36 @@ type MessageStatus string
 
 type TextFormat string
 
+// RunStatus is intentionally limited to the lifecycle rendered by the web IM
+// service. Tool and content streaming are activities while the run is running.
+type RunStatus string
+
+const (
+	RunStatusPending     RunStatus = "pending"
+	RunStatusRunning     RunStatus = "running"
+	RunStatusWaitingUser RunStatus = "waiting_user"
+	RunStatusCompleted   RunStatus = "completed"
+	RunStatusFailed      RunStatus = "failed"
+	RunStatusCancelled   RunStatus = "cancelled"
+
+	// Temporary source aliases keep repository changes reviewable while all old
+	// call sites are migrated to the frontend lifecycle.
+	RunStatusCreated   = RunStatusPending
+	RunStatusStreaming = RunStatusRunning
+)
+
 const (
 	MessageStatusPending   MessageStatus = "pending"
 	MessageStatusStreaming MessageStatus = "streaming"
 	MessageStatusCompleted MessageStatus = "completed"
 	MessageStatusFailed    MessageStatus = "failed"
 	MessageStatusCancelled MessageStatus = "cancelled"
+)
+
+const (
+	BlockKindThinking    = "thinking"
+	BlockKindTool        = "tool"
+	BlockKindInteraction = "hitl"
 )
 
 const (
@@ -37,6 +62,7 @@ type Chat struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	UserID    uuid.UUID `gorm:"type:uuid;index"`
 	Title     string
+	LastSeq   int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -74,14 +100,16 @@ type Run struct {
 	OutputMessageID uuid.UUID `gorm:"type:uuid"`
 	Status          RunStatus
 	IdempotencyKey  string
-	LastSeq         int64
-	ErrorCode       *string
-	ErrorMessage    *string
-	ErrorRetryable  bool
-	CreatedAt       time.Time
-	StartedAt       *time.Time
-	UpdatedAt       time.Time
-	CompletedAt     *time.Time
+	// LastSeq is retained for databases created by older migrations. New IM
+	// ordering is owned by Chat.LastSeq and never reads this field.
+	LastSeq        int64
+	ErrorCode      *string
+	ErrorMessage   *string
+	ErrorRetryable bool
+	CreatedAt      time.Time
+	StartedAt      *time.Time
+	UpdatedAt      time.Time
+	CompletedAt    *time.Time
 
 	// StepIDs is transient live-run state; tool steps are not persisted yet.
 	StepIDs []string `gorm:"-"`
@@ -90,3 +118,19 @@ type Run struct {
 func (Run) TableName() string {
 	return "runs"
 }
+
+// AgentBlock persists the latest snapshot of a Thinking, Tool, or HITL block.
+// Data is application JSON decoded according to Kind when building a snapshot.
+type AgentBlock struct {
+	ID        string    `gorm:"primaryKey;size:128"`
+	ChatID    uuid.UUID `gorm:"type:uuid;index"`
+	RunID     uuid.UUID `gorm:"type:uuid;primaryKey;index"`
+	Kind      string    `gorm:"size:16"`
+	Status    string    `gorm:"size:16"`
+	Sequence  int64
+	Data      json.RawMessage `gorm:"type:jsonb"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (AgentBlock) TableName() string { return "agent_blocks" }

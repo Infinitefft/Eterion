@@ -1,46 +1,37 @@
-import { Ban, Check, CircleAlert, LoaderCircle, Search, Sparkles, Wrench } from 'lucide-react';
-import { useStore } from 'zustand';
+import { Ban, Check, CircleAlert, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
 
-import { imStore } from '@/service/im';
-import type { AgentRun, AgentRunStatus, AgentStep, RunId, StepId } from '@/service/im/types';
+import { getIMService } from '@/service/im';
+import type {
+  AgentBlockState,
+  HITLAnswer,
+  HITLInteractionState,
+  HITLQuestion,
+  JsonValue,
+  RunId,
+  RunState,
+  RunStatus,
+  ThreadId,
+  ToolCallBlockState,
+} from '@/service/im/types';
+import { useIMStore } from '@/store/imStore';
 
 import { ThinkingIndicator } from './ThinkingIndicator';
 
 interface AgentRunTraceProps {
+  threadId: ThreadId;
   runId: RunId;
   hideThinkingIndicator?: boolean;
 }
 
-interface AgentStepItemProps {
-  stepId: StepId;
-}
+const ACTIVE_RUN_STATUSES = new Set<RunStatus>(['pending', 'running', 'waiting_user']);
 
-const ACTIVE_RUN_STATUSES = new Set<AgentRunStatus>([
-  'created',
-  'queued',
-  'running',
-  'calling_tool',
-  'calling_skill',
-  'retrieving',
-  'streaming',
-  'waiting_user',
-]);
-
-function getRunStatusLabel(run: AgentRun): string {
+function getRunStatusLabel(run: RunState): string {
   switch (run.status) {
-    case 'created':
-    case 'queued':
+    case 'pending':
       return '正在准备';
     case 'running':
       return '正在思考';
-    case 'calling_tool':
-      return '正在调用工具';
-    case 'calling_skill':
-      return '正在使用 Skill';
-    case 'retrieving':
-      return '正在检索资料';
-    case 'streaming':
-      return '正在生成回答';
     case 'waiting_user':
       return '等待你的确认';
     case 'failed':
@@ -52,128 +43,354 @@ function getRunStatusLabel(run: AgentRun): string {
   }
 }
 
-function getStepLabel(step: AgentStep): string {
-  switch (step.kind) {
-    case 'reasoning':
-      return step.summary || step.title || '正在分析问题';
-    case 'tool':
-      return `调用工具 · ${step.tool.name}`;
-    case 'skill':
-      return `使用 Skill · ${step.skill.name}`;
-    case 'retrieval':
-      return step.query ? `检索资料 · ${step.query}` : '检索相关资料';
+function formatJsonValue(value: JsonValue | null): string | null {
+  if (value === null) return null;
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+}
+
+function getToolLabel(block: ToolCallBlockState): string {
+  const name = block.displayName || block.name;
+
+  switch (block.status) {
+    case 'running': {
+      const args = formatJsonValue(block.args);
+      return args ? `${name} · ${args}` : `${name} · 执行中`;
+    }
+    case 'completed': {
+      const result = block.summary || formatJsonValue(block.result);
+      return result ? `${name} · ${result}` : `${name} · 已完成`;
+    }
+    case 'failed':
+      return `${name} · ${block.error?.message || '调用失败'}`;
   }
 }
 
-function StepKindIcon({ step }: { step: AgentStep }) {
-  switch (step.kind) {
+function getInteractionLabel(block: HITLInteractionState): string {
+  const prompts = block.questions.map((question) => question.prompt).join('；');
+
+  if (block.status === 'requested') {
+    return prompts ? `等待回答 · ${prompts}` : '等待你的回答';
+  }
+
+  const answersByQuestion = new Map(
+    (block.answers ?? []).map((answer) => [
+      answer.questionId,
+      Array.isArray(answer.value) ? answer.value.join('、') : answer.value,
+    ]),
+  );
+  const resolved = block.questions
+    .map((question) => {
+      const answer = answersByQuestion.get(question.questionId);
+      return answer ? `${question.prompt}：${answer}` : question.prompt;
+    })
+    .join('；');
+
+  return resolved ? `已回答 · ${resolved}` : '已完成回答';
+}
+
+function getBlockLabel(block: AgentBlockState): string {
+  switch (block.kind) {
+    case 'thinking':
+      return block.content || (block.status === 'streaming' ? '正在思考' : '思考完成');
+    case 'tool':
+      return getToolLabel(block);
+    case 'hitl':
+      return getInteractionLabel(block);
+  }
+}
+
+function BlockKindIcon({ block }: { block: AgentBlockState }) {
+  switch (block.kind) {
+    case 'thinking':
+      return <Sparkles size={13} />;
     case 'tool':
       return <Wrench size={13} />;
-    case 'skill':
-      return <Sparkles size={13} />;
-    case 'retrieval':
-      return <Search size={13} />;
-    case 'reasoning':
-      return <Sparkles size={13} />;
-  }
-}
-
-function StepStatusIcon({ step }: { step: AgentStep }) {
-  switch (step.status) {
-    case 'pending':
-    case 'running':
-      return <LoaderCircle className='chat-run-spinner' size={13} />;
-    case 'completed':
-      return <Check size={13} />;
-    case 'failed':
+    case 'hitl':
       return <CircleAlert size={13} />;
-    case 'cancelled':
-      return <Ban size={13} />;
   }
 }
 
-/** 每个 Step 独立订阅，工具进度变化不会重渲染其他步骤。 */
-function AgentStepItem({ stepId }: AgentStepItemProps) {
-  const step = useStore(imStore, (state) => state.stepsById[stepId]);
+function BlockStatusIcon({ block }: { block: AgentBlockState }) {
+  switch (block.kind) {
+    case 'thinking':
+      return block.status === 'streaming' ? (
+        <LoaderCircle className='chat-run-spinner' size={13} />
+      ) : (
+        <Check size={13} />
+      );
+    case 'tool':
+      if (block.status === 'running') {
+        return <LoaderCircle className='chat-run-spinner' size={13} />;
+      }
+      return block.status === 'completed' ? <Check size={13} /> : <CircleAlert size={13} />;
+    case 'hitl':
+      return block.status === 'requested' ? (
+        <LoaderCircle className='chat-run-spinner' size={13} />
+      ) : (
+        <Check size={13} />
+      );
+  }
+}
 
-  if (!step) return null;
+function AgentBlockItem({ block }: { block: AgentBlockState }) {
+  const label = getBlockLabel(block);
 
   return (
-    <li className='chat-run-step' data-status={step.status}>
+    <li className='chat-run-step' data-status={block.status}>
       <span className='chat-run-step-kind' aria-hidden='true'>
-        <StepKindIcon step={step} />
+        <BlockKindIcon block={block} />
       </span>
-      <span className='chat-run-step-label'>{getStepLabel(step)}</span>
+      <span className='chat-run-step-label' title={label}>
+        {label}
+      </span>
       <span className='chat-run-step-status' aria-hidden='true'>
-        <StepStatusIcon step={step} />
+        <BlockStatusIcon block={block} />
       </span>
     </li>
   );
 }
 
-function AgentStepList({ stepIds }: { stepIds: StepId[] }) {
-  if (stepIds.length === 0) return null;
+type HITLDraft = Partial<Record<string, string | string[]>>;
+
+function hasHITLValue(value: string | string[] | undefined): boolean {
+  return Array.isArray(value) ? value.length > 0 : Boolean(value?.trim());
+}
+
+function HITLQuestionField({
+  question,
+  value,
+  onChange,
+}: {
+  question: HITLQuestion;
+  value: string | string[] | undefined;
+  onChange: (value: string | string[]) => void;
+}) {
+  if (question.options && question.multiple) {
+    const selectedValues = Array.isArray(value) ? value : [];
+
+    return (
+      <fieldset className='chat-hitl-question'>
+        <legend>{question.prompt}</legend>
+        {question.options.map((option) => (
+          <label key={option}>
+            <input
+              type='checkbox'
+              checked={selectedValues.includes(option)}
+              onChange={(event) => {
+                onChange(
+                  event.target.checked
+                    ? [...selectedValues, option]
+                    : selectedValues.filter((current) => current !== option),
+                );
+              }}
+            />
+            <span>{option}</span>
+          </label>
+        ))}
+      </fieldset>
+    );
+  }
+
+  if (question.options) {
+    return (
+      <label className='chat-hitl-question'>
+        <span>{question.prompt}</span>
+        <select
+          value={typeof value === 'string' ? value : ''}
+          required={question.required}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option value=''>请选择</option>
+          {question.options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  return (
+    <label className='chat-hitl-question'>
+      <span>{question.prompt}</span>
+      <input
+        type='text'
+        value={typeof value === 'string' ? value : ''}
+        required={question.required}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+/** requested 状态下提供一个最小可用表单，提交结果仍等待服务端 Envelope 确认。 */
+function HITLResponseForm({ block }: { block: HITLInteractionState }) {
+  const [draft, setDraft] = useState<HITLDraft>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canSubmit = block.questions.every(
+    (question) => !question.required || hasHITLValue(draft[question.questionId]),
+  );
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!canSubmit || isSubmitting || isSubmitted) return;
+
+    const answers: HITLAnswer[] = block.questions.flatMap((question) => {
+      const value = draft[question.questionId];
+      return hasHITLValue(value) && value !== undefined
+        ? [{ questionId: question.questionId, value }]
+        : [];
+    });
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const dispatch = getIMService().respondToInteraction({
+        threadId: block.threadId,
+        runId: block.runId,
+        interactionId: block.id,
+        answers,
+      });
+      const ack = await dispatch.ack;
+
+      if (!ack.ok) {
+        throw new Error(ack.error.message);
+      }
+
+      setIsSubmitted(true);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : '提交回答失败');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <li className='chat-hitl-step' data-status={block.status}>
+      <form onSubmit={(event) => void handleSubmit(event)}>
+        {block.questions.map((question) => (
+          <HITLQuestionField
+            key={question.questionId}
+            question={question}
+            value={draft[question.questionId]}
+            onChange={(value) => {
+              setDraft((current) => ({ ...current, [question.questionId]: value }));
+              setError(null);
+            }}
+          />
+        ))}
+
+        <button type='submit' disabled={!canSubmit || isSubmitting || isSubmitted}>
+          {isSubmitted ? '已提交，等待继续执行' : isSubmitting ? '提交中…' : '提交回答'}
+        </button>
+        {error ? <p role='alert'>{error}</p> : null}
+      </form>
+    </li>
+  );
+}
+
+function AgentBlockList({ blocks }: { blocks: AgentBlockState[] }) {
+  if (blocks.length === 0) return null;
 
   return (
     <ul className='chat-run-steps'>
-      {stepIds.map((stepId) => (
-        <AgentStepItem key={stepId} stepId={stepId} />
-      ))}
+      {blocks.map((block) =>
+        block.kind === 'hitl' && block.status === 'requested' ? (
+          <HITLResponseForm key={`${block.kind}:${block.id}`} block={block} />
+        ) : (
+          <AgentBlockItem key={`${block.kind}:${block.id}`} block={block} />
+        ),
+      )}
     </ul>
   );
 }
 
-/**
- * Agent Run 的轻量过程视图。
- * 当前只展示公开摘要、工具名、Skill 名和检索关键词，不展示隐藏思维链。
- */
-export function AgentRunTrace({ runId, hideThinkingIndicator = false }: AgentRunTraceProps) {
-  const run = useStore(imStore, (state) => state.runsById[runId]);
+function RunStatusIcon({ run }: { run: RunState }) {
+  switch (run.status) {
+    case 'pending':
+    case 'running':
+    case 'waiting_user':
+      return <LoaderCircle className='chat-run-spinner' size={14} aria-hidden='true' />;
+    case 'completed':
+      return <Check size={14} aria-hidden='true' />;
+    case 'failed':
+      return <CircleAlert size={14} aria-hidden='true' />;
+    case 'cancelled':
+      return <Ban size={14} aria-hidden='true' />;
+  }
+}
 
-  if (!run) return null;
+function CompletedRunTrace({ blocks }: { blocks: AgentBlockState[] }) {
+  if (blocks.length === 0) return null;
 
+  return (
+    <details className='chat-run-trace chat-run-trace-completed'>
+      <summary>
+        <span>Agent 过程</span>
+        <small>{blocks.length} 个过程</small>
+      </summary>
+      <AgentBlockList blocks={blocks} />
+    </details>
+  );
+}
+
+function RunTraceContent({
+  run,
+  blocks,
+  hideThinkingIndicator,
+}: {
+  run: RunState;
+  blocks: AgentBlockState[];
+  hideThinkingIndicator: boolean;
+}) {
   const isActive = ACTIVE_RUN_STATUSES.has(run.status);
   const statusLabel = getRunStatusLabel(run);
 
-  if (hideThinkingIndicator && (run.status === 'running' || run.status === 'streaming')) {
+  if (hideThinkingIndicator && isActive && blocks.length === 0) {
     return null;
   }
 
-  if (run.status === 'streaming') {
-    return (
-      <div className='chat-assistant-thinking'>
-        <ThinkingIndicator />
-      </div>
-    );
-  }
-
-  if (!isActive && run.status === 'completed' && run.stepIds.length === 0) {
-    return null;
-  }
-
-  if (!isActive && run.status === 'completed') {
-    return (
-      <details className='chat-run-trace chat-run-trace-completed'>
-        <summary>
-          <span>{statusLabel}</span>
-          <small>{run.stepIds.length} 个步骤</small>
-        </summary>
-        <AgentStepList stepIds={run.stepIds} />
-      </details>
-    );
+  if (run.status === 'completed') {
+    return <CompletedRunTrace blocks={blocks} />;
   }
 
   return (
     <div className='chat-run-trace' data-status={run.status}>
       <div className='chat-run-heading'>
-        {run.status === 'running' ? null : isActive ? (
-          <LoaderCircle className='chat-run-spinner' size={14} aria-hidden='true' />
+        {run.status === 'running' && !hideThinkingIndicator ? (
+          <ThinkingIndicator />
         ) : (
-          <CircleAlert size={14} aria-hidden='true' />
+          <>
+            <RunStatusIcon run={run} />
+            <span>{statusLabel}</span>
+          </>
         )}
-        {run.status === 'running' ? <ThinkingIndicator /> : <span>{statusLabel}</span>}
       </div>
-      <AgentStepList stepIds={run.stepIds} />
+      <AgentBlockList blocks={blocks} />
     </div>
+  );
+}
+
+/** Agent Run 的轻量过程视图，只展示协议明确公开的 Thinking、Tool 和 HITL。 */
+export function AgentRunTrace({
+  threadId,
+  runId,
+  hideThinkingIndicator = false,
+}: AgentRunTraceProps) {
+  const detail = useIMStore((state) => state.detailsByThread[threadId]);
+  const run = detail?.runs.find((current) => current.id === runId);
+
+  if (!detail || !run) return null;
+
+  const blocks = detail.blocks.filter((block) => block.runId === runId);
+
+  return (
+    <RunTraceContent run={run} blocks={blocks} hideThinkingIndicator={hideThinkingIndicator} />
   );
 }

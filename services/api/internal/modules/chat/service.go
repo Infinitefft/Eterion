@@ -128,10 +128,10 @@ func (s *Service) UpdateChat(
 	userID uuid.UUID,
 	chatID uuid.UUID,
 	request UpdateChatRequest,
-) (*ChatResponse, error) {
+) (*ChatResponse, int64, error) {
 	title := strings.TrimSpace(request.Title)
 	if title == "" {
-		return nil, newBusinessError(
+		return nil, 0, newBusinessError(
 			ErrorInvalidEnvelope,
 			"Chat 标题不能为空",
 			false,
@@ -139,7 +139,7 @@ func (s *Service) UpdateChat(
 		)
 	}
 	if utf8.RuneCountInString(title) > maxChatTitleRunes {
-		return nil, newBusinessError(
+		return nil, 0, newBusinessError(
 			ErrorInvalidEnvelope,
 			"Chat 标题不能超过 120 个字符",
 			false,
@@ -155,7 +155,7 @@ func (s *Service) UpdateChat(
 		s.now(),
 	)
 	if errors.Is(err, ErrRepositoryChatNotFound) {
-		return nil, newBusinessError(
+		return nil, 0, newBusinessError(
 			ErrorChatNotFound,
 			"Chat 不存在或无权访问",
 			false,
@@ -163,11 +163,11 @@ func (s *Service) UpdateChat(
 		)
 	}
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	result := chatResponse(*chat)
-	return &result, nil
+	return &result, chat.LastSeq, nil
 }
 
 func (s *Service) DeleteChat(
@@ -220,7 +220,7 @@ func (s *Service) Snapshot(
 	userID uuid.UUID,
 	chatID uuid.UUID,
 ) (*SnapshotResponse, error) {
-	chat, messages, runs, err := s.repository.Snapshot(
+	chat, messages, runs, blocks, err := s.repository.Snapshot(
 		ctx,
 		userID,
 		chatID,
@@ -244,31 +244,43 @@ func (s *Service) Snapshot(
 
 	messageResponses := make([]SnapshotMessage, 0, len(messages))
 	for _, message := range messages {
-		var messageError *CommandError
-		if message.Status == MessageStatusFailed && message.RunID != nil {
-			messageError = runCommandError(runsByID[*message.RunID])
+		// The pending output row is an internal reservation. It becomes a
+		// frontend MessageState only after message.started.
+		if message.Status == MessageStatusPending {
+			continue
 		}
-		messageResponses = append(messageResponses, snapshotMessage(
-			wireChatMessage(message, messageError),
-		))
+		var messageError *ProtocolError
+		if message.Status == MessageStatusFailed && message.RunID != nil {
+			messageError = protocolRunError(runsByID[*message.RunID])
+		}
+		messageResponses = append(messageResponses, snapshotMessage(message, messageError))
 	}
 
 	runResponses := make([]SnapshotRun, 0, len(runs))
 	for _, run := range runs {
-		runResponses = append(runResponses, snapshotRun(wireAgentRun(run)))
+		runResponses = append(runResponses, snapshotRun(run))
+	}
+
+	blockResponses := make([]any, 0, len(blocks))
+	for _, block := range blocks {
+		mapped, err := snapshotBlock(block)
+		if err != nil {
+			return nil, err
+		}
+		blockResponses = append(blockResponses, mapped)
 	}
 
 	return &SnapshotResponse{
-		Chat: SnapshotChat{
+		Thread: SnapshotThread{
 			ID:        chat.ID.String(),
 			Title:     chat.Title,
 			CreatedAt: chat.CreatedAt.UnixMilli(),
 			UpdatedAt: chat.UpdatedAt.UnixMilli(),
 		},
-		Messages: messageResponses,
-		Runs:     runResponses,
-		Steps:    []any{},
-		Cursor:   nil,
+		Messages:  messageResponses,
+		Runs:      runResponses,
+		Blocks:    blockResponses,
+		LastSeqID: chat.LastSeq,
 	}, nil
 }
 

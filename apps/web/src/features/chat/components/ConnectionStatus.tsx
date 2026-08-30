@@ -1,9 +1,9 @@
 import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
-import { useStore } from 'zustand';
 
-import { getIMService, imStore } from '@/service/im';
+import { getIMService } from '@/service/im';
 import type { IMConnectionStatus } from '@/service/im/transport';
+import { useIMStore } from '@/store/imStore';
 
 const CONNECTION_LABELS: Record<IMConnectionStatus, string> = {
   disabled: '连接未启用',
@@ -18,15 +18,9 @@ const CONNECTION_LABELS: Record<IMConnectionStatus, string> = {
 /** 只订阅连接相关的几个原始字段，不读取整份 IM Store。 */
 export function ConnectionStatus() {
   const [isRetrying, setIsRetrying] = useState(false);
-  const status = useStore(imStore, (state) => state.connection.status);
-  const reconnectAttempts = useStore(
-    imStore,
-    (state) => state.connection.reconnectAttempts,
-  );
-  const errorMessage = useStore(
-    imStore,
-    (state) => state.connection.lastError?.message ?? null,
-  );
+  const status = useIMStore((state) => state.connection.status);
+  const reconnectAttempts = useIMStore((state) => state.connection.reconnectAttempts);
+  const errorMessage = useIMStore((state) => state.connection.lastError?.message ?? null);
 
   const canReconnect = status === 'disconnected' || status === 'failed';
   const label =
@@ -48,17 +42,13 @@ export function ConnectionStatus() {
   }
 
   return (
-    <div
-      className="chat-connection-status"
-      data-status={status}
-      title={errorMessage || label}
-    >
-      <span className="chat-connection-dot" aria-hidden="true" />
+    <div className='chat-connection-status' data-status={status} title={errorMessage || label}>
+      <span className='chat-connection-dot' aria-hidden='true' />
       <span>{label}</span>
 
       {canReconnect ? (
         <button
-          type="button"
+          type='button'
           disabled={isRetrying}
           onClick={() => {
             void handleReconnect();
@@ -67,7 +57,7 @@ export function ConnectionStatus() {
           <RefreshCw
             className={isRetrying ? 'chat-run-spinner' : undefined}
             size={12}
-            aria-hidden="true"
+            aria-hidden='true'
           />
           重连
         </button>

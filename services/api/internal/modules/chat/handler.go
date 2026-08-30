@@ -179,7 +179,7 @@ func (h *Handler) UpdateChat(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.UpdateChat(
+	result, seq, err := h.service.UpdateChat(
 		c.Request.Context(),
 		identity.UserID,
 		chatID,
@@ -189,6 +189,10 @@ func (h *Handler) UpdateChat(c *gin.Context) {
 		h.writeError(c, err)
 		return
 	}
+	h.publisher.ThreadUpdated(identity.UserID.String(), Chat{
+		ID: chatID, UserID: identity.UserID, Title: result.Title,
+		LastSeq: seq, CreatedAt: result.CreatedAt, UpdatedAt: result.UpdatedAt,
+	}, seq)
 	response.JSON(c, http.StatusOK, result)
 }
 
@@ -281,11 +285,6 @@ func (h *Handler) Connect(c *gin.Context) {
 	)
 	h.hub.Register(connection)
 	defer h.hub.Unregister(connection)
-
-	if err := h.publisher.ConnectionReady(connection); err != nil {
-		connection.Close("ready event failed")
-		return
-	}
 
 	if err := connection.Serve(
 		c.Request.Context(),

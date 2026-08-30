@@ -1,11 +1,32 @@
 package chat
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
-func wireChatMessage(
-	message Message,
-	messageError *CommandError,
-) WireChatMessage {
+func protocolRunError(run Run) *ProtocolError {
+	if run.ErrorCode == nil {
+		return nil
+	}
+	message := ""
+	if run.ErrorMessage != nil {
+		message = *run.ErrorMessage
+	}
+	return &ProtocolError{Code: *run.ErrorCode, Message: message}
+}
+
+func runStatusPayload(run Run) RunStatusPayload {
+	return RunStatusPayload{
+		Status: run.Status, ModelID: run.ModelID,
+		InputMessageID: run.InputMessageID.String(), OutputMessageID: run.OutputMessageID.String(),
+		CreatedAt: run.CreatedAt.UnixMilli(), StartedAt: timeMillisPointer(run.StartedAt),
+		CompletedAt: timeMillisPointer(run.CompletedAt), Error: protocolRunError(run),
+	}
+}
+
+func snapshotMessage(message Message, messageError *ProtocolError) SnapshotMessage {
 	var runID *string
 	if message.RunID != nil {
 		value := message.RunID.String()
@@ -15,58 +36,58 @@ func wireChatMessage(
 	if format == "" {
 		format = TextFormatPlainText
 	}
-	return WireChatMessage{
-		MessageID: message.ID.String(),
-		ChatID:    message.ChatID.String(),
-		RunID:     runID,
-		Role:      message.Role,
-		Status:    message.Status,
-		Content: TextContent{
-			Type:    "text",
-			Format:  format,
-			Content: message.Content,
-		},
-		CreatedAt:   message.CreatedAt.UnixMilli(),
-		UpdatedAt:   message.UpdatedAt.UnixMilli(),
-		CompletedAt: timeMillisPointer(message.CompletedAt),
-		Error:       messageError,
+	return SnapshotMessage{
+		ID: message.ID.String(), ThreadID: message.ChatID.String(), RunID: runID,
+		Role: message.Role, Format: format, Content: message.Content, Status: message.Status,
+		CreatedAt: message.CreatedAt.UnixMilli(), CompletedAt: timeMillisPointer(message.CompletedAt),
+		Error: messageError,
 	}
 }
 
-func wireAgentRun(run Run) WireAgentRun {
-	// Copy live step IDs so later mutations cannot change an already-built event.
-	stepIDs := append([]string(nil), run.StepIDs...)
-
-	return WireAgentRun{
-		RunID:           run.ID.String(),
-		ChatID:          run.ChatID.String(),
-		ModelID:         run.ModelID,
-		InputMessageID:  run.InputMessageID.String(),
-		OutputMessageID: run.OutputMessageID.String(),
-		Status:          run.Status,
-		StepIDs:         stepIDs,
-		LastSeq:         run.LastSeq,
-		Desynced:        false,
-		CreatedAt:       run.CreatedAt.UnixMilli(),
-		StartedAt:       timeMillisPointer(run.StartedAt),
-		UpdatedAt:       run.UpdatedAt.UnixMilli(),
-		CompletedAt:     timeMillisPointer(run.CompletedAt),
-		Error:           runCommandError(run),
+func snapshotRun(run Run) SnapshotRun {
+	return SnapshotRun{
+		ID: run.ID.String(), ThreadID: run.ChatID.String(), ModelID: run.ModelID,
+		InputMessageID: run.InputMessageID.String(), OutputMessageID: run.OutputMessageID.String(),
+		Status: run.Status, CreatedAt: run.CreatedAt.UnixMilli(),
+		StartedAt: timeMillisPointer(run.StartedAt), CompletedAt: timeMillisPointer(run.CompletedAt),
+		Error: protocolRunError(run),
 	}
 }
 
-func runCommandError(run Run) *CommandError {
-	if run.ErrorCode == nil {
-		return nil
-	}
-	errorMessage := ""
-	if run.ErrorMessage != nil {
-		errorMessage = *run.ErrorMessage
-	}
-	return &CommandError{
-		Code:      *run.ErrorCode,
-		Message:   errorMessage,
-		Retryable: run.ErrorRetryable,
+func snapshotBlock(block AgentBlock) (any, error) {
+	switch block.Kind {
+	case BlockKindThinking:
+		var data thinkingBlockData
+		if err := json.Unmarshal(block.Data, &data); err != nil {
+			return nil, fmt.Errorf("decode thinking block %s: %w", block.ID, err)
+		}
+		return SnapshotThinkingBlock{
+			Kind: BlockKindThinking, ID: block.ID, ThreadID: block.ChatID.String(),
+			RunID: block.RunID.String(), Status: block.Status, Content: data.Content,
+		}, nil
+	case BlockKindTool:
+		var data toolBlockData
+		if err := json.Unmarshal(block.Data, &data); err != nil {
+			return nil, fmt.Errorf("decode tool block %s: %w", block.ID, err)
+		}
+		return SnapshotToolBlock{
+			Kind: BlockKindTool, ID: block.ID, ThreadID: block.ChatID.String(),
+			RunID: block.RunID.String(), Status: block.Status, Name: data.Name,
+			DisplayName: data.DisplayName, Args: data.Args, Summary: data.Summary,
+			Result: data.Result, Error: data.Error,
+		}, nil
+	case BlockKindInteraction:
+		var data interactionBlockData
+		if err := json.Unmarshal(block.Data, &data); err != nil {
+			return nil, fmt.Errorf("decode HITL block %s: %w", block.ID, err)
+		}
+		return SnapshotInteractionBlock{
+			Kind: BlockKindInteraction, ID: block.ID, ThreadID: block.ChatID.String(),
+			RunID: block.RunID.String(), Status: block.Status,
+			Questions: data.Questions, Answers: data.Answers,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported agent block kind %q", block.Kind)
 	}
 }
 
@@ -76,38 +97,4 @@ func timeMillisPointer(value *time.Time) *int64 {
 	}
 	millis := value.UnixMilli()
 	return &millis
-}
-
-func snapshotMessage(message WireChatMessage) SnapshotMessage {
-	return SnapshotMessage{
-		ID:          message.MessageID,
-		ChatID:      message.ChatID,
-		RunID:       message.RunID,
-		Role:        message.Role,
-		Status:      message.Status,
-		Content:     message.Content,
-		CreatedAt:   message.CreatedAt,
-		UpdatedAt:   message.UpdatedAt,
-		CompletedAt: message.CompletedAt,
-		Error:       message.Error,
-	}
-}
-
-func snapshotRun(run WireAgentRun) SnapshotRun {
-	return SnapshotRun{
-		ID:              run.RunID,
-		ChatID:          run.ChatID,
-		ModelID:         run.ModelID,
-		InputMessageID:  run.InputMessageID,
-		OutputMessageID: run.OutputMessageID,
-		Status:          run.Status,
-		StepIDs:         run.StepIDs,
-		LastSeq:         run.LastSeq,
-		Desynced:        run.Desynced,
-		CreatedAt:       run.CreatedAt,
-		StartedAt:       run.StartedAt,
-		UpdatedAt:       run.UpdatedAt,
-		CompletedAt:     run.CompletedAt,
-		Error:           run.Error,
-	}
 }

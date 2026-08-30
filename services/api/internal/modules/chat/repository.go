@@ -3,6 +3,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -50,7 +51,7 @@ type Repository interface {
 		now time.Time,
 	) (*Chat, error)
 	DeleteChat(ctx context.Context, userID, chatID uuid.UUID) error
-	Snapshot(ctx context.Context, userID, chatID uuid.UUID) (*Chat, []Message, []Run, error)
+	Snapshot(ctx context.Context, userID, chatID uuid.UUID) (*Chat, []Message, []Run, []AgentBlock, error)
 	StartChat(
 		ctx context.Context,
 		userID uuid.UUID,
@@ -81,6 +82,7 @@ type Repository interface {
 		runID uuid.UUID,
 	) (*Run, error)
 	LoadRunExecution(ctx context.Context, runID uuid.UUID) (*RunExecution, error)
+	ReserveSubmitEvents(ctx context.Context, runID uuid.UUID) ([3]int64, error)
 	NextSeq(
 		ctx context.Context,
 		runID uuid.UUID,
@@ -98,6 +100,7 @@ type Repository interface {
 		ctx context.Context,
 		runID uuid.UUID,
 		messageID uuid.UUID,
+		format TextFormat,
 		now time.Time,
 	) (int64, error)
 	AppendDelta(
@@ -112,6 +115,7 @@ type Repository interface {
 		runID uuid.UUID,
 		messageID uuid.UUID,
 		fullText string,
+		format TextFormat,
 		now time.Time,
 	) (int64, int64, error)
 	EndRun(
@@ -124,6 +128,8 @@ type Repository interface {
 		retryable bool,
 		now time.Time,
 	) (RunStatus, int64, int64, error)
+	SaveThinking(ctx context.Context, runID uuid.UUID, blockID, content, status string, now time.Time) (int64, error)
+	SaveTool(ctx context.Context, runID uuid.UUID, blockID, status string, data toolBlockData, now time.Time) (int64, error)
 }
 
 type GormRepository struct {
@@ -198,11 +204,13 @@ func (r *GormRepository) UpdateChatTitle(
 
 		if err := tx.Model(&chat).Updates(map[string]any{
 			"title":      title,
+			"last_seq":   chat.LastSeq + 1,
 			"updated_at": now,
 		}).Error; err != nil {
 			return fmt.Errorf("update chat title: %w", err)
 		}
 		chat.Title = title
+		chat.LastSeq++
 		chat.UpdatedAt = now
 		return nil
 	})
@@ -235,7 +243,7 @@ func (r *GormRepository) DeleteChat(
 			Where(
 				"chat_id = ? AND status IN ?",
 				chatID,
-				[]RunStatus{RunStatusCreated, RunStatusRunning, RunStatusStreaming},
+				[]RunStatus{RunStatusPending, RunStatusRunning, RunStatusWaitingUser},
 			).
 			Count(&activeRunCount).Error; err != nil {
 			return fmt.Errorf("check active runs before deleting chat: %w", err)
@@ -262,10 +270,10 @@ func (r *GormRepository) Snapshot(
 	ctx context.Context,
 	userID uuid.UUID,
 	chatID uuid.UUID,
-) (*Chat, []Message, []Run, error) {
+) (*Chat, []Message, []Run, []AgentBlock, error) {
 	chat, err := r.FindChatOwned(ctx, userID, chatID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	var messages []Message
@@ -273,7 +281,7 @@ func (r *GormRepository) Snapshot(
 		Where("chat_id = ?", chatID).
 		Order("created_at ASC, id ASC").
 		Find(&messages).Error; err != nil {
-		return nil, nil, nil, fmt.Errorf("load chat messages: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("load chat messages: %w", err)
 	}
 
 	var runs []Run
@@ -281,10 +289,18 @@ func (r *GormRepository) Snapshot(
 		Where("chat_id = ? AND user_id = ?", chatID, userID).
 		Order("created_at ASC, id ASC").
 		Find(&runs).Error; err != nil {
-		return nil, nil, nil, fmt.Errorf("load chat runs: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("load chat runs: %w", err)
 	}
 
-	return chat, messages, runs, nil
+	var blocks []AgentBlock
+	if err := r.db.WithContext(ctx).
+		Where("chat_id = ?", chatID).
+		Order("sequence ASC, id ASC").
+		Find(&blocks).Error; err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("load chat agent blocks: %w", err)
+	}
+
+	return chat, messages, runs, blocks, nil
 }
 
 func (r *GormRepository) StartChat(
@@ -432,9 +448,9 @@ func (r *GormRepository) Submit(
 				"chat_id = ? AND status IN ?",
 				chatID,
 				[]RunStatus{
-					RunStatusCreated,
+					RunStatusPending,
 					RunStatusRunning,
-					RunStatusStreaming,
+					RunStatusWaitingUser,
 				},
 			).
 			Count(&activeCount).Error; err != nil {
@@ -505,10 +521,11 @@ func (r *GormRepository) LoadRunExecution(
 	var messages []Message
 	if err := r.db.WithContext(ctx).
 		Where(
-			"chat_id = ? AND id <> ? AND content <> '' AND status = ?",
+			"chat_id = ? AND id <> ? AND content <> '' AND status = ? AND role IN ?",
 			run.ChatID,
 			run.OutputMessageID,
 			MessageStatusCompleted,
+			[]MessageRole{MessageRoleUser, MessageRoleAssistant},
 		).
 		Order("created_at ASC, id ASC").
 		Find(&messages).Error; err != nil {
@@ -527,6 +544,24 @@ func (r *GormRepository) LoadRunExecution(
 	}, nil
 }
 
+// ReserveSubmitEvents allocates thread.updated, message.completed and the
+// initial run.status as one consecutive Thread sequence range.
+func (r *GormRepository) ReserveSubmitEvents(ctx context.Context, runID uuid.UUID) ([3]int64, error) {
+	var sequences [3]int64
+	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
+		if run.Status != RunStatusPending {
+			return ErrRepositoryInvalidRunState
+		}
+		first, _, err := reserveThreadSeq(tx, run.ChatID, 3)
+		if err != nil {
+			return err
+		}
+		sequences = [3]int64{first, first + 1, first + 2}
+		return nil
+	})
+	return sequences, err
+}
+
 func (r *GormRepository) NextSeq(
 	ctx context.Context,
 	runID uuid.UUID,
@@ -538,11 +573,9 @@ func (r *GormRepository) NextSeq(
 		if !containsRunStatus(allowed, run.Status) {
 			return ErrRepositoryInvalidRunState
 		}
-		seq = run.LastSeq + 1
-		return tx.Model(run).Updates(map[string]any{
-			"last_seq":   seq,
-			"updated_at": now,
-		}).Error
+		first, _, err := reserveThreadSeq(tx, run.ChatID, 1)
+		seq = first
+		return err
 	})
 	return seq, err
 }
@@ -563,10 +596,13 @@ func (r *GormRepository) TransitionRun(
 		}
 
 		previous = run.Status
-		seq = run.LastSeq + 1
+		first, _, err := reserveThreadSeq(tx, run.ChatID, 1)
+		if err != nil {
+			return err
+		}
+		seq = first
 		updates := map[string]any{
 			"status":     next,
-			"last_seq":   seq,
 			"updated_at": now,
 		}
 		if next == RunStatusRunning {
@@ -581,12 +617,13 @@ func (r *GormRepository) StartMessage(
 	ctx context.Context,
 	runID uuid.UUID,
 	messageID uuid.UUID,
+	format TextFormat,
 	now time.Time,
 ) (int64, error) {
 	var seq int64
 	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
 		if !containsRunStatus(
-			[]RunStatus{RunStatusRunning, RunStatusStreaming},
+			[]RunStatus{RunStatusRunning},
 			run.Status,
 		) {
 			return ErrRepositoryInvalidRunState
@@ -594,8 +631,9 @@ func (r *GormRepository) StartMessage(
 		result := tx.Model(&Message{}).
 			Where("id = ? AND run_id = ?", messageID, runID).
 			Updates(map[string]any{
-				"status":     MessageStatusStreaming,
-				"updated_at": now,
+				"status":         MessageStatusStreaming,
+				"content_format": format,
+				"updated_at":     now,
 			})
 		if result.Error != nil {
 			return fmt.Errorf("start assistant message: %w", result.Error)
@@ -603,11 +641,9 @@ func (r *GormRepository) StartMessage(
 		if result.RowsAffected != 1 {
 			return errors.New("assistant message not found")
 		}
-		seq = run.LastSeq + 1
-		return tx.Model(run).Updates(map[string]any{
-			"last_seq":   seq,
-			"updated_at": now,
-		}).Error
+		first, _, err := reserveThreadSeq(tx, run.ChatID, 1)
+		seq = first
+		return err
 	})
 	return seq, err
 }
@@ -623,7 +659,7 @@ func (r *GormRepository) AppendDelta(
 
 	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
 		if !containsRunStatus(
-			[]RunStatus{RunStatusRunning, RunStatusStreaming},
+			[]RunStatus{RunStatusRunning},
 			run.Status,
 		) {
 			return ErrRepositoryInvalidRunState
@@ -643,11 +679,9 @@ func (r *GormRepository) AppendDelta(
 			return errors.New("assistant message not found")
 		}
 
-		seq = run.LastSeq + 1
-		return tx.Model(run).Updates(map[string]any{
-			"last_seq":   seq,
-			"updated_at": now,
-		}).Error
+		first, _, err := reserveThreadSeq(tx, run.ChatID, 1)
+		seq = first
+		return err
 	})
 	return seq, err
 }
@@ -657,6 +691,7 @@ func (r *GormRepository) CompleteRun(
 	runID uuid.UUID,
 	messageID uuid.UUID,
 	fullText string,
+	format TextFormat,
 	now time.Time,
 ) (int64, int64, error) {
 	var messageSeq int64
@@ -664,11 +699,7 @@ func (r *GormRepository) CompleteRun(
 
 	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
 		if !containsRunStatus(
-			[]RunStatus{
-				RunStatusCreated,
-				RunStatusRunning,
-				RunStatusStreaming,
-			},
+			[]RunStatus{RunStatusPending, RunStatusRunning},
 			run.Status,
 		) {
 			return ErrRepositoryInvalidRunState
@@ -677,10 +708,11 @@ func (r *GormRepository) CompleteRun(
 		messageResult := tx.Model(&Message{}).
 			Where("id = ? AND run_id = ?", messageID, runID).
 			Updates(map[string]any{
-				"content":      fullText,
-				"status":       MessageStatusCompleted,
-				"updated_at":   now,
-				"completed_at": now,
+				"content":        fullText,
+				"content_format": format,
+				"status":         MessageStatusCompleted,
+				"updated_at":     now,
+				"completed_at":   now,
 			})
 		if messageResult.Error != nil {
 			return fmt.Errorf("complete assistant message: %w", messageResult.Error)
@@ -689,11 +721,14 @@ func (r *GormRepository) CompleteRun(
 			return errors.New("assistant message not found")
 		}
 
-		messageSeq = run.LastSeq + 1
-		statusSeq = run.LastSeq + 2
+		first, last, err := reserveThreadSeq(tx, run.ChatID, 2)
+		if err != nil {
+			return err
+		}
+		messageSeq = first
+		statusSeq = last
 		return tx.Model(run).Updates(map[string]any{
 			"status":          RunStatusCompleted,
-			"last_seq":        statusSeq,
 			"error_code":      nil,
 			"error_message":   nil,
 			"error_retryable": false,
@@ -723,19 +758,19 @@ func (r *GormRepository) EndRun(
 	var statusSeq int64
 	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
 		if !containsRunStatus(
-			[]RunStatus{
-				RunStatusCreated,
-				RunStatusRunning,
-				RunStatusStreaming,
-			},
+			[]RunStatus{RunStatusPending, RunStatusRunning, RunStatusWaitingUser},
 			run.Status,
 		) {
 			return ErrRepositoryInvalidRunState
 		}
 
 		previous = run.Status
-		messageSeq = run.LastSeq + 1
-		statusSeq = run.LastSeq + 2
+		first, last, err := reserveThreadSeq(tx, run.ChatID, 2)
+		if err != nil {
+			return err
+		}
+		messageSeq = first
+		statusSeq = last
 		messageStatus := MessageStatusFailed
 		if status == RunStatusCancelled {
 			messageStatus = MessageStatusCancelled
@@ -757,7 +792,6 @@ func (r *GormRepository) EndRun(
 
 		updates := map[string]any{
 			"status":          status,
-			"last_seq":        statusSeq,
 			"updated_at":      now,
 			"completed_at":    now,
 			"error_code":      nil,
@@ -776,6 +810,90 @@ func (r *GormRepository) EndRun(
 		return tx.Model(run).Updates(updates).Error
 	})
 	return previous, messageSeq, statusSeq, err
+}
+
+func (r *GormRepository) SaveThinking(
+	ctx context.Context,
+	runID uuid.UUID,
+	blockID string,
+	content string,
+	status string,
+	now time.Time,
+) (int64, error) {
+	data, err := json.Marshal(thinkingBlockData{Content: content})
+	if err != nil {
+		return 0, fmt.Errorf("encode thinking block: %w", err)
+	}
+	return r.saveBlock(ctx, runID, AgentBlock{
+		ID: blockID, Kind: BlockKindThinking, Status: status, Data: data,
+		CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+func (r *GormRepository) SaveTool(
+	ctx context.Context,
+	runID uuid.UUID,
+	blockID string,
+	status string,
+	data toolBlockData,
+	now time.Time,
+) (int64, error) {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return 0, fmt.Errorf("encode tool block: %w", err)
+	}
+	return r.saveBlock(ctx, runID, AgentBlock{
+		ID: blockID, Kind: BlockKindTool, Status: status, Data: raw,
+		CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+func (r *GormRepository) saveBlock(
+	ctx context.Context,
+	runID uuid.UUID,
+	block AgentBlock,
+) (int64, error) {
+	var seq int64
+	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
+		if run.Status != RunStatusRunning {
+			return ErrRepositoryInvalidRunState
+		}
+		first, _, err := reserveThreadSeq(tx, run.ChatID, 1)
+		if err != nil {
+			return err
+		}
+		seq = first
+		block.ChatID = run.ChatID
+		block.RunID = run.ID
+		block.Sequence = seq
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "run_id"}, {Name: "id"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"status": block.Status, "data": block.Data, "updated_at": block.UpdatedAt,
+			}),
+		}).Create(&block).Error
+	})
+	return seq, err
+}
+
+func reserveThreadSeq(tx *gorm.DB, chatID uuid.UUID, count int64) (int64, int64, error) {
+	if count <= 0 {
+		return 0, 0, errors.New("sequence reservation count must be positive")
+	}
+	var chat Chat
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&chat, "id = ?", chatID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, 0, ErrRepositoryChatNotFound
+	}
+	if err != nil {
+		return 0, 0, fmt.Errorf("lock thread sequence: %w", err)
+	}
+	first := chat.LastSeq + 1
+	last := chat.LastSeq + count
+	if err := tx.Model(&chat).Update("last_seq", last).Error; err != nil {
+		return 0, 0, fmt.Errorf("advance thread sequence: %w", err)
+	}
+	return first, last, nil
 }
 
 func (r *GormRepository) withLockedRun(
@@ -897,7 +1015,7 @@ func createRunRecord(
 		ModelID:         modelID,
 		InputMessageID:  userMessage.ID,
 		OutputMessageID: assistantMessage.ID,
-		Status:          RunStatusCreated,
+		Status:          RunStatusPending,
 		IdempotencyKey:  idempotencyKey,
 		LastSeq:         0,
 		CreatedAt:       now,

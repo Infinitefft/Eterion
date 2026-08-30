@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { ensureAuthInitialized } from '@/api/client';
 import { getIMService } from '@/service/im';
 import { useAuthStore } from '@/store/authStore';
+import { useIMStore } from '@/store/imStore';
 
 import type { PropsWithChildren } from 'react';
 
@@ -50,14 +51,27 @@ export function AppProviders({ children }: PropsWithChildren) {
     const service = getIMService();
 
     if (userId) {
-      /** WebSocket 连接和历史列表互不依赖，并行启动避免登录后的请求瀑布。 */
-      void Promise.allSettled([service.connect(), service.loadChats()]);
-      return;
+      let cancelled = false;
+
+      /** 先拿到历史列表，再接收实时事件，避免首屏 HTTP 响应覆盖刚收到的 WS 状态。 */
+      void useIMStore
+        .getState()
+        .loadThreads()
+        .catch(() => undefined)
+        .then(() => {
+          if (!cancelled) {
+            void service.connect();
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
     }
 
     /** 退出登录后主动断开带身份的连接，但保留全局 Service 实例。 */
     service.disconnect();
-    service.resetBusinessState();
+    useIMStore.getState().resetBusinessState();
   }, [userId]);
 
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;

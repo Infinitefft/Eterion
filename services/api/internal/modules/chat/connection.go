@@ -45,7 +45,7 @@ type Connection struct {
 	userID string
 
 	socket *websocket.Conn
-	send   chan ServerEnvelope
+	send   chan any
 	done   chan struct{}
 	logger *slog.Logger
 
@@ -68,7 +68,7 @@ func NewConnection(
 		id:     id,
 		userID: userID,
 		socket: socket,
-		send:   make(chan ServerEnvelope, sendQueueSize), // 有缓冲 channel
+		send:   make(chan any, sendQueueSize), // 有缓冲 channel
 		done:   make(chan struct{}),
 		logger: logger,
 	}
@@ -92,7 +92,7 @@ func (c *Connection) Done() <-chan struct{} {
 //
 // select 中的 default 让这里成为非阻塞操作：队列满时立即返回，
 // 而不是卡住正在产生模型增量的 goroutine。
-func (c *Connection) Send(event ServerEnvelope) error {
+func (c *Connection) Send(frame any) error {
 	select {
 	case <-c.done:
 		return ErrConnectionClosed
@@ -100,7 +100,7 @@ func (c *Connection) Send(event ServerEnvelope) error {
 	}
 
 	select {
-	case c.send <- event:
+	case c.send <- frame:
 		return nil
 	case <-c.done:
 		return ErrConnectionClosed
@@ -213,11 +213,11 @@ func (c *Connection) writeLoop(ctx context.Context) error {
 			return ctx.Err()
 		case <-c.done:
 			return nil
-		case event := <-c.send:
+		case frame := <-c.send:
 			if err := c.socket.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
 				return fmt.Errorf("set websocket write deadline: %w", err)
 			}
-			if err := c.socket.WriteJSON(event); err != nil {
+			if err := c.socket.WriteJSON(frame); err != nil {
 				return fmt.Errorf("write websocket event: %w", err)
 			}
 		case <-pingTicker.C:

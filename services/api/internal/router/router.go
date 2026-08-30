@@ -1,4 +1,4 @@
-// 负责创建 Gin 路由，并装配认证、Chat、WebSocket 和 Python Agent 依赖。
+// 负责创建 Gin 路由，并装配认证、Chat、WebSocket 和 Node Agent 依赖。
 package router
 
 import (

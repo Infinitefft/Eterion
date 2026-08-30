@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, LoaderCircle, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import { fetchChatModels, type ChatModel, type ChatModelCatalog } from '@/service/im/rest';
+import { fetchChatModels, type ChatModel, type ChatModelCatalog } from '@/api/im';
 import type { ModelId } from '@/service/im/types';
 import { useAuthStore } from '@/store/authStore';
 

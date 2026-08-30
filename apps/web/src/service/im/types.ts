@@ -1,431 +1,268 @@
-/**
- * Chat 的唯一标识。
- * 由前端创建新会话时生成，后续作为永久业务 ID 使用。
- */
-export type ChatId = string;
-
-/** 一条用户、Assistant 或系统消息的唯一标识。 */
-export type MessageId = string;
-
-/**
- * 一次 Agent 执行的唯一标识。
- * 一条用户消息通常会触发一个 Run。
- */
-export type RunId = string;
-
-/** Agent 执行过程中某一个步骤的唯一标识。 */
-export type StepId = string;
-
-/** 后端模型注册表中的稳定模型 ID，例如 doubao、deepseek、minimax。 */
-export type ModelId = string;
-
-/**
- * 一次客户端指令发送的标识。
- * 用于把客户端请求和服务端 ACK 关联起来。
- */
-export type RequestId = string;
+import type {
+  HITLAnswer,
+  HITLQuestion,
+  InteractionId,
+  JsonValue,
+  MessageCompletionStatus,
+  MessageFormat,
+  MessageId,
+  MessageRole,
+  ModelId,
+  ProtocolError,
+  RunId,
+  RunStatus,
+  SeqId,
+  ThinkingId,
+  ThreadId,
+  ToolCallId,
+  UnixTimestamp,
+} from './protocol';
 
 /**
- * 一条服务端事件的唯一标识。
- * 前端使用它判断某条事件是否已经处理过。
+ * 向页面重新导出常用协议基础类型。
+ *
+ * 页面只需要依赖应用状态类型，不必为了一个 ID 或状态再直接依赖 protocol.ts。
  */
-export type EventId = string;
+export type {
+  HITLAnswer,
+  HITLQuestion,
+  InteractionId,
+  JsonValue,
+  MessageCompletionStatus,
+  MessageFormat,
+  MessageId,
+  MessageRole,
+  ModelId,
+  ProtocolError,
+  RunId,
+  RunStatus,
+  SeqId,
+  ThinkingId,
+  ThreadId,
+  ToolCallId,
+  UnixTimestamp,
+} from './protocol';
 
-/**
- * 客户端业务操作的幂等标识。
- * 同一业务意图重试时必须复用，防止创建重复消息或 Run。
- */
-export type IdempotencyKey = string;
+/** 服务端持久化的 Thread 基础信息。 */
+export interface ThreadRecord {
+  /** Thread 的稳定 ID，也是实时事件的路由键。 */
+  id: ThreadId;
 
-/**
- * 用户全局事件流的位置。
- * 后续断线重连时，前端可以携带最后一个 Cursor 请求续传。
- */
-export type EventCursor = string;
-
-/**
- * 项目中的协议时间统一使用 Unix 毫秒时间戳。
- * 可以直接通过 Date.now() 生成。
- */
-export type UnixTimestamp = number;
-
-/**
- * 前端可以稳定识别和展示的结构化错误。
- * 业务逻辑只能依赖 code，不能匹配 message 文本。
- */
-export interface IMError {
-  /** 稳定的机器可读错误码。 */
-  code: string;
-
-  /** 可以向用户展示的错误说明。 */
-  message: string;
-
-  /** 表示当前操作是否允许重试。 */
-  retryable: boolean;
-}
-
-/**
- * 一条可持久化的 Chat 会话。
- * Chat 是 Message 和 Run 的顶层容器。
- */
-export interface Chat {
-  /** 前端生成的永久 Chat ID。 */
-  id: ChatId;
-
-  /** 展示在页面标题和历史会话列表中的名称。 */
+  /** 会话列表和聊天详情页展示的标题。 */
   title: string;
 
-  /** Chat 第一次创建的时间。 */
+  /** Thread 创建时间。 */
   createdAt: UnixTimestamp;
 
-  /** Chat 中的消息或元数据最近一次发生变化的时间。 */
+  /** Thread 最近一次发生业务变化的时间。 */
   updatedAt: UnixTimestamp;
 }
 
 /**
- * 文本内容支持的格式。
+ * 前端 Store 中真正保存的 Thread 状态。
  *
- * plain_text：只作为普通文本展示。
- * markdown：允许页面使用 Markdown Renderer 展示。
+ * generating、waiting_user 等状态不在这里重复保存，
+ * 后续直接从这个 Thread 最新 Run 的 status 派生。
  */
-export type TextFormat = 'plain_text' | 'markdown';
-
-/**
- * 用户输入和 Agent 最终回答使用的文本内容结构。
- * 当前只支持 text，后续可以扩展其他 Content 类型。
- */
-export interface TextContent {
-  /** 可辨识联合使用的内容类型。 */
-  type: 'text';
-
-  /** 告诉 UI 应该使用纯文本还是 Markdown 渲染。 */
-  format: TextFormat;
-
-  /** 真正需要展示的文本内容。 */
-  content: string;
+export interface ThreadState extends ThreadRecord {
+  /** 当前 Thread 是否存在用户尚未查看的新结果。 */
+  hasUnread: boolean;
 }
 
 /**
- * 消息的生命周期状态。
+ * 前端消息状态。
  *
- * delivery_unknown 是前端状态，表示指令已经发送，
- * 但在超时时间内没有收到服务端 ACK。
+ * sending 是客户端发出 Command 后、收到服务端事实事件前的乐观状态；
+ * streaming 表示 Assistant 正在产生正式内容；其余状态来自协议终态。
  */
-export type ChatMessageStatus =
-  | 'pending'
-  | 'delivery_unknown'
-  | 'streaming'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+export type MessageStateStatus = 'sending' | 'streaming' | MessageCompletionStatus;
 
-/** 对话中的一条用户、Assistant 或系统消息。 */
-export interface ChatMessage {
-  /** 消息的唯一 ID。 */
+/** 用户消息或 Assistant 正式回复在前端组装后的完整状态。 */
+export interface MessageState {
+  /** Message 的稳定 ID。 */
   id: MessageId;
 
-  /** 当前消息所属的 Chat。 */
-  chatId: ChatId;
+  /** Message 所属的 Thread。 */
+  threadId: ThreadId;
 
   /**
-   * 产生或消费当前消息的 Agent Run。
-   * 不属于某个 Run 的系统消息可以为 null。
+   * Message 关联的 Run。
+   * 没有建立 Run 关系的用户消息可以为 null。
    */
   runId: RunId | null;
 
-  /** 消息发送方，用于决定头像、布局和渲染方式。 */
-  role: 'user' | 'assistant' | 'system';
+  /** 消息发送方。 */
+  role: MessageRole;
 
-  /** 当前消息所处的生命周期阶段。 */
-  status: ChatMessageStatus;
+  /** 正文使用纯文本还是 Markdown 渲染。 */
+  format: MessageFormat;
 
-  /** 当前消息的正文。 */
-  content: TextContent;
+  /** 已经组装完成的当前正文，不保存单独的 delta。 */
+  content: string;
 
-  /** 消息第一次创建的时间。 */
+  /** 当前消息状态。 */
+  status: MessageStateStatus;
+
+  /** 消息创建时间。 */
   createdAt: UnixTimestamp;
 
-  /** 消息正文或状态最近一次变化的时间。 */
-  updatedAt: UnixTimestamp;
-
-  /**
-   * 消息进入终态的时间。
-   * streaming 或 pending 状态下为 null。
-   */
+  /** 消息进入终态的时间；发送中或流式生成中为 null。 */
   completedAt: UnixTimestamp | null;
 
-  /** 消息生成失败时的结构化错误。 */
-  error: IMError | null;
+  /** 消息失败时的错误；正常状态为 null。 */
+  error: ProtocolError | null;
 }
 
-/**
- * Agent Run 的生命周期。
- *
- * Tool、Skill 和 RAG 的详细过程不直接塞进这里，
- * 它们通过 AgentStep 表达。
- */
-export type AgentRunStatus =
-  | 'created'
-  | 'queued'
-  | 'running'
-  | 'calling_tool'
-  | 'calling_skill'
-  | 'retrieving'
-  | 'streaming'
-  | 'waiting_user'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
-
-/**
- * 一次完整的 Agent 执行。
- *
- * 一般关系为：
- * 用户消息 -> AgentRun -> Assistant 消息
- */
-export interface AgentRun {
-  /** 当前 Run 的唯一 ID。 */
+/** 一次 Agent 执行在前端保存的权威状态。 */
+export interface RunState {
+  /** Run 的稳定 ID。 */
   id: RunId;
 
-  /** 当前 Run 所属的 Chat。 */
-  chatId: ChatId;
+  /** Run 所属的 Thread。 */
+  threadId: ThreadId;
 
-  /** 本次 Run 实际使用的稳定模型 ID。 */
+  /** 当前 Run 实际使用的模型。 */
   modelId: ModelId;
 
   /** 触发当前 Run 的用户消息。 */
   inputMessageId: MessageId;
 
-  /** 当前 Run 最终生成的 Assistant 消息。 */
+  /** 当前 Run 生成的 Assistant 正式消息。 */
   outputMessageId: MessageId;
 
-  /** Run 当前所处的执行阶段。 */
-  status: AgentRunStatus;
+  /** Run 当前生命周期状态。 */
+  status: RunStatus;
 
-  /**
-   * 当前 Run 包含的 Agent Step ID。
-   * 数组顺序就是 UI 默认展示顺序。
-   */
-  stepIds: StepId[];
-
-  /**
-   * 当前 Run 已处理的最大事件序号。
-   * 用于处理事件乱序、重复和缺失。
-   */
-  lastSeq: number;
-
-  /**
-   * 是否发现了事件序号缺口。
-   * 为 true 时，本地状态不能继续视为权威状态。
-   */
-  desynced: boolean;
-
-  /** Run 第一次创建的时间。 */
+  /** Run 创建时间。 */
   createdAt: UnixTimestamp;
 
-  /** Agent 真正开始执行的时间。 */
+  /** Agent 真正开始执行的时间；尚未开始时为 null。 */
   startedAt: UnixTimestamp | null;
 
-  /** Run 状态或内容最近一次变化的时间。 */
-  updatedAt: UnixTimestamp;
-
-  /** Run 进入 completed、failed 或 cancelled 的时间。 */
+  /** Run 进入终态的时间；执行期间为 null。 */
   completedAt: UnixTimestamp | null;
 
-  /** Run 执行失败时的结构化错误。 */
-  error: IMError | null;
+  /** Run 失败时的错误；其他状态为 null。 */
+  error: ProtocolError | null;
 }
 
-/**
- * Agent 执行步骤支持的类型。
- *
- * reasoning：可公开的分析状态或摘要。
- * tool：一次底层工具调用。
- * skill：一次 Skill 能力调用。
- * retrieval：一次 RAG 文档检索。
- */
-export type AgentStepKind = 'reasoning' | 'tool' | 'skill' | 'retrieval';
+/** Thinking Block 在前端可能处于的状态。 */
+export type ThinkingBlockStatus = 'streaming' | 'completed';
 
-/** 单个 Agent Step 的生命周期。 */
-export type AgentStepStatus =
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+/** 模型公开 Thinking 内容在前端合并后的状态。 */
+export interface ThinkingBlockState {
+  /** Agent Block 的判别字段。 */
+  kind: 'thinking';
 
-/**
- * 所有 Agent Step 共用的基础字段。
- *
- * TKind 会把每个具体 Step 的 kind 固定为一个字面量，
- * 使 TypeScript 可以根据 step.kind 自动推断具体字段。
- */
-export interface AgentStepBase<TKind extends AgentStepKind> {
-  /** 当前步骤的唯一 ID。 */
-  id: StepId;
+  /** Thinking Block 的稳定 ID。 */
+  id: ThinkingId;
 
-  /** 当前步骤所属的 Chat。 */
-  chatId: ChatId;
+  /** Thinking 所属的 Thread。 */
+  threadId: ThreadId;
 
-  /** 当前步骤所属的 Agent Run。 */
+  /** Thinking 所属的 Run。 */
   runId: RunId;
 
-  /** 当前步骤的具体类型。 */
-  kind: TKind;
+  /** Thinking 当前是否仍在流式生成。 */
+  status: ThinkingBlockStatus;
 
-  /**
-   * 面向用户的步骤标题。
-   * 例如“分析问题”“调用网页搜索”“检索本地知识库”。
-   */
-  title: string;
-
-  /** 当前步骤所处的生命周期阶段。 */
-  status: AgentStepStatus;
-
-  /**
-   * 当前步骤在 Run 中的展示顺序。
-   * 不依赖事件实际到达前端的时间排序。
-   */
-  sequence: number;
-
-  /**
-   * 可选的父步骤 ID。
-   *
-   * 例如 Skill 内部调用了 Tool，
-   * ToolStep 可以把对应 SkillStep 设为父步骤。
-   */
-  parentStepId: StepId | null;
-
-  /** 当前步骤真正开始执行的时间。 */
-  startedAt: UnixTimestamp | null;
-
-  /** 当前步骤完成、失败或取消的时间。 */
-  completedAt: UnixTimestamp | null;
-
-  /** 当前步骤失败时的结构化错误。 */
-  error: IMError | null;
+  /** 已经把全部 delta 追加完成的当前内容。 */
+  content: string;
 }
 
-/**
- * 可公开展示的分析状态或摘要。
- * 不用于承载模型隐藏的原始思维链。
- */
-export interface ReasoningStep extends AgentStepBase<'reasoning'> {
-  /**
-   * 可以向用户展示的简短分析摘要。
-   * 只有“思考中”状态而没有具体摘要时可以为 null。
-   */
+/** Tool 调用在前端可能处于的状态。 */
+export type ToolCallStatus = 'running' | 'completed' | 'failed';
+
+/** 一次 Tool 调用在前端合并后的状态。 */
+export interface ToolCallBlockState {
+  /** Agent Block 的判别字段。 */
+  kind: 'tool';
+
+  /** Tool Call 的稳定 ID。 */
+  id: ToolCallId;
+
+  /** Tool Call 所属的 Thread。 */
+  threadId: ThreadId;
+
+  /** Tool Call 所属的 Run。 */
+  runId: RunId;
+
+  /** Tool 当前执行状态。 */
+  status: ToolCallStatus;
+
+  /** Tool 在 Agent 注册表中的稳定名称。 */
+  name: string;
+
+  /** 面向用户的展示名称；没有时为 null。 */
+  displayName: string | null;
+
+  /** Tool 调用参数；没有公开参数时为 null。 */
+  args: JsonValue | null;
+
+  /** Tool 成功后的简短结果；执行中或没有摘要时为 null。 */
   summary: string | null;
+
+  /** Tool 成功后的结构化结果；执行中或没有公开结果时为 null。 */
+  result: JsonValue | null;
+
+  /** Tool 失败时的错误；其他状态为 null。 */
+  error: ProtocolError | null;
 }
 
-/** Tool 的稳定身份和展示信息。 */
-export interface ToolReference {
-  /** Tool 在注册表或后端中的稳定 ID。 */
-  id: string;
+/** HITL 在前端可能处于的状态。 */
+export type HITLInteractionStatus = 'requested' | 'resolved';
 
-  /** 页面上向用户展示的 Tool 名称。 */
-  name: string;
-}
+/** 一次 Human-in-the-loop 交互在前端合并后的状态。 */
+export interface HITLInteractionState {
+  /** Agent Block 的判别字段。 */
+  kind: 'hitl';
 
-/** Agent 的一次 Tool 调用。 */
-export interface ToolStep extends AgentStepBase<'tool'> {
-  /**
-   * 一次具体 Tool 调用的 ID。
-   * 同一个 Tool 在一个 Run 中可以被调用多次。
-   */
-  callId: string;
+  /** HITL Interaction 的稳定 ID。 */
+  id: InteractionId;
 
-  /** 本次调用所使用的 Tool。 */
-  tool: ToolReference;
+  /** HITL 所属的 Thread。 */
+  threadId: ThreadId;
 
-  /**
-   * Tool 的输入参数。
-   * 当前不规定具体结构，后续根据 Tool 协议细化。
-   */
-  input: unknown;
+  /** HITL 所属的 Run。 */
+  runId: RunId;
 
-  /**
-   * Tool 的输出结果。
-   * 当前不规定具体结构，UI 暂时显示占位内容。
-   */
-  output: unknown;
-}
+  /** 当前正在等待回答，还是已经得到回答。 */
+  status: HITLInteractionStatus;
 
-/** Skill 的稳定身份和展示信息。 */
-export interface SkillReference {
-  /** Skill 在注册表中的稳定 ID。 */
-  id: string;
+  /** 服务端要求用户回答的问题。 */
+  questions: HITLQuestion[];
 
-  /** 页面上向用户展示的 Skill 名称。 */
-  name: string;
-}
-
-/** Agent 的一次 Skill 调用。 */
-export interface SkillStep extends AgentStepBase<'skill'> {
-  /**
-   * 一次具体 Skill 调用的 ID。
-   * 用于关联调用开始、进度、结果和错误事件。
-   */
-  callId: string;
-
-  /** 本次调用所使用的 Skill。 */
-  skill: SkillReference;
-
-  /** Skill 输入，当前暂不约束具体结构。 */
-  input: unknown;
-
-  /** Skill 输出，当前暂不约束具体结构。 */
-  output: unknown;
-}
-
-/** 一次 RAG 文档检索步骤。 */
-export interface RetrievalStep extends AgentStepBase<'retrieval'> {
-  /** 一次具体检索任务的 ID。 */
-  retrievalId: string;
-
-  /**
-   * 实际用于知识库检索的查询文本。
-   * 检索尚未开始或后端未公开时可以为 null。
-   */
-  query: string | null;
-
-  /**
-   * 检索到的文档或引用结果。
-   * 当前使用 unknown[] 占位，后续再定义文档结构。
-   */
-  documents: unknown[];
+  /** 用户最终提交的答案；尚未解决时为 null。 */
+  answers: HITLAnswer[] | null;
 }
 
 /**
- * 所有 Agent Step 的可辨识联合。
+ * 一次 Run 中可以展示的全部 Agent Block。
  *
- * 使用示例：
- *
- * if (step.kind === 'tool') {
- *   step.tool.name;
- * }
+ * Skill 不单独展示，RAG 作为普通 Tool，因此不需要 AgentStep、SkillBlock
+ * 或 RetrievalBlock 等额外抽象。
  */
-export type AgentStep = ReasoningStep | ToolStep | SkillStep | RetrievalStep;
+export type AgentBlockState = ThinkingBlockState | ToolCallBlockState | HITLInteractionState;
 
 /**
- * 进入历史会话或发生状态校准时加载的权威快照。
+ * 服务端返回的单个 Thread 权威快照。
+ *
+ * Snapshot 用于首次打开历史 Thread，以及 seqId 出现缺口后的恢复。
+ * 数组按实际展示顺序返回，状态层可以直接据此重建本地实体和索引。
  */
-export interface ChatSnapshot {
-  /** 当前 Chat 的基础信息。 */
-  chat: Chat;
+export interface ThreadSnapshot {
+  /** Thread 的服务端元数据，不包含纯前端 hasUnread。 */
+  thread: ThreadRecord;
 
-  /** 当前 Chat 的全部历史消息。 */
-  messages: ChatMessage[];
+  /** Thread 内的全部正式消息，按创建顺序排列。 */
+  messages: MessageState[];
 
-  /** 当前 Chat 已产生的全部 Agent Run。 */
-  runs: AgentRun[];
+  /** Thread 内的全部 Run，按创建顺序排列。 */
+  runs: RunState[];
 
-  /** 所有 Run 对应的 Agent 执行步骤。 */
-  steps: AgentStep[];
+  /** Thread 内的 Thinking、Tool 和 HITL，按实际出现顺序排列。 */
+  blocks: AgentBlockState[];
 
-  /**
-   * 生成当前快照时对应的事件流位置。
-   * 后续实时事件应该从这个位置之后继续处理。
-   */
-  cursor: EventCursor | null;
+  /** Snapshot 已经包含的最大 Thread 事件序号。 */
+  lastSeqId: SeqId;
 }
