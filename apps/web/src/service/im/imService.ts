@@ -24,121 +24,114 @@ import type {
 } from './transport';
 
 /**
- * 这个模块只有两条主流程：
+ * 全局 IM 应用层服务。
  *
- * 上行：页面调用业务方法 -> 组装 Command -> Transport 发送 -> requestId 匹配 ACK。
- * 下行：Transport 收到 Frame -> threadId 路由 -> seqId 排序 -> 广播给订阅者。
+ * 上行：页面构造 Command -> Transport 发送 -> requestId 匹配 ACK。
+ * 下行：Transport 接收 Frame -> threadId 路由 -> seqId 排序 -> 状态层消费。
  *
- * 它不会组装聊天页面状态。Message、Run、Thinking、Tool 和 HITL 的具体状态
- * 会在后续状态层中，根据这里发布的有序事件进行更新。
+ * 这里不组装 React 页面状态；Message、Run、Thinking、Tool、HITL 和未读状态
+ * 由后续状态层根据这里发布的有序 Envelope 统一维护。
  */
 
 /** 创建 Thread 并发送首条用户消息所需的数据。 */
 export interface StartThreadInput {
-  /** 用户发送的第一条消息正文。 */
+  /** 用户发送的首条消息正文。 */
   content: string;
-
-  /** 不传时由后端选择默认模型。 */
+  /** 不传时由服务端选择默认模型。 */
   modelId?: ModelId;
-
-  /** 调用方需要重发同一个业务意图时，可以复用原 ThreadId。 */
+  /** 明确重发同一业务意图时，可以复用原 ThreadId。 */
   threadId?: ThreadId;
-
-  /** 调用方需要重发同一条消息时，可以复用原 MessageId。 */
+  /** 明确重发同一条消息时，可以复用原 MessageId。 */
   messageId?: MessageId;
 }
 
-/** 向已有 Thread 发送用户消息所需的数据。 */
+/** 向已经存在的 Thread 发送消息所需的数据。 */
 export interface SendMessageInput {
-  /** 这条消息属于哪个 Thread。 */
+  /** 目标 Thread。 */
   threadId: ThreadId;
-
-  /** 用户输入的正文。 */
+  /** 用户输入的消息正文。 */
   content: string;
-
-  /** 不传时由后端选择默认模型。 */
+  /** 不传时由服务端选择默认模型。 */
   modelId?: ModelId;
-
-  /** 重发同一条业务消息时复用它，因此不再额外设计 idempotencyKey。 */
+  /** 重发同一业务消息时可以复用原 MessageId。 */
   messageId?: MessageId;
 }
 
-/** 取消正在执行的 Run 所需的数据。 */
+/** 取消一次 Agent Run 所需的数据。 */
 export interface CancelRunInput {
-  /** Run 所属的 Thread，也是服务端路由取消请求的依据。 */
+  /** Run 所属的 Thread。 */
   threadId: ThreadId;
-
-  /** 要取消的 Agent 执行。 */
+  /** 要取消的 Agent Run。 */
   runId: RunId;
 }
 
-/** 回答 HITL 交互所需的数据。 */
+/**
+ * 回答一次 HITL 需要的数据
+ */
 export interface RespondToInteractionInput {
   /** HITL 所属的 Thread。 */
   threadId: ThreadId;
-
   /** 当前等待用户输入的 Run。 */
   runId: RunId;
-
-  /** 这次回答针对哪一个 HITL 请求。 */
+  /** 需要回答的具体 HITL。 */
   interactionId: InteractionId;
-
   /** 用户对本次 HITL 全部问题的回答。 */
   answers: HITLAnswer[];
 }
 
 /**
- * Command 会立刻返回，页面可以马上取得其中的业务 ID；
- * ack Promise 表示本次发送结果：收到 ACK 时 resolve，
- * 未连接、发送失败、超时、断线或销毁时 reject。
+ * 业务方法同步返回完整 Command，同时异步等待 ACK。
+ * 状态层可以先使用 Command 中的稳定业务 ID 做乐观更新。
  */
 export interface IMCommandDispatch<TCommand extends ClientCommand> {
-  /** 已经生成 ID 的完整 Command，状态层可以立即用它做乐观更新。 */
+  /** 已经生成完整业务 ID 的 Command。 */
   command: Readonly<TCommand>;
-
-  /** 服务端是否接受 Command 的异步结果，不代表 Agent 已经执行完成。 */
+  /** 本次发送的异步 ACK 结果。 */
   ack: Promise<AckFrame>;
 }
 
-/** seqId 不连续时通知状态层重新加载对应 Thread snapshot。 */
+/**
+ * 某个 Thread 出现 seqId 缺口时的数据
+ */
 export interface ThreadSequenceGap {
-  /** 哪个 Thread 出现了序号缺口。 */
+  /** 出现序号缺口的 Thread。 */
   threadId: ThreadId;
-
-  /** 按当前游标，下一条本应收到的 seqId。 */
+  /** 当前期望接收到的 seqId */
   expectedSeqId: SeqId;
-
   /** 实际提前到达并触发本次 gap 的 seqId。 */
   receivedSeqId: SeqId;
 }
 
 /**
- * IMService 对状态层发布的统一事件。
+ * IMService 向状态层发布的统一事件。
  *
- * kind 使用内部名称而不是服务端 Envelope.type，避免把连接状态和 gap
- * 误认为 Thread 业务事件。状态层只需订阅一次，再通过 kind 进行分流。
+ * 状态层只需要调用一次 subscribe()，
+ * 然后通过 kind 判断当前收到的是什么数据。
+ *
+ * kind 是 IMService 内部判别字段，
+ * 不等同于服务端 Envelope 的 type。
  */
 export type IMServiceEvent =
   | {
-      /** 已经通过 seqId 检查、可以安全应用的服务端业务事件。 */
+      /** 已经通过 seqId 检查，可以安全应用的业务 Envelope。 */
       kind: 'envelope';
       envelope: ServerThreadEvent;
     }
   | {
-      /** Transport 最新的完整连接状态。 */
+      /** Transport 的连接状态发生变化。 */
       kind: 'connection';
       state: Readonly<IMConnectionState>;
     }
   | {
-      /** 某个 Thread 出现 seqId 缺口，需要状态层加载 snapshot。 */
+      /** 某个 Thread 需要通过 Snapshot 恢复。 */
       kind: 'sequenceGap';
       gap: ThreadSequenceGap;
     };
 
-/** 全局状态层通常只注册一个这样的监听器。 */
+/** 状态层通常只注册一个统一监听器，再按照 event.kind 分流。 */
 export type IMServiceListener = (event: IMServiceEvent) => void;
 
-/** 取消一次订阅的函数。 */
+/** 取消一次 IMService 订阅的函数。 */
 export type IMServiceUnsubscribe = () => void;
 
 export interface IMServiceDependencies {
@@ -149,791 +142,1065 @@ export interface IMServiceDependencies {
 export interface IMServiceOptions {
   /** Command 发出后等待 ACK 的最长时间。 */
   commandAckTimeoutMs?: number;
-
-  /** 单个 Thread 最多暂存多少条尚不能发布的事件。 */
+  /** 单个 Thread 最多缓存多少个暂时不能发布的 Envelope。 */
   maxBufferedEventsPerThread?: number;
 }
 
-/** 一条已经登记、即将发送或已经发送，但还没有收到 ACK 的请求。 */
+/** 一条已经登记、但还没有收到服务端 ACK 的请求。 */
 interface PendingAck {
   /** 收到 ACK 时完成调用方拿到的 Promise。 */
   resolve: (ack: AckFrame) => void;
-
   /** 发送失败、断线或超时时让 Promise 失败。 */
   reject: (error: Error) => void;
-
-  /** ACK 完成后必须清理，避免定时器和闭包长期驻留。 */
+  /** ACK 完成后必须清理的超时定时器。 */
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
-/** 每个 Thread 都有自己的顺序基线和临时乱序缓冲区。 */
+/**
+ * 单个 Thread 的实时事件顺序状态。
+ *
+ * 每个 Thread 都拥有独立的 ThreadStream，
+ * 不同 Thread 之间不会比较 seqId。
+ */
 interface ThreadStream {
-  /** 已经发布给订阅者的最大 seqId；null 表示还没有建立本地基线。 */
+  /**
+   * 已经安全发布给状态层的最大 seqId。
+   *
+   * null 表示当前还没有建立本地顺序基线。
+   */
   lastSeqId: SeqId | null;
 
-  /** true 时说明状态层正在同步 snapshot，新事件只能进入 buffer。 */
+  /**
+   * 当前 Thread 是否处于 Snapshot 同步阶段。
+   *
+   * paused 为 true 时，新到达的 Envelope 只能进入 buffer，
+   * 不能直接发布给状态层。
+   */
   paused: boolean;
 
-  /** 记住已经报告过的缺口，避免同一个 gap 反复触发 snapshot。 */
+  /**
+   * 当前已经通知过状态层的缺失 seqId。
+   *
+   * 例如当前缺少 11，之后连续收到 12、13、14，
+   * 只需要通知状态层一次，不需要重复加载三次 Snapshot。
+   */
   reportedGapExpectedSeqId: SeqId | null;
-
-  /** Key 是 seqId，因此可以 O(1) 判断下一条连续事件是否已经到达。 */
+  /** 以 seqId 为 Key，O(1) 查找下一条连续 Envelope。 */
   buffer: Map<SeqId, ServerThreadEvent>;
 }
 
-/** 正常情况下 ACK 应该很快返回，15 秒只用于兜底释放 Promise。 */
+/**
+ * 默认等待 ACK 的最长时间。
+ *
+ * 正常 ACK 应该很快返回，
+ * 15 秒主要用于异常情况下释放 Promise 和内存。
+ */
 const DEFAULT_ACK_TIMEOUT_MS = 15_000;
 
-/** 防止断线或长期 gap 让某个 Thread 的内存无限增长。 */
+/**
+ * 单个 Thread 默认最多缓存的 Envelope 数量。
+ *
+ * 防止长期断线或一直无法恢复的 gap 无限占用内存。
+ */
 const DEFAULT_MAX_BUFFERED_EVENTS = 500;
 
-/** 所有客户端生成的业务 ID 和 requestId 都使用 UUID。 */
+/** 生成客户端使用的 UUID 业务 ID。 */
 function createId(): string {
+  /** 浏览器原生 API 会返回一个随机 UUID。 */
   return crypto.randomUUID();
 }
 
-/** catch 得到的不一定是 Error，把它收敛成调用方容易处理的 Error。 */
+/**
+ * 把 catch 捕获到的 unknown 转换成标准 Error。
+ *
+ * JavaScript 允许 throw 字符串、数字或其他任意值，
+ * 但业务层统一处理 Error 会更简单。
+ */
 function toError(error: unknown, fallbackMessage: string): Error {
+  /**
+   * 已经是 Error 时保留原始信息；
+   * 否则使用调用位置提供的默认错误文案。
+   */
   return error instanceof Error ? error : new Error(fallbackMessage);
 }
 
 /**
- * 全局 IM 应用层服务。
- *
- * Transport 负责 WebSocket；IMService 只负责 Command/ACK、Thread 路由和 seqId 顺序。
- * Message、Run、Thinking、Tool、HITL 与未读状态由后续状态层组装。
+ * Command/ACK、Thread 顺序和统一事件发布的应用层协调器。
  */
 export class IMService {
-  /** 只负责建立 WebSocket、重连以及发送/接收原始字符串。 */
+  /** 只负责 WebSocket 物理通信的全局 Transport。 */
   private readonly transport: IMTransport;
 
-  /** 每一条 PendingAck 使用相同的超时时间。 */
+  /**
+   * 每一条 Command 等待 ACK 的最长时间。
+   */
   private readonly commandAckTimeoutMs: number;
 
-  /** 每个 Thread 的 buffer 都独立受这个上限约束。 */
+  /**
+   * 每个 Thread 最多允许缓存多少条暂时不能发布的 Envelope。
+   */
   private readonly maxBufferedEventsPerThread: number;
 
-  /** requestId 只用于找到正在等待的 ACK。 */
+  /**
+   * 当前仍在等待 ACK 的 Command。
+   *
+   * Key 是 Command.requestId，
+   * 收到 ACK 后也通过 ACK.requestId 找回对应 Promise。
+   */
   private readonly pendingAcks = new Map<RequestId, PendingAck>();
 
-  /** seqId 只在同一个 ThreadStream 内比较。 */
+  /** 每个 Thread 独立维护 lastSeqId 和乱序 buffer。 */
   private readonly threadStreams = new Map<ThreadId, ThreadStream>();
 
-  /**
-   * IMService 唯一的发布通道。
-   * 状态层在这里订阅一次，页面再通过 Zustand selector 按 threadId 取数据。
-   */
+  /** IMService 唯一的状态层事件发布通道。 */
   private readonly listeners = new Set<IMServiceListener>();
 
-  /** destroy() 时用它解除构造函数建立的唯一 Transport 订阅。 */
+  /** destroy() 时用于解除构造函数建立的 Transport 订阅。 */
   private readonly unsubscribeTransport: IMTransportUnsubscribe;
 
-  /** 缓存 Transport 最新状态，让发送 Command 时可以同步判断能否发送。 */
+  /**
+   * Transport 最近一次发布的完整连接状态。
+   *
+   * sendCommand() 会同步读取它，
+   * 判断当前是否允许发送 Command。
+   */
   private connectionState: Readonly<IMConnectionState>;
 
-  /** 防止销毁后的实例被继续连接、发送或订阅。 */
+  /**
+   * 当前 IMService 是否已经被永久销毁。
+   *
+   * disconnect 后仍然可以重新 connect，
+   * destroy 后则不能再使用。
+   */
   private destroyed = false;
 
+  /**
+   * 创建全局 IMService。
+   *
+   * 构造函数只保存依赖、合并配置并订阅 Transport，
+   * 不会主动建立 WebSocket 连接。
+   */
   constructor(dependencies: IMServiceDependencies, options: IMServiceOptions = {}) {
-    /** 保存全局唯一的底层连接实例。 */
     this.transport = dependencies.transport;
-
-    /** 调用方没有配置时使用 15 秒 ACK 超时。 */
     this.commandAckTimeoutMs = options.commandAckTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS;
-
-    /** 调用方没有配置时，每个 Thread 最多缓存 500 条事件。 */
     this.maxBufferedEventsPerThread =
       options.maxBufferedEventsPerThread ?? DEFAULT_MAX_BUFFERED_EVENTS;
-
-    /** 构造时读取一次当前状态，之后由 state.changed 持续覆盖。 */
     this.connectionState = this.transport.getState();
-
-    /** 全生命周期只订阅一次 Transport，避免重复处理同一个服务端 Frame。 */
     this.unsubscribeTransport = this.transport.subscribe(this.handleTransportEvent);
   }
 
+  /**
+   * 建立或复用全局的 websocket 连接
+   *
+   * Promise 只代表底层 websocket 是否成功打开
+   * 不代表任何 command 已经被服务端处理
+   */
   connect(): Promise<void> {
-    /** 已销毁的 Service 不能重新启动连接。 */
+    /** 已销毁的 Service 不能重新建立连接。 */
     this.assertUsable();
-
-    /** Transport 自己处理并发 connect() 复用和断线重连。 */
     return this.transport.connect();
   }
 
+  /**
+   * 主动断开当前 WebSocket。
+   *
+   * disconnect 是可恢复操作：
+   * 后续仍然可以再次调用 connect()。
+   */
   disconnect(): void {
     this.assertUsable();
 
-    /** 主动断开表示当前用户离开，旧 ACK 和 seqId 基线都不再复用。 */
-    this.rejectAllPendingAcks(new Error('IM WebSocket 已主动断开'));
+    /**
+     * 旧连接不可能再返回可靠 ACK，
+     * 立即结束所有仍在等待的 ack Promise。
+     */
+    this.rejectAllPendingAcks(new Error('IM WebSocket 已经主动断开'));
 
-    /** 下次连接后必须重新通过实时首帧或 snapshot 建立顺序基线。 */
+    /**
+     * 主动断开后不再复用旧 seqId 基线。
+     *
+     * 下次连接需要通过实时首帧或 Snapshot
+     * 重新建立每个 Thread 的顺序状态。
+     */
     this.threadStreams.clear();
 
-    /** 真正关闭浏览器 WebSocket，并停止 Transport 的自动重连。 */
+    /** 真正关闭 WebSocket，并停止 Transport 自动重连 */
     this.transport.disconnect();
   }
 
+  /**
+   * 永久销毁 IMService。
+   *
+   * 主要用于：
+   * - 应用真正卸载；
+   * - 用户退出登录并销毁旧 Runtime；
+   * - Vite 热更新释放旧实例。
+   *
+   * 普通 React 路由切换不能调用它。
+   */
   destroy(): void {
     if (this.destroyed) {
       return;
     }
 
-    /** 先置为 true，避免清理期间出现重入调用。 */
     this.destroyed = true;
 
-    /** 不再接收 Transport 的状态变化和原始服务端 Frame。 */
     this.unsubscribeTransport();
 
-    /** 销毁是永久生命周期结束，因此同时关闭底层连接。 */
     this.transport.disconnect();
 
-    /** 让所有仍在 await ACK 的页面立即结束等待。 */
     this.rejectAllPendingAcks(new Error('IMService 已销毁'));
 
-    /** 释放顺序状态和统一订阅者引用。 */
     this.threadStreams.clear();
+
     this.listeners.clear();
   }
 
+  /** 获取 Transport 最近一次发布的完整连接状态。 */
   getConnectionState(): Readonly<IMConnectionState> {
-    /** 返回最近一次 Transport 发布的完整状态快照。 */
     return this.connectionState;
   }
 
+  /**
+   * 订阅 IMService 的全部应用层事件。
+   *
+   * 状态层通常只调用一次，然后根据 event.kind 处理：
+   * - envelope；
+   * - connection；
+   * - sequenceGap。
+   */
   subscribe(listener: IMServiceListener): IMServiceUnsubscribe {
     this.assertUsable();
 
-    /**
-     * 这里只登记一次统一监听器；页面、会话列表和详情页不再分别进入 IMService。
-     * Set 天然避免同一个函数引用被重复登记。
-     */
     this.listeners.add(listener);
 
-    /** 删除这个函数引用；不同调用方应各自传入自己的 listener。 */
     return () => {
       this.listeners.delete(listener);
     };
   }
 
+  /**
+   * 创建 Thread 并发送首条用户消息。
+   * ThreadId 和 MessageId 会在发送前确定，便于状态层立即乐观更新。
+   */
   startThread(input: StartThreadInput): IMCommandDispatch<ThreadStartCommand> {
-    /**
-     * Thread 和首条 Message 的 ID 在发送前就确定：
-     * 状态层可以立即创建乐观数据，后端也使用这两个 ID 识别同一业务对象。
-     */
     const command: ThreadStartCommand = {
-      /** 服务端通过 type 选择 thread.start 处理器。 */
       type: 'thread.start',
-
-      /** 每一次网络请求都有新的 requestId，它只关联这一次 ACK。 */
       requestId: createId(),
-
-      /** 首次发送时生成；明确重发同一 Thread 时复用调用方传入的值。 */
       threadId: input.threadId ?? createId(),
-
-      /** MessageId 同时承担这条用户消息的稳定业务身份。 */
       messageId: input.messageId ?? createId(),
-
-      /** undefined 字段不放进 wire payload，让“未指定模型”的语义清楚。 */
       payload:
         input.modelId === undefined
-          ? { content: input.content }
-          : { content: input.content, modelId: input.modelId },
+          ? {
+              content: input.content,
+            }
+          : {
+              content: input.content,
+              modelId: input.modelId,
+            },
     };
-
-    /** 同步返回完整 Command，同时开始异步等待 ACK。 */
     return this.dispatchCommand(command);
   }
 
+  /**
+   * 向已有 Thread 发送一条用户消息。
+   * MessageId 是稳定业务身份，requestId 只关联本次 ACK。
+   */
   sendMessage(input: SendMessageInput): IMCommandDispatch<MessageSendCommand> {
     const command: MessageSendCommand = {
-      /** 这是向已有 Thread 追加用户消息，而不是创建 Thread。 */
       type: 'message.send',
-
-      /** requestId 只标识本次发送动作，不等同于 messageId。 */
       requestId: createId(),
-
-      /** 已有会话必须由调用方明确提供目标 Thread。 */
       threadId: input.threadId,
-
-      /** 正常发送生成新 ID；业务重发时可以复用原 ID。 */
       messageId: input.messageId ?? createId(),
-
-      /** 仅在明确选择模型时携带 modelId。 */
       payload:
         input.modelId === undefined
-          ? { content: input.content }
-          : { content: input.content, modelId: input.modelId },
+          ? {
+              content: input.content,
+            }
+          : {
+              content: input.content,
+              modelId: input.modelId,
+            },
     };
-
-    /** 发送流程与其他 Command 共用 dispatchCommand。 */
     return this.dispatchCommand(command);
   }
 
+  /**
+   * 请求取消一次 Agent Run。
+   * ACK 只表示取消命令被接受，最终状态仍由 run.status Envelope 确认。
+   */
   cancelRun(input: CancelRunInput): IMCommandDispatch<RunCancelCommand> {
     const command: RunCancelCommand = {
-      /** 取消只是请求，最终 Run 状态仍以后续 run.status 事件为准。 */
       type: 'run.cancel',
-
-      /** 用于匹配这次取消请求的 ACK。 */
       requestId: createId(),
-
-      /** 服务端用 threadId 将取消操作放到正确的会话中。 */
       threadId: input.threadId,
-
-      /** 精确指出要停止的 Agent Run。 */
       runId: input.runId,
     };
-
     return this.dispatchCommand(command);
   }
 
+  /** 回答一次正在等待用户输入的 HITL。 */
   respondToInteraction(
     input: RespondToInteractionInput,
   ): IMCommandDispatch<InteractionRespondCommand> {
     const command: InteractionRespondCommand = {
-      /** 服务端通过该类型进入 HITL 回答处理器。 */
       type: 'interaction.respond',
-
-      /** ACK 仍然只使用独立的 requestId 关联。 */
       requestId: createId(),
-
-      /** 三个定位 ID 分别确定会话、执行和具体交互。 */
       threadId: input.threadId,
       runId: input.runId,
       interactionId: input.interactionId,
-
-      /** 真正的回答数据放在 payload，定位 ID 保持在 envelope 顶层。 */
-      payload: { answers: input.answers },
+      payload: {
+        answers: input.answers,
+      },
     };
-
     return this.dispatchCommand(command);
   }
 
-  pauseThread(threadId: ThreadId): void {
-    this.assertUsable();
-
-    /**
-     * snapshot 请求发出前先暂停：暂停不关闭 WebSocket，
-     * 只是让这个 Thread 后续到达的实时事件暂时写入 buffer。
-     */
-    this.getOrCreateThreadStream(threadId).paused = true;
-  }
-
-  resumeThread(threadId: ThreadId, lastSeqId: SeqId): void {
-    this.assertUsable();
-
-    /**
-     * 正常恢复会取得 pause 时的原 Stream；如果它已被 disconnect 清除则会新建。
-     * 因此状态层还要忽略断线前发起、却在断线后才返回的旧 snapshot。
-     */
-    const stream = this.getOrCreateThreadStream(threadId);
-
-    /**
-     * 较旧的 snapshot 不能覆盖较新的实时基线。
-     * 例如当前已经处理到 200，迟到的 snapshot.lastSeqId=100 必须拒绝。
-     */
-    if (stream.lastSeqId !== null && lastSeqId < stream.lastSeqId) {
-      throw new Error('snapshot.lastSeqId 不能小于当前 Thread 的 lastSeqId');
-    }
-
-    /** snapshot 是当前权威状态，所以从它的 lastSeqId 重新确定实时游标。 */
-    stream.lastSeqId = lastSeqId;
-
-    /** 状态层已经应用 snapshot，允许继续发布该 Thread 的实时事件。 */
-    stream.paused = false;
-
-    /** 新基线可能已经填上旧缺口，因此允许后面报告新的 expectedSeqId。 */
-    stream.reportedGapExpectedSeqId = null;
-
-    /** 遍历暂停期间积累的全部 seqId。 */
-    for (const seqId of stream.buffer.keys()) {
-      /** snapshot 已覆盖的事件再次应用会重复追加 delta，必须删除。 */
-      if (seqId <= lastSeqId) {
-        stream.buffer.delete(seqId);
-      }
-    }
-
-    /** 从 lastSeqId + 1 开始，把剩余连续事件按顺序广播出去。 */
-    this.flushThreadBuffer(threadId, stream);
-  }
-
+  /**
+   * 同步返回完整 Command，并立即开始异步发送和等待 ACK。
+   * 这里不 await，调用方才能先取得业务 ID 做乐观更新。
+   */
   private dispatchCommand<TCommand extends ClientCommand>(
     command: TCommand,
   ): IMCommandDispatch<TCommand> {
-    /**
-     * 不在这里 await ACK：
-     * 调用方需要先拿到 command.threadId/messageId 做乐观更新，
-     * 再根据 ack Promise 展示服务端接受或拒绝结果。
-     */
     return {
-      /** 原样返回刚刚生成的完整业务命令。 */
       command,
-
-      /** sendCommand 会立刻尝试发送，并返回表示本次发送结果的 Promise。 */
       ack: this.sendCommand(command),
     };
   }
 
+  /**
+   * 序列化并发送 Command，同时用 requestId 管理 ACK Promise 和超时。
+   */
   private sendCommand(command: ClientCommand): Promise<AckFrame> {
-    /** 销毁后的全局实例不允许继续创建 ACK 定时器。 */
     this.assertUsable();
 
-    /** 本方案不设计离线队列：未连接时由页面明确决定是否稍后再发。 */
     if (this.connectionState.status !== 'connected') {
       return Promise.reject(new Error('IM WebSocket 尚未连接'));
     }
-
-    /** 序列化放在建立 PendingAck 之前，失败时不需要额外清理 Map。 */
+    // 序列化命令
     let serializedCommand: string;
 
     try {
-      /** Transport 只认识字符串，不认识 ClientCommand。 */
       serializedCommand = JSON.stringify(command);
     } catch (error) {
-      /** JSON.stringify 失败表示当前 Command 根本没有交给 WebSocket。 */
       return Promise.reject(toError(error, 'IM Command 序列化失败'));
     }
 
-    /** 理论上 UUID 不会重复，这个判断防止覆盖另一个仍在等待的 Promise。 */
+    /**
+     * UUID 正常情况下不会重复。
+     *
+     * 这个检查主要防止一个仍在等待的 Promise
+     * 被相同 requestId 的新 Command 覆盖。
+     */
     if (this.pendingAcks.has(command.requestId)) {
-      return Promise.reject(new Error(`重复的 requestId：${command.requestId}`));
+      return Promise.reject(new Error(`重复的 requestId: ${command.requestId}`));
     }
 
-    /** 新 Thread 的服务端业务事件从 seqId 1 开始。 */
+    /**
+     * 新 Thread 的服务端业务事件从 seqId = 1 开始
+     *
+     * 因此前端在发送 thread.start 时
+     * 提前把 lastSeqId 设置为 0
+     * 表示下一条唯一合法事件是 1
+     */
     if (command.type === 'thread.start') {
-      /** 发送前就创建 Stream，才能判断服务端第一条事件是否真的是 seqId 1。 */
       const stream = this.getOrCreateThreadStream(command.threadId);
 
+      /**
+       * 如果调用方复用了已有的 ThreadStream
+       * 不能覆盖已经存在的顺序基线
+       */
       if (stream.lastSeqId === null) {
-        /** 0 表示当前尚未发布业务事件，下一条期望值是 1。 */
         stream.lastSeqId = 0;
       }
     }
 
-    /**
-     * Promise 等待与 command.requestId 相同的 ACK；
-     * 发送失败、超时或断线等明确失败路径也会结束它。
-     */
-    return new Promise<AckFrame>((resolve, reject) => {
-      /** 即使服务端永远不返回 ACK，也要在固定时间后释放 PendingAck。 */
+    return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        /** 定时器触发时重新查 Map，因为 ACK 可能已经先一步完成。 */
         const pending = this.pendingAcks.get(command.requestId);
 
         if (!pending) {
-          /** 找不到说明 ACK、断线或发送失败路径已经完成清理。 */
           return;
         }
 
-        /** 先从 Map 删除，迟到 ACK 到达时便会被安全忽略。 */
         this.pendingAcks.delete(command.requestId);
 
-        /** 拒绝调用方正在等待的 ack Promise。 */
         pending.reject(new Error('等待服务端 ACK 超时'));
       }, this.commandAckTimeoutMs);
 
-      /** 保存 Promise 控制函数和对应定时器，等待 handleAck 使用。 */
       const pending: PendingAck = {
         resolve,
         reject,
         timeoutId,
       };
 
-      /** 先登记再发送，保证同步测试 ACK 也能找到对应 Promise。 */
       this.pendingAcks.set(command.requestId, pending);
 
       try {
-        /** 到这里才真正把已经序列化的 Command 交给 WebSocket。 */
         this.transport.send(serializedCommand);
       } catch (error) {
         /**
-         * 测试 Transport 可能在 send() 内同步模拟 ACK；
-         * 如果 pending 已被处理，就不能再把已经成功的 Promise 改成失败。
+         * 测试 Transport 可能在 send() 内同步触发 ACK，
+         * 然后再出现异常。
+         *
+         * 如果当前 PendingAck 已经被处理，
+         * 就不能把已经完成的 Promise 再改成失败。
          */
         if (this.pendingAcks.get(command.requestId) !== pending) {
           return;
         }
-
-        /** 明确发送失败，不再需要等待 ACK 超时。 */
         clearTimeout(timeoutId);
-
-        /** 删除本次 requestId，避免内存残留。 */
         this.pendingAcks.delete(command.requestId);
-
-        /** 告诉调用方 Command 没有成功交给当前连接。 */
         reject(toError(error, 'IM Command 发送失败'));
       }
     });
   }
 
+  /**
+   * 处理服务端返回的一条 ACK。
+   *
+   * ACK 不参与 seqId 排序，
+   * 只通过 requestId 找到对应的 PendingAck。
+   */
+  private handleAck(ack: AckFrame): void {
+    const pending = this.pendingAcks.get(ack.requestId);
+
+    if (!pending) {
+      return;
+    }
+    /** ACK 已经到达，取消对应的超时定时器。 */
+    clearTimeout(pending.timeoutId);
+
+    /**
+     * 先从 Map 删除，再完成 Promise。
+     *
+     * 防止调用方的后续逻辑重入时，
+     * 仍然看到一个已经完成的 PendingAck。
+     */
+    this.pendingAcks.delete(ack.requestId);
+    pending.resolve(ack);
+  }
+
+  /**
+   * 批量结束所有仍在等待的 ACK。
+   *
+   * 通常在以下情况调用：
+   * - WebSocket 断开；
+   * - 用户主动 disconnect；
+   * - IMService destroy。
+   */
+  private rejectAllPendingAcks(error: Error): void {
+    const pendingAcks = [...this.pendingAcks.values()];
+    this.pendingAcks.clear();
+    for (const pendingAck of pendingAcks) {
+      clearTimeout(pendingAck.timeoutId);
+      pendingAck.reject(error);
+    }
+  }
+
+  /**
+   * 接收 Transport 事件并分流服务端 Frame。
+   *
+   * Transport 只会上报：
+   * - WebSocket 连接状态变化；
+   * - 服务端发送的原始文本消息。
+   *
+   * IMService 在这里把底层事件转换成应用层处理流程。
+   */
+
+  /**
+   * 处理 Transport 发布的底层事件。
+   *
+   * 使用箭头函数而不是普通 class 方法，
+   * 是为了在传给 transport.subscribe() 后仍然保留正确的 this。
+   */
   private readonly handleTransportEvent = (event: IMTransportEvent): void => {
-    /** Transport 只会上报连接状态变化和原始文本帧两类事件。 */
     if (event.type === 'state.changed') {
-      /** 缓存完整状态，让 getConnectionState() 和 sendCommand() 同步读取。 */
+      /**
+       * 保存 Transport 最新状态。
+       *
+       * getConnectionState() 和 sendCommand()
+       * 后续都会读取这个状态。
+       */
       this.connectionState = event.state;
 
-      /**
-       * 这些状态表示旧 Socket 已经不能再返回 ACK。
-       * connecting/reconnecting 不在这里重复拒绝，因为断开时已经清理过一次。
-       */
       if (
         event.state.status === 'disconnected' ||
         event.state.status === 'failed' ||
         event.state.status === 'disabled'
       ) {
-        this.rejectAllPendingAcks(new Error('IM WebSocket 连接已断开'));
+        /**
+         * 立即结束所有仍然等待 ACK 的 Promise。
+         *
+         * reconnecting 不需要再次处理，
+         * 因为进入 reconnecting 前通常已经发布过 disconnected。
+         */
+        this.rejectAllPendingAcks(new Error('IM WebSocket 连接已经断开'));
       }
 
-      /** 通过统一通道发布，并用 kind=connection 与业务 Envelope 区分。 */
       this.publish({
         kind: 'connection',
         state: event.state,
       });
+
       return;
     }
-
-    /** 非 state.changed 的唯一情况就是 message.received。 */
+    /**
+     * IMTransportEvent 只有两个分支。
+     *
+     * 排除 state.changed 后，
+     * 当前事件一定是 message.received。
+     */
     this.handleRawFrame(event.data);
   };
 
+  /**
+   * 解析服务端发送的一条完整 WebSocket 文本消息。
+   *
+   * 服务端可能发送：
+   * - ACK；
+   * - Thread 业务 Envelope。
+   */
   private handleRawFrame(rawFrame: string): void {
-    /** ServerFrame 是 ACK 与全部 ThreadEvent 的判别联合。 */
+    /**
+     * ServerFrame 是 ACK 和 ServerThreadEvent 的判别联合。
+     */
     let frame: ServerFrame;
 
     try {
-      /** 前后端共享协议约定，这里只解析 JSON，不重复校验每个 payload 字段。 */
+      /**
+       * 前后端共同维护 protocol.ts，
+       * 因此这里只解析 JSON，
+       * 不在运行时重复校验每个 payload 字段。
+       */
       frame = JSON.parse(rawFrame) as ServerFrame;
     } catch (error) {
-      /** 单条非法 JSON 不应该让全局 WebSocket 监听器停止工作。 */
-      console.error('无法解析服务端 IM Frame。', error);
+      /**
+       * 单条非法 JSON 不应该中断整个 WebSocket 消息循环。
+       *
+       * 记录错误后忽略当前消息，
+       * 后续合法消息仍然可以继续处理。
+       */
+      console.error('无法解析服务端 IM Frame', error);
+
       return;
     }
 
-    /** ACK 不属于 Thread 事件，也不参与 seqId 排序。 */
+    /**
+     * ACK 只通过 requestId 关联 Command，
+     * 不属于 Thread 业务事件，也不参与 seqId 排序。
+     */
     if (frame.type === 'ack') {
       this.handleAck(frame);
       return;
     }
 
-    /** 其余 Frame 都拥有 threadId 和 seqId，进入统一的 Thread 顺序处理。 */
+    /**
+     * 排除 ACK 后，
+     * 当前 Frame 一定是拥有 threadId 和 seqId 的业务 Envelope。
+     */
     this.handleThreadEvent(frame);
   }
 
-  private handleAck(ack: AckFrame): void {
-    /** requestId 是 Command 与 ACK 之间唯一需要使用的关联键。 */
-    const pending = this.pendingAcks.get(ack.requestId);
-
-    if (!pending) {
-      /** ACK 可能已经超时或来自旧连接，找不到等待者时直接忽略。 */
-      return;
-    }
-
-    /** ACK 已经到达，取消对应超时任务。 */
-    clearTimeout(pending.timeoutId);
-
-    /** 先删除再 resolve，防止调用方回调重入时仍看到旧 PendingAck。 */
-    this.pendingAcks.delete(ack.requestId);
-
-    /** ok=true 和 ok=false 都属于一个有效 ACK，由调用方根据 ok 判断结果。 */
-    pending.resolve(ack);
-  }
-
+  /**
+   * 处理一条 Thread 业务 Envelope。
+   *
+   * 这是 seqId 状态机的入口。
+   *
+   * 每一条服务端业务 Envelope 都必须先经过这里，
+   * 确认顺序安全后，才能发布给状态层。
+   */
   private handleThreadEvent(event: ServerThreadEvent): void {
-    /** 每个 threadId 都使用独立 Stream，所以不同会话的 seqId 不会相互影响。 */
+    /**
+     * 每个 threadId 使用独立的 ThreadStream。
+     *
+     * 不同 Thread 的 seqId 不会相互比较。
+     */
     const stream = this.getOrCreateThreadStream(event.threadId);
 
     /**
-     * 例如已经发布到 10，又收到 9 或 10：
-     * 它们是迟到或重复事件，再次发布会让 content delta 被追加两遍。
+     * 第一种情况：重复事件或迟到旧事件。
+     *
+     * 例如当前已经发布到 seqId=10，
+     * 又收到 seqId=9 或 seqId=10。
+     *
+     * 如果再次发布，message.delta 等事件
+     * 就可能被状态层重复追加。
      */
     if (stream.lastSeqId !== null && event.seqId <= stream.lastSeqId) {
+      /** 直接丢弃 */
       return;
     }
 
     /**
-     * 状态层正在加载 snapshot 时，即使事件恰好连续也不能发布；
-     * 否则 snapshot 稍后覆盖状态，会造成实时更新丢失或重复。
+     * 第二种情况：当前 Thread 正在加载 Snapshot。
+     *
+     * 即使当前 Envelope 的 seqId 正好符合预期，
+     * 也不能在 Snapshot 应用完成前发布。
+     *
+     * 否则 Snapshot 稍后覆盖 Zustand 时，
+     * 可能造成实时状态重复或丢失。
      */
     if (stream.paused) {
+      /** 暂停期间的所有 Evenlope 都先进入 Map */
       this.bufferThreadEvent(event.threadId, stream, event);
+
       return;
     }
 
     /**
-     * null 只表示当前没有本地顺序基线。
-     * 在没有 pause 的情况下，我们接受首帧作为“从现在开始”的实时基线，
-     * 不补发它之前的历史事件；打开聊天详情时再由 snapshot 恢复历史状态。
+     * 第三种情况：当前还没有这个 Thread 的本地顺序基线。
+     *
+     * 例如会话列表第一次观察到一个后台 Thread，
+     * 第一条收到的事件可能已经是 seqId=50。
+     *
+     * 我们接受这条事件作为“从现在开始”的实时基线，
+     * 不要求补齐之前的 1～49。
+     *
+     * 用户真正打开聊天详情页时，
+     * 再通过 Snapshot 恢复完整历史状态。
      */
     if (stream.lastSeqId === null) {
+      /**
+       * 发布当前首帧，
+       * 并把 lastSeqId 更新为 event.seqId。
+       */
       this.publishAndAdvance(stream, event);
+
       return;
     }
+    /**
+     * 当前唯一期望的下一条事件。
+     *
+     * 例如 lastSeqId=10，
+     * 那么 expectedSeqId 就是 11。
+     */
+    const expectedSeqId = stream.lastSeqId + 1;
 
     /**
-     * 例如 lastSeqId=10，收到 11：顺序连续，可以立即广播；
-     * 广播后再检查 buffer 中是否已经提前存有 12、13 等事件。
+     * 第四种情况：当前 Envelope 正好符合预期。
+     *
+     * 这说明从 lastSeqId 到当前事件之间没有 gap，
+     * 可以立即发布给状态层。
      */
-    if (event.seqId === stream.lastSeqId + 1) {
+    if (event.seqId === expectedSeqId) {
+      /**
+       * 先发布当前 Envelope，
+       * 并把 lastSeqId 推进到 event.seqId。
+       */
       this.publishAndAdvance(stream, event);
+
+      /**
+       * 当前事件可能刚好填补了之前的缺口。
+       *
+       * 发布后立即检查 Map 中是否已经存在
+       * 后续的 expectedSeqId。
+       */
       this.flushThreadBuffer(event.threadId, stream);
+
       return;
     }
 
     /**
-     * 剩下的情况只能是未来事件：例如 lastSeqId=10，却先收到 12。
-     * 12 不能先发布，否则所有订阅者都会在缺少 11 的状态上继续计算。
+     * 第五种情况：当前 Envelope 的 seqId 大于 expectedSeqId。
+     *
+     * 例如：
+     * lastSeqId=10
+     * expectedSeqId=11
+     * 实际收到 event.seqId=12
+     *
+     * 说明 11 还没有到达，12 不能提前发布。
      */
+
+    /** 先把未来事件保存进对应 Thread 的 Map。 */
     this.bufferThreadEvent(event.threadId, stream, event);
 
-    /** 通知状态层“期望 11、实际收到 12”，由状态层请求权威 snapshot。 */
+    /**
+     * 通知状态层当前 Thread 出现 seqId 缺口。
+     *
+     * 状态层收到 sequenceGap 后，
+     * 会暂停 Thread 并加载权威 Snapshot。
+     */
     this.reportSequenceGap(event.threadId, stream, event.seqId);
   }
 
+  /**
+   * 把暂时不能发布的 Envelope 放入 Map，
+   * 并在顺序恢复后连续排空 Map。
+   */
+
+  /**
+   * 把一条暂时不能发布的 Envelope
+   * 保存到对应 Thread 的乱序缓冲区。
+   *
+   * 进入这里的常见原因：
+   * - 当前事件大于 expectedSeqId；
+   * - 当前 Thread 正在加载 Snapshot。
+   */
   private bufferThreadEvent(
     threadId: ThreadId,
     stream: ThreadStream,
     event: ServerThreadEvent,
   ): void {
-    /** 使用局部别名强调后续始终修改调用方传入的同一个 Stream 对象。 */
+    /**
+     * 使用局部别名强调：
+     * 后续始终修改调用方传入的同一个 ThreadStream
+     */
     const current = stream;
 
     /**
-     * seqId 作为 Map Key：
-     * - 相同事件再次到达会覆盖旧值，不会增加内存；
-     * - flush 时可以直接查找 lastSeqId + 1，不需要遍历数组。
+     * 使用 seqId 作为 Map Key。
+     *
+     * 如果相同 seqId 再次到达，
+     * 新值会覆盖旧值，不会重复增加内存。
      */
     current.buffer.set(event.seqId, event);
 
-    /** 还没有达到单 Thread 上限时，只需继续等待缺失事件或 snapshot。 */
+    /**
+     * 缓存数量还没有超过上限时，
+     * 继续等待缺失事件或 Snapshot。
+     */
     if (current.buffer.size <= this.maxBufferedEventsPerThread) {
       return;
     }
 
     /**
-     * 超过上限说明客户端长期没有恢复连续状态。
-     * 此时保留数百条旧 delta 的价值很低，权威 snapshot 才是恢复依据。
+     * 超过上限说明当前 Thread
+     * 已经长时间无法恢复连续状态。
+     *
+     * 继续保留大量旧 delta 的价值很低，
+     * 应该重新通过 Snapshot 获取完整权威状态。
      */
+
+    /** 删除之前积累的全部乱序 Envelope。 */
     current.buffer.clear();
 
-    /** 保留触发溢出的最新事件，snapshot 之后仍有机会继续实时衔接。 */
+    /** 保留触发溢出的当前事件，Snapshot 后仍可继续衔接实时流。 */
     current.buffer.set(event.seqId, event);
 
-    /** 清除旧 gap 去重记录，确保状态层能收到一次新的恢复信号。 */
+    /**
+     * 清除旧 gap 的去重记录。
+     *
+     * 这样状态层可以收到一次新的 sequenceGap，
+     * 重新发起 Snapshot。
+     */
     current.reportedGapExpectedSeqId = null;
 
-    /** 再次报告当前缺口，促使状态层重新加载 snapshot。 */
+    /** 再次通知状态层当前 Thread 仍然存在缺口。 */
     this.reportSequenceGap(threadId, current, event.seqId);
   }
 
+  /**
+   * 从 lastSeqId + 1 开始，
+   * 连续发布 Map 中已经到达的 Envelope。
+   *
+   * 这个方法不会对整个 Map 排序，
+   * 每次只查找唯一允许发布的下一条事件。
+   */
   private flushThreadBuffer(threadId: ThreadId, stream: ThreadStream): void {
-    /** 排空过程必须始终操作进入函数时的这个 Stream。 */
+    /**
+     * 保存进入函数时的 ThreadStream 引用。
+     *
+     * 后续可以用引用相等判断：
+     * 当前 Stream 是否已经因为 disconnect 等操作失效。
+     */
     const current = stream;
 
     /**
-     * 两种情况不能排空：
-     * - 状态层又 pause 了这个 Thread，或 disconnect 已替换/清空 Stream；
-     * - 还没有 lastSeqId，不知道应该从哪个序号开始。
+     * 以下情况不能继续排空：
+     *
+     * 1. 状态层又暂停了当前 Thread；
+     * 2. threadStreams 中已经不是原来的 Stream；
+     * 3. lastSeqId 仍然是 null，没有明确的下一条期望值。
      */
     if (!this.canContinueFlushing(threadId, current) || current.lastSeqId === null) {
       return;
     }
 
-    /** Map 允许直接 O(1) 查询唯一可以安全发布的下一条事件。 */
+    /**
+     * 查找唯一可以安全发布的下一条事件。
+     *
+     * 例如 lastSeqId=10，
+     * 就只查找 buffer.get(11)。
+     */
     let nextEvent = current.buffer.get(current.lastSeqId + 1);
 
-    /** 只要“下一条”存在，就持续按照 11、12、13 的顺序排空。 */
     while (nextEvent) {
-      /** 发布前先从 buffer 删除，避免回调重入时再次找到同一事件。 */
+      /**
+       * 发布前先从 Map 删除。
+       *
+       * 如果订阅者回调发生重入，
+       * 就不会再次找到并发布同一个 Envelope。
+       */
       current.buffer.delete(nextEvent.seqId);
 
-      /** 推进 lastSeqId，并通过唯一事件通道交给状态层。 */
+      /**
+       * 发布当前 Envelope，
+       * 并把 lastSeqId 推进到它的 seqId。
+       */
       this.publishAndAdvance(current, nextEvent);
 
-      /** 订阅者可以在回调中重新 pause 或 disconnect，旧排空循环必须及时停止。 */
+      /**
+       * 订阅者可能在 publish() 回调中：
+       * - 调用 pauseThread()；
+       * - 调用 disconnect()；
+       * - 销毁或替换当前 Stream。
+       *
+       * 因此每发布一条后，
+       * 都必须重新检查排空流程是否仍然有效。
+       */
+
       if (!this.canContinueFlushing(threadId, current)) {
         return;
       }
 
-      /** lastSeqId 已在 publishAndAdvance 中推进，继续寻找新的下一条。 */
       nextEvent = current.buffer.get(current.lastSeqId + 1);
     }
 
-    /** buffer 已经全部连续发布完成，当前不再存在已知缺口。 */
+    /**
+     * 找不到下一条事件后，
+     * 还要判断 Map 是否已经完全排空。
+     */
     if (current.buffer.size === 0) {
-      /** 以后出现新的 expectedSeqId 时允许重新发送 gap 通知。 */
+      /**
+       * Map 为空说明目前已知事件已经全部连续发布
+       *
+       * 清除 gap 去重记录
+       * 以后出现新缺口时可以重新通知状态层
+       */
       current.reportedGapExpectedSeqId = null;
       return;
     }
 
     /**
-     * buffer 还有事件但找不到 lastSeqId + 1，说明排空后出现了下一个缺口。
-     * 例如原来缺 11，恢复并发布到 13 后，buffer 中只剩 15，此时又缺 14。
+     * Map 仍然存在事件，
+     * 但没有 lastSeqId + 1，
+     * 说明排空后又遇到了新的缺口。
+     *
+     * 例如：
+     * lastSeqId=13
+     * buffer={15, 16}
+     * 当前缺少 14。
      */
     const firstBufferedSeqId = this.findFirstBufferedSeqId(current);
 
     if (firstBufferedSeqId !== null) {
-      /** 用 buffer 中最早的未来事件描述这次新的 gap。 */
       this.reportSequenceGap(threadId, current, firstBufferedSeqId);
     }
   }
 
+  /**
+   * 判断当前排空循环是否仍然可以继续
+   */
   private canContinueFlushing(threadId: ThreadId, stream: ThreadStream): boolean {
     /**
-     * paused 检查 snapshot 是否重新开始；引用相等检查 Map 中是否仍是原 Stream。
-     * disconnect() 会 clear threadStreams，因此旧排空循环会立即失效。
+     * paused=false：
+     * 当前 Thread 没有重新进入 Snapshot 同步。
+     *
+     * 引用相等：
+     * threadStreams 中保存的仍然是进入循环时的原 Stream。
+     *
+     * disconnect() 会清空 threadStreams，
+     * 因此旧循环会立刻失效。
      */
     return !stream.paused && this.threadStreams.get(threadId) === stream;
   }
 
-  private publishAndAdvance(stream: ThreadStream, event: ServerThreadEvent): void {
-    /** 使用同一个对象引用保存游标，不创建额外的顺序状态副本。 */
-    const current = stream;
+  /**
+   * 查找 Map 中最小的 seqId。
+   *
+   * Map 保留的是插入顺序，不是数字大小顺序，
+   * 因此不能直接取第一个 Key。
+   */
+  private findFirstBufferedSeqId(stream: ThreadStream): SeqId | null {
+    let firstSeqId: SeqId | null = null;
+
+    for (const seqId of stream.buffer.keys()) {
+      if (firstSeqId === null || seqId < firstSeqId) {
+        firstSeqId = seqId;
+      }
+    }
+    return firstSeqId;
+  }
+
+  /**
+   * 在加载 Snapshot 期间暂停和恢复一个 Thread。
+   *
+   * 正确调用顺序是：
+   *
+   * 1. pauseThread(threadId)
+   * 2. 请求服务端 Snapshot
+   * 3. 把 Snapshot 应用到 Zustand
+   * 4. resumeThread(threadId, snapshot.lastSeqId)
+   *
+   * 暂停不会关闭 WebSocket，
+   * 只会让当前 Thread 后续到达的 Envelope 进入 buffer。
+   */
+
+  /**
+   * 暂停发布指定 Thread 的实时 Envelope。
+   *
+   * 通常在以下情况调用：
+   * - 第一次打开 Thread 并加载 Snapshot；
+   * - 发现 sequenceGap；
+   * - WebSocket 重连后重新同步活跃 Thread。
+   */
+  pauseThread(threadId: ThreadId): void {
+    this.assertUsable();
+
+    const stream = this.getOrCreateThreadStream(threadId);
+
+    stream.paused = true;
+  }
+
+  /**
+   * Snapshot 已经应用完成后，
+   * 恢复指定 Thread 的实时 Envelope 发布。
+   *
+   * lastSeqId 必须是这个 Snapshot 已经完整包含到的事件位置。
+   */
+  resumeThread(threadId: ThreadId, lastSeqId: SeqId): void {
+    this.assertUsable();
 
     /**
-     * 必须先推进游标再调用订阅者：
-     * 如果订阅者回调中发生重入，新事件会看到正确的最新 lastSeqId。
+     * 正常情况下会取得 pauseThread() 使用的原 Stream。
+     *
+     * 如果 disconnect() 已经清空过 threadStreams，
+     * 这里会创建新 Stream。
+     *
+     * 因此状态层还需要忽略断线前发起、
+     * 却在断线后才返回的旧 Snapshot。
      */
-    current.lastSeqId = event.seqId;
+    const stream = this.getOrCreateThreadStream(threadId);
 
-    /** 只有顺序游标确认接收后，Envelope 才能离开 IMService。 */
+    if (stream.lastSeqId !== null && lastSeqId < stream.lastSeqId) {
+      throw new Error('snapshot.lastSeqId 不能小于当前 Thread 的 lastSeqId');
+    }
+
+    stream.lastSeqId = lastSeqId;
+
+    stream.paused = false;
+
+    stream.reportedGapExpectedSeqId = null;
+
+    /**
+     * 删除已经被 Snapshot 包含的缓存事件。
+     *
+     * 如果 Snapshot.lastSeqId=20，
+     * 那么 buffer 中 seqId<=20 的 Envelope
+     * 都不能再次应用，否则会重复追加 delta。
+     */
+    for (const seqId of stream.buffer.keys()) {
+      if (seqId <= lastSeqId) {
+        stream.buffer.delete(seqId);
+      }
+    }
+
+    this.flushThreadBuffer(threadId, stream);
+  }
+
+  /**
+   * 发布一条已经确认顺序安全的 Envelope，并推进 lastSeqId。
+   * 必须先推进游标再同步 publish，避免 Listener 重入时看到旧基线。
+   */
+  private publishAndAdvance(stream: ThreadStream, event: ServerThreadEvent): void {
+    // ThreadStream 本来就是 IMService 内部维护的可变状态；使用局部别名避免把“修改状态”误判为“修改函数参数”。
+    const currentStream = stream;
+
+    currentStream.lastSeqId = event.seqId;
+
     this.publish({
       kind: 'envelope',
       envelope: event,
     });
   }
 
+  /**
+   * 报告当前 Thread 缺少的 expectedSeqId。
+   * 相同 expectedSeqId 只报告一次，避免连续未来事件重复触发 Snapshot。
+   */
   private reportSequenceGap(threadId: ThreadId, stream: ThreadStream, receivedSeqId: SeqId): void {
-    /** 保持与其他顺序函数相同的 Stream 引用。 */
-    const current = stream;
+    // gap 标记属于这条 thread 流的内部状态，后续补齐或重置基线时会被清空。
+    const currentStream = stream;
 
-    /** 例如已经发布到 10，下一条唯一合法的事件就是 11。 */
-    const expectedSeqId = (current.lastSeqId ?? 0) + 1;
+    const expectedSeqId = (currentStream.lastSeqId ?? 0) + 1;
 
-    /**
-     * 同一个缺口期间可能连续收到 12、13、14；
-     * expectedSeqId 都是 11，没有必要重复触发三次 snapshot。
-     */
-    if (current.reportedGapExpectedSeqId === expectedSeqId) {
+    if (currentStream.reportedGapExpectedSeqId === expectedSeqId) {
       return;
     }
 
-    /** 先登记再通知，避免 gap 监听器同步重入后重复报告。 */
-    current.reportedGapExpectedSeqId = expectedSeqId;
+    currentStream.reportedGapExpectedSeqId = expectedSeqId;
 
-    /** 生成一个不包含业务 payload 的轻量恢复通知。 */
     const gap: ThreadSequenceGap = {
       threadId,
       expectedSeqId,
       receivedSeqId,
     };
 
-    /** gap 也走统一通道，状态层根据 kind=sequenceGap 启动 snapshot 恢复。 */
     this.publish({
       kind: 'sequenceGap',
       gap,
     });
   }
 
+  /** 获取 Thread 的顺序状态；第一次观察到该 Thread 时按需创建。 */
   private getOrCreateThreadStream(threadId: ThreadId): ThreadStream {
-    /** 大部分事件都会命中已有 Stream，先走最常见的读取路径。 */
     const existing = this.threadStreams.get(threadId);
 
     if (existing) {
       return existing;
     }
 
-    /**
-     * Stream 按需创建：
-     * 全局 IM 可以收到很多 Thread，但没有事件的 Thread 不占用顺序缓冲空间。
-     */
     const created: ThreadStream = {
-      /** 未知 Thread 的第一条实时事件会建立这个基线。 */
       lastSeqId: null,
-
-      /** 正常情况下创建后即可接收事件，snapshot 才会主动 pause。 */
       paused: false,
-
-      /** 新 Stream 还没有报告过任何 gap。 */
       reportedGapExpectedSeqId: null,
-
-      /** 每个 Thread 拥有独立 Map，不会与其他 Thread 的 seqId 冲突。 */
       buffer: new Map<SeqId, ServerThreadEvent>(),
     };
 
-    /** 注册后，后续相同 threadId 始终取得这个对象。 */
     this.threadStreams.set(threadId, created);
     return created;
   }
 
-  private findFirstBufferedSeqId(stream: ThreadStream): SeqId | null {
-    /** null 同时表示“目前还没有遍历到元素”和“buffer 为空”。 */
-    let firstSeqId: SeqId | null = null;
-
-    /** Map 保留插入顺序而不是数值顺序，因此需要寻找最小 Key。 */
-    for (const seqId of stream.buffer.keys()) {
-      /** 第一个 Key 直接采用，之后只在找到更小值时替换。 */
-      if (firstSeqId === null || seqId < firstSeqId) {
-        firstSeqId = seqId;
-      }
-    }
-
-    /** 调用方只用它描述 gap，不用它执行完整排序。 */
-    return firstSeqId;
-  }
-
+  /**
+   * 通过唯一事件通道同步通知状态层。
+   * 复制 Set 后遍历，允许 Listener 在回调中安全取消订阅。
+   */
   private publish(event: IMServiceEvent): void {
-    /**
-     * 复制 Set 后同步遍历：
-     * - 同步发布保证状态层按 seqId 的先后顺序应用 Envelope；
-     * - 复制保证监听器在回调中 unsubscribe 不会破坏本轮遍历。
-     */
-    for (const listener of [...this.listeners]) {
-      /** 一个状态订阅者异常不能关闭 WebSocket 或阻止其他订阅者。 */
+    const listeners = [...this.listeners];
+
+    for (const listener of listeners) {
       this.callListenerSafely(listener, event, 'IM service listener failed.');
     }
   }
 
-  private rejectAllPendingAcks(error: Error): void {
-    /**
-     * 先复制 Value：后面会一次性 clear Map，
-     * 避免每次 reject 都再次按 requestId 查询和删除。
-     */
-    const pendingAcks = [...this.pendingAcks.values()];
-
-    /** 先清空 Map，防止 Promise 的 catch 回调重入后仍看到旧请求。 */
-    this.pendingAcks.clear();
-
-    /** 每一条 PendingAck 都同时拥有一个仍可能触发的 timeout。 */
-    for (const pending of pendingAcks) {
-      /** 断线或销毁已经确定失败，超时任务不再有意义。 */
-      clearTimeout(pending.timeoutId);
-
-      /** 让所有调用方结束 await，而不是永久停留在等待状态。 */
-      pending.reject(error);
-    }
-  }
-
+  /**
+   * 隔离单个 Listener 异常，避免它关闭 WebSocket 或阻断其他订阅者。
+   */
   private callListenerSafely<TValue>(
     listener: (value: TValue) => void,
     value: TValue,
-    message: string,
+    errorMessage: string,
   ): void {
     try {
-      /** 发布保持同步，因此同一批事件的调用顺序是确定的。 */
       listener(value);
     } catch (error) {
-      /** 一个页面订阅者的异常不能阻止其他订阅者，也不能关闭 WebSocket。 */
-      console.error(message, error);
+      console.error(errorMessage, error);
     }
   }
 
+  /**
+   * 确认当前 IMService 仍然可以使用。
+   *
+   * disconnect 是临时操作，之后仍可以重新 connect；
+   * destroy 是永久操作，之后不能再调用业务能力。
+   */
   private assertUsable(): void {
-    /** destroy 是永久操作；disconnect 后仍可重新 connect，二者语义不同。 */
     if (this.destroyed) {
       throw new Error('IMService 已销毁');
     }
   }
 }
 
-/** 页面和状态层依赖的公开能力就是 IMService 实例本身。 */
 export type IMServicePublicApi = IMService;
