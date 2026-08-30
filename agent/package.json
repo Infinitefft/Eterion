@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "eval:agent": "tsx evals/smoke-agent.ts",
     "start": "node dist/index.js",
+    "test": "pnpm build && node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "engines": {
@@ -20,6 +22,7 @@
     "cheerio": "1.2.0",
     "dotenv": "17.4.2",
     "fastify": "5.12.1",
+    "langchain": "1.5.10",
     "zod": "4.4.3"
   },
   "devDependencies": {

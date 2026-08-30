@@ -1,20 +1,23 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 
-const BRAVE_SEARCH_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
+const QIANFAN_SEARCH_ENDPOINT =
+  'https://qianfan.baidubce.com/v2/ai_search/web_search';
 const SEARCH_TIMEOUT_MS = 10_000;
 
-/** 只校验当前 Tool 真正使用的 Brave Search 响应字段。 */
-const braveSearchResponseSchema = z.object({
-  web: z
-    .object({
-      results: z.array(
-        z.object({
-          title: z.string(),
-          url: z.string().url(),
-        }),
-      ),
-    })
+/**
+ * zod 在运行时检查外部 API 的返回值，避免把不符合预期的数据交给模型。
+ * 这里只声明 Tool 真正需要的 title 和 url，不复制百度响应的所有字段。
+ */
+const qianfanSearchResponseSchema = z.object({
+  code: z.union([z.string(), z.number()]).optional(),
+  references: z
+    .array(
+      z.object({
+        title: z.string(),
+        url: z.string().url(),
+      }),
+    )
     .optional(),
 });
 
@@ -23,31 +26,32 @@ export function createWebSearchTool(apiKey: string) {
   const normalizedApiKey = apiKey.trim();
 
   if (!normalizedApiKey) {
-    throw new Error('BRAVE_SEARCH_API_KEY is required');
+    throw new Error('QIANFAN_API_KEY is required');
   }
 
   return tool(
     async ({ query, count }) => {
-      const searchParams = new URLSearchParams({
-        q: query,
-        count: String(count),
-        safesearch: 'moderate',
-      });
-
       let response: Response;
 
       try {
-        response = await fetch(
-          `${BRAVE_SEARCH_ENDPOINT}?${searchParams.toString()}`,
-          {
-            method: 'GET',
-            headers: {
-              Accept: 'application/json',
-              'X-Subscription-Token': normalizedApiKey,
-            },
-            signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+        response = await fetch(QIANFAN_SEARCH_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            // 百度千帆通过 Bearer 方式认证 API Key，Key 不会出现在 URL 中。
+            Authorization: `Bearer ${normalizedApiKey}`,
           },
-        );
+          // 超时后中止 fetch，防止搜索服务卡住整个 Agent 循环。
+          signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: query }],
+            search_source: 'baidu_search_v2',
+            // 只搜索网页；top_k 对应 Tool 参数 count。
+            resource_type_filter: [{ type: 'web', top_k: count }],
+            safe_search: true,
+          }),
+        });
       } catch (error) {
         throw new Error('web_search request failed', { cause: error });
       }
@@ -59,13 +63,19 @@ export function createWebSearchTool(apiKey: string) {
       }
 
       const rawBody: unknown = await response.json();
-      const parsedBody = braveSearchResponseSchema.safeParse(rawBody);
+      // safeParse 不会抛出异常，而是返回 success 标记供我们判断。
+      const parsedBody = qianfanSearchResponseSchema.safeParse(rawBody);
 
       if (!parsedBody.success) {
-        throw new Error('Brave Search returned an invalid response');
+        throw new Error('Qianfan Search returned an invalid response');
       }
 
-      const results = (parsedBody.data.web?.results ?? [])
+      // 百度在业务错误时可能返回 code，即使 HTTP 状态码是成功也不应当作搜索结果。
+      if (parsedBody.data.code !== undefined) {
+        throw new Error('Qianfan Search returned an error');
+      }
+
+      const results = (parsedBody.data.references ?? [])
         .slice(0, count)
         .map((result) => ({
           title: result.title,
@@ -86,7 +96,7 @@ export function createWebSearchTool(apiKey: string) {
           .string()
           .trim()
           .min(1)
-          .max(400)
+          .max(72)
           .describe('Search query sent to the web search engine'),
         count: z
           .number()

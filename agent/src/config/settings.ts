@@ -10,6 +10,7 @@ export interface Settings {
   port: number;
   defaultModelId: string;
   models: ModelConfig[];
+  qianfanApiKey: string;
   systemPrompt: string;
   modelTimeoutMs: number;
   runTimeoutMs: number;
@@ -39,6 +40,8 @@ export function loadSettings(environ?: NodeJS.ProcessEnv): Settings {
     port: parsePort(value(environ, 'AGENT_PORT', '8001')),
     defaultModelId,
     models,
+    // 是否必须配置由 Agent Runtime 决定；Settings 只负责集中读取环境变量。
+    qianfanApiKey: value(environ, 'QIANFAN_API_KEY'),
     systemPrompt: value(environ, 'SYSTEM_PROMPT', DEFAULT_SYSTEM_PROMPT),
     modelTimeoutMs: parseDurationMs(
       value(environ, 'MODEL_TIMEOUT', '2m'),

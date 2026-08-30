@@ -59,7 +59,7 @@ Go Gin API
 
 普通资源操作使用 REST API，前端实时消息和 Agent 状态使用统一的 WebSocket 事件信封。Node Agent 不生成 `seqId`、时间戳或前端 Message ID，只输出 `run / thinking / content / tool` 四组语义事件；Go 后续负责补齐 IM envelope，并将 `content.*` 映射为前端 `message.*`。因此 LangChain、Deep Agents 和不同模型厂商的原始 chunk 都不会进入前端协议。
 
-当前 Agent 实现了可运行的 Direct Runtime 和真实 Brave `web_search` Tool；该 Tool 尚未注册进聊天编排。意图路由、Skills、RAG、Memory 和 Deep Agents 适配层目前只有明确边界，没有模拟实现。由于 Agent 事件契约刚完成重构，现有 Go SSE 适配器需要在后续开发中同步到新事件名。
+当前 Agent 实现了可运行的 Direct Runtime 和基于百度千帆的真实 `web_search` Tool；该 Tool 尚未注册进聊天编排。意图路由、Skills、RAG、Memory 和 Deep Agents 适配层目前只有明确边界，没有模拟实现。由于 Agent 事件契约刚完成重构，现有 Go SSE 适配器需要在后续开发中同步到新事件名。
 
 ## 已安装的技术栈
 
