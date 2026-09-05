@@ -2,7 +2,7 @@ import { ArrowDown } from 'lucide-react';
 import { useEffect, useRef, useState, type UIEvent } from 'react';
 
 import type { ThreadId } from '@/service/im/types';
-import { useIMStore, type IMStore } from '@/store/imStore';
+import { useIMStore } from '@/store/imStore';
 
 import { ChatMessageList } from './ChatMessageList';
 
@@ -11,22 +11,6 @@ interface ChatConversationProps {
 }
 
 const BOTTOM_THRESHOLD_PX = 96;
-
-/** 只判断当前 Thread 中会影响对话高度的数据是否发生变化。 */
-function didThreadVisualStateChange(
-  current: IMStore,
-  previous: IMStore,
-  threadId: ThreadId,
-): boolean {
-  const currentDetail = current.detailsByThread[threadId];
-  const previousDetail = previous.detailsByThread[threadId];
-
-  return (
-    currentDetail?.messages !== previousDetail?.messages ||
-    currentDetail?.runs !== previousDetail?.runs ||
-    currentDetail?.blocks !== previousDetail?.blocks
-  );
-}
 
 /**
  * 对话滚动视口。
@@ -71,7 +55,15 @@ export function ChatConversation({ threadId }: ChatConversationProps) {
      * Conversation 自己只关心“内容高度变了”，真正的数据渲染交给 MessageList。
      */
     const unsubscribe = useIMStore.subscribe((current, previous) => {
-      if (didThreadVisualStateChange(current, previous, threadId)) {
+      /** 只判断当前 Thread 中会影响对话高度的数据是否发生变化。 */
+      const currentDetail = current.detailsByThread[threadId];
+      const previousDetail = previous.detailsByThread[threadId];
+
+      if (
+        currentDetail?.messages !== previousDetail?.messages ||
+        currentDetail?.runs !== previousDetail?.runs ||
+        currentDetail?.blocks !== previousDetail?.blocks
+      ) {
         scheduleFollow();
       }
     });

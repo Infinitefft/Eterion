@@ -173,15 +173,6 @@ function findToolBlock(
   );
 }
 
-function findHITLBlock(
-  detail: ThreadDetailState,
-  interactionId: string,
-): HITLInteractionState | undefined {
-  return detail.blocks.find(
-    (block): block is HITLInteractionState => block.kind === 'hitl' && block.id === interactionId,
-  );
-}
-
 /* 以下函数只会在 useIMStore 初始化完成后执行。 */
 /* eslint-disable @typescript-eslint/no-use-before-define */
 
@@ -430,7 +421,10 @@ function applyEnvelope(event: ServerThreadEvent): void {
 
     case 'interaction.resolved': {
       updateDetail(threadId, (detail) => {
-        const current = findHITLBlock(detail, event.interactionId);
+        const current = detail.blocks.find(
+          (block): block is HITLInteractionState =>
+            block.kind === 'hitl' && block.id === event.interactionId,
+        );
 
         if (!current) {
           return detail;
@@ -451,30 +445,20 @@ function applyEnvelope(event: ServerThreadEvent): void {
 
 /** Snapshot 会整体替换一个 Thread 的服务端状态。 */
 function applySnapshot(snapshot: ThreadSnapshot): void {
-  useIMStore.setState((state) => {
-    const current = state.threads.find((thread) => thread.id === snapshot.thread.id);
-    const thread: ThreadState = {
-      ...snapshot.thread,
-      /** 是否已读由页面在 Snapshot 成功后明确提交；加载失败时不能提前清掉红点。 */
-      hasUnread: current?.hasUnread ?? false,
-    };
-
-    return {
-      threads: [thread, ...state.threads.filter((item) => item.id !== thread.id)].sort(
-        (left, right) => right.updatedAt - left.updatedAt,
-      ),
-      detailsByThread: {
-        ...state.detailsByThread,
-        [snapshot.thread.id]: {
-          snapshotStatus: 'ready',
-          snapshotError: null,
-          messages: snapshot.messages,
-          runs: snapshot.runs,
-          blocks: snapshot.blocks,
-        },
+  useIMStore.setState((state) => ({
+    /** 是否已读由页面在 Snapshot 成功后明确提交；加载失败时不能提前清掉红点。 */
+    threads: upsertThread(state.threads, snapshot.thread),
+    detailsByThread: {
+      ...state.detailsByThread,
+      [snapshot.thread.id]: {
+        snapshotStatus: 'ready',
+        snapshotError: null,
+        messages: snapshot.messages,
+        runs: snapshot.runs,
+        blocks: snapshot.blocks,
       },
-    };
-  });
+    },
+  }));
 }
 
 function setSnapshotState(threadId: ThreadId, status: IMLoadStatus, error: string | null): void {

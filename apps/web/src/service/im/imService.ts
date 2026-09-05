@@ -844,10 +844,9 @@ export class IMService {
     event: ServerThreadEvent,
   ): void {
     /**
-     * 使用局部别名强调：
-     * 后续始终修改调用方传入的同一个 ThreadStream
+     * ThreadStream 是 IMService 内部维护的可变状态，
+     * 后续直接修改调用方传入的同一个对象。
      */
-    const current = stream;
 
     /**
      * 使用 seqId 作为 Map Key。
@@ -855,13 +854,13 @@ export class IMService {
      * 如果相同 seqId 再次到达，
      * 新值会覆盖旧值，不会重复增加内存。
      */
-    current.buffer.set(event.seqId, event);
+    stream.buffer.set(event.seqId, event);
 
     /**
      * 缓存数量还没有超过上限时，
      * 继续等待缺失事件或 Snapshot。
      */
-    if (current.buffer.size <= this.maxBufferedEventsPerThread) {
+    if (stream.buffer.size <= this.maxBufferedEventsPerThread) {
       return;
     }
 
@@ -874,10 +873,10 @@ export class IMService {
      */
 
     /** 删除之前积累的全部乱序 Envelope。 */
-    current.buffer.clear();
+    stream.buffer.clear();
 
     /** 保留触发溢出的当前事件，Snapshot 后仍可继续衔接实时流。 */
-    current.buffer.set(event.seqId, event);
+    stream.buffer.set(event.seqId, event);
 
     /**
      * 清除旧 gap 的去重记录。
@@ -885,10 +884,10 @@ export class IMService {
      * 这样状态层可以收到一次新的 sequenceGap，
      * 重新发起 Snapshot。
      */
-    current.reportedGapExpectedSeqId = null;
+    stream.reportedGapExpectedSeqId = null;
 
     /** 再次通知状态层当前 Thread 仍然存在缺口。 */
-    this.reportSequenceGap(threadId, current, event.seqId);
+    this.reportSequenceGap(threadId, stream, event.seqId);
   }
 
   /**
@@ -900,12 +899,11 @@ export class IMService {
    */
   private flushThreadBuffer(threadId: ThreadId, stream: ThreadStream): void {
     /**
-     * 保存进入函数时的 ThreadStream 引用。
+     * 参数 stream 已经持有进入函数时的 ThreadStream 引用。
      *
      * 后续可以用引用相等判断：
      * 当前 Stream 是否已经因为 disconnect 等操作失效。
      */
-    const current = stream;
 
     /**
      * 以下情况不能继续排空：
@@ -914,7 +912,7 @@ export class IMService {
      * 2. threadStreams 中已经不是原来的 Stream；
      * 3. lastSeqId 仍然是 null，没有明确的下一条期望值。
      */
-    if (!this.canContinueFlushing(threadId, current) || current.lastSeqId === null) {
+    if (!this.canContinueFlushing(threadId, stream) || stream.lastSeqId === null) {
       return;
     }
 
@@ -924,7 +922,7 @@ export class IMService {
      * 例如 lastSeqId=10，
      * 就只查找 buffer.get(11)。
      */
-    let nextEvent = current.buffer.get(current.lastSeqId + 1);
+    let nextEvent = stream.buffer.get(stream.lastSeqId + 1);
 
     while (nextEvent) {
       /**
@@ -933,13 +931,13 @@ export class IMService {
        * 如果订阅者回调发生重入，
        * 就不会再次找到并发布同一个 Envelope。
        */
-      current.buffer.delete(nextEvent.seqId);
+      stream.buffer.delete(nextEvent.seqId);
 
       /**
        * 发布当前 Envelope，
        * 并把 lastSeqId 推进到它的 seqId。
        */
-      this.publishAndAdvance(current, nextEvent);
+      this.publishAndAdvance(stream, nextEvent);
 
       /**
        * 订阅者可能在 publish() 回调中：
@@ -951,25 +949,25 @@ export class IMService {
        * 都必须重新检查排空流程是否仍然有效。
        */
 
-      if (!this.canContinueFlushing(threadId, current)) {
+      if (!this.canContinueFlushing(threadId, stream)) {
         return;
       }
 
-      nextEvent = current.buffer.get(current.lastSeqId + 1);
+      nextEvent = stream.buffer.get(stream.lastSeqId + 1);
     }
 
     /**
      * 找不到下一条事件后，
      * 还要判断 Map 是否已经完全排空。
      */
-    if (current.buffer.size === 0) {
+    if (stream.buffer.size === 0) {
       /**
        * Map 为空说明目前已知事件已经全部连续发布
        *
        * 清除 gap 去重记录
        * 以后出现新缺口时可以重新通知状态层
        */
-      current.reportedGapExpectedSeqId = null;
+      stream.reportedGapExpectedSeqId = null;
       return;
     }
 
@@ -983,10 +981,22 @@ export class IMService {
      * buffer={15, 16}
      * 当前缺少 14。
      */
-    const firstBufferedSeqId = this.findFirstBufferedSeqId(current);
+    /**
+     * 查找 Map 中最小的 seqId。
+     *
+     * Map 保留的是插入顺序，不是数字大小顺序，
+     * 因此不能直接取第一个 Key。
+     */
+    let firstBufferedSeqId: SeqId | null = null;
+
+    for (const seqId of stream.buffer.keys()) {
+      if (firstBufferedSeqId === null || seqId < firstBufferedSeqId) {
+        firstBufferedSeqId = seqId;
+      }
+    }
 
     if (firstBufferedSeqId !== null) {
-      this.reportSequenceGap(threadId, current, firstBufferedSeqId);
+      this.reportSequenceGap(threadId, stream, firstBufferedSeqId);
     }
   }
 
@@ -1005,23 +1015,6 @@ export class IMService {
      * 因此旧循环会立刻失效。
      */
     return !stream.paused && this.threadStreams.get(threadId) === stream;
-  }
-
-  /**
-   * 查找 Map 中最小的 seqId。
-   *
-   * Map 保留的是插入顺序，不是数字大小顺序，
-   * 因此不能直接取第一个 Key。
-   */
-  private findFirstBufferedSeqId(stream: ThreadStream): SeqId | null {
-    let firstSeqId: SeqId | null = null;
-
-    for (const seqId of stream.buffer.keys()) {
-      if (firstSeqId === null || seqId < firstSeqId) {
-        firstSeqId = seqId;
-      }
-    }
-    return firstSeqId;
   }
 
   /**
@@ -1105,10 +1098,8 @@ export class IMService {
    * 必须先推进游标再同步 publish，避免 Listener 重入时看到旧基线。
    */
   private publishAndAdvance(stream: ThreadStream, event: ServerThreadEvent): void {
-    // ThreadStream 本来就是 IMService 内部维护的可变状态；使用局部别名避免把“修改状态”误判为“修改函数参数”。
-    const currentStream = stream;
-
-    currentStream.lastSeqId = event.seqId;
+    // ThreadStream 本来就是 IMService 内部维护的可变状态，直接更新其属性以推进游标。
+    stream.lastSeqId = event.seqId;
 
     this.publish({
       kind: 'envelope',
@@ -1122,25 +1113,21 @@ export class IMService {
    */
   private reportSequenceGap(threadId: ThreadId, stream: ThreadStream, receivedSeqId: SeqId): void {
     // gap 标记属于这条 thread 流的内部状态，后续补齐或重置基线时会被清空。
-    const currentStream = stream;
+    const expectedSeqId = (stream.lastSeqId ?? 0) + 1;
 
-    const expectedSeqId = (currentStream.lastSeqId ?? 0) + 1;
-
-    if (currentStream.reportedGapExpectedSeqId === expectedSeqId) {
+    if (stream.reportedGapExpectedSeqId === expectedSeqId) {
       return;
     }
 
-    currentStream.reportedGapExpectedSeqId = expectedSeqId;
-
-    const gap: ThreadSequenceGap = {
-      threadId,
-      expectedSeqId,
-      receivedSeqId,
-    };
+    stream.reportedGapExpectedSeqId = expectedSeqId;
 
     this.publish({
       kind: 'sequenceGap',
-      gap,
+      gap: {
+        threadId,
+        expectedSeqId,
+        receivedSeqId,
+      },
     });
   }
 
@@ -1171,22 +1158,14 @@ export class IMService {
     const listeners = [...this.listeners];
 
     for (const listener of listeners) {
-      this.callListenerSafely(listener, event, 'IM service listener failed.');
-    }
-  }
-
-  /**
-   * 隔离单个 Listener 异常，避免它关闭 WebSocket 或阻断其他订阅者。
-   */
-  private callListenerSafely<TValue>(
-    listener: (value: TValue) => void,
-    value: TValue,
-    errorMessage: string,
-  ): void {
-    try {
-      listener(value);
-    } catch (error) {
-      console.error(errorMessage, error);
+      /**
+       * 隔离单个 Listener 异常，避免它关闭 WebSocket 或阻断其他订阅者。
+       */
+      try {
+        listener(event);
+      } catch (error) {
+        console.error('IM service listener failed.', error);
+      }
     }
   }
 

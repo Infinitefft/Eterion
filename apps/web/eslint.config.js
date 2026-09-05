@@ -146,5 +146,12 @@ export default defineConfig([
       globals: globals.node,
     },
   },
+  {
+    files: ['src/service/im/imService.ts'],
+    rules: {
+      // ThreadStream 是 Service 内部的可变状态，允许直接更新其属性，避免为此创建重复别名。
+      'no-param-reassign': ['error', { props: true, ignorePropertyModificationsFor: ['stream'] }],
+    },
+  },
   eslintConfigPrettier,
 ]);

@@ -65,7 +65,6 @@ export function Composer({ threadId }: ComposerProps) {
 
     if (!canSubmit) return;
 
-    const content = normalizedPrompt;
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -73,7 +72,7 @@ export function Composer({ threadId }: ComposerProps) {
       /** ACK 只确认服务端接收；消息和 Run 最终仍由 Envelope 写入 Store。 */
       const dispatch = getIMService().sendMessage({
         threadId,
-        content,
+        content: normalizedPrompt,
         modelId: selectedModelId ?? undefined,
       });
 
@@ -90,7 +89,7 @@ export function Composer({ threadId }: ComposerProps) {
       }
     } catch (error) {
       /** 服务端没有接收时恢复原文；用户已经输入新内容则不覆盖。 */
-      setPrompt((current) => (current.length === 0 ? content : current));
+      setPrompt((current) => (current.length === 0 ? normalizedPrompt : current));
       window.requestAnimationFrame(() => {
         if (textareaRef.current) {
           resizeComposerTextarea(textareaRef.current, {

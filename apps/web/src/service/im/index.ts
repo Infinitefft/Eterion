@@ -40,21 +40,6 @@ async function resolveIMWebSocketUrl(): Promise<string | null> {
   return url.toString();
 }
 
-/** 创建 Transport、IMService，并把 Service 接入全局 Store。 */
-function createIMRuntime(): IMRuntime {
-  const transport = new WebSocketTransport({
-    url: resolveIMWebSocketUrl,
-  });
-
-  const service = new IMService({ transport });
-  const unbindStore = bindIMStore(service);
-
-  return {
-    service,
-    unbindStore,
-  };
-}
-
 /**
  * 在 React 渲染前初始化全局 IM Runtime。
  *
@@ -63,7 +48,16 @@ function createIMRuntime(): IMRuntime {
  */
 export function initializeIMService(): IMService {
   if (!runtime) {
-    runtime = createIMRuntime();
+    /** 创建 Transport、IMService，并把 Service 接入全局 Store。 */
+    const transport = new WebSocketTransport({
+      url: resolveIMWebSocketUrl,
+    });
+    const service = new IMService({ transport });
+
+    runtime = {
+      service,
+      unbindStore: bindIMStore(service),
+    };
   }
 
   return runtime.service;
