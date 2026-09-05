@@ -75,12 +75,7 @@ export function createWebSearchTool(apiKey: string) {
         throw new Error('Qianfan Search returned an error');
       }
 
-      const results = (parsedBody.data.references ?? [])
-        .slice(0, count)
-        .map((result) => ({
-          title: result.title,
-          url: result.url,
-        }));
+      const results = (parsedBody.data.references ?? []).slice(0, count);
 
       return {
         query,

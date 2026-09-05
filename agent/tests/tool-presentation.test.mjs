@@ -60,3 +60,37 @@ test('能够读取 LangChain ToolMessage 中的 JSON content', () => {
     url: 'https://example.com/',
   });
 });
+
+test('ToolMessage 的 JSON 无效时仅展示完成状态', () => {
+  const presentation = projectToolResult('web_fetch', {
+    content: '{invalid JSON',
+    tool_call_id: 'call-invalid-json',
+  });
+
+  assert.deepEqual(presentation, {
+    summary: '网页读取已完成',
+    result: null,
+  });
+});
+
+test('web_search 不向前端结果暴露额外字段', () => {
+  const presentation = projectToolResult('web_search', {
+    query: 'Example',
+    providerDetails: { rawResponse: '内部响应内容' },
+    results: [
+      {
+        title: 'Example',
+        url: 'https://example.com/',
+        content: '仅供模型使用的网页正文',
+      },
+    ],
+  });
+
+  assert.deepEqual(presentation, {
+    summary: '找到 1 个相关网页',
+    result: {
+      query: 'Example',
+      results: [{ title: 'Example', url: 'https://example.com/' }],
+    },
+  });
+});

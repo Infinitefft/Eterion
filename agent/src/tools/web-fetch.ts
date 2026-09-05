@@ -22,7 +22,7 @@ import { z } from 'zod';
 /** 单次网页请求最多等待 10 秒。 */
 const FETCH_TIMEOUT_MS = 10_000;
 
-/** 最多读取 2MB，避免异常网页占用过多内存。 */
+/** 用于预检声明大小和校验已读正文；当前不是下载过程中的硬上限。 */
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 /**
@@ -162,10 +162,10 @@ export const webFetch = tool(
       }
 
       /** text() 只保留节点中的文字，不会把 HTML 标签交给模型。 */
-      content = cleanText(contentRoot.text());
-    } else {
-      content = cleanText(content);
+      content = contentRoot.text();
     }
+
+    content = cleanText(content);
 
     if (!content) {
       throw new Error('web_fetch could not extract readable content');
@@ -180,7 +180,7 @@ export const webFetch = tool(
     return {
       url: targetUrl.toString(),
       title,
-      content: truncated ? content.slice(0, maxCharacters) : content,
+      content: content.slice(0, maxCharacters),
       truncated,
     };
   },
@@ -311,5 +311,5 @@ function isPrivateAddress(address: string): boolean {
  * 清理 HTML 中常见的不换行空格和重复空白，减少无意义的模型上下文占用。
  */
 function cleanText(value: string): string {
-  return value.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  return value.replace(/\s+/g, ' ').trim();
 }

@@ -1,10 +1,10 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 
-import { loadSettings } from '../src/config/settings.js';
-import { createWebAgent } from '../src/graph/agent.js';
-import { buildModelClients } from '../src/models/factory.js';
-import { buildAgentPrompt } from '../src/prompts/agent.js';
-import { createWebSearchTool, webFetch } from '../src/tools/index.js';
+import { loadSettings } from '../src/config.js';
+import { createWebAgent } from '../src/agent.js';
+import { buildModelClients } from '../src/models.js';
+import { createWebSearchTool } from '../src/tools/web-search.js';
+import { webFetch } from '../src/tools/web-fetch.js';
 
 const DEFAULT_QUESTION =
   '搜索 LangChain Agent 的官方资料，阅读最相关的网页并总结，并附上来源 URL。';
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
 
   const agent = createWebAgent({
     model,
-    prompt: buildAgentPrompt(settings.systemPrompt),
+    prompt: settings.systemPrompt,
     tools,
   });
 

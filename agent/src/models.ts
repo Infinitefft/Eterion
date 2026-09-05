@@ -1,6 +1,6 @@
 import { ChatOpenAI } from '@langchain/openai';
 
-import type { Settings } from '../config/settings.js';
+import type { Settings } from './config.js';
 
 /** SDK 创建集中在这里，Runtime 不感知 API Key、Base URL 等厂商细节。 */
 export function buildModelClients(settings: Settings): Map<string, ChatOpenAI> {
@@ -27,7 +27,7 @@ export function buildModelClients(settings: Settings): Map<string, ChatOpenAI> {
               modelKwargs: {
                 thinking: { type: 'disabled' },
 
-                // 先串行执行 Tools，便于保证事件顺序和验证 Tool Call 上限。
+                // 请求模型不要并行调用 Tools；这不是 Runtime 的并发锁。
                 parallel_tool_calls: false,
               },
             }
@@ -39,4 +39,30 @@ export function buildModelClients(settings: Settings): Map<string, ChatOpenAI> {
       }),
     ]),
   );
+}
+
+/**
+ * 不同 Provider 的 chunk 形状可能不同，这里只抽取正式 Content。
+ * reasoning/tool-call block 不能误混进前端正式回复。
+ */
+export function extractContentDelta(chunk: unknown): string {
+  if (!isRecord(chunk)) return '';
+
+  if (typeof chunk.text === 'string' && chunk.text) {
+    return chunk.text;
+  }
+
+  const content = chunk.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+
+  return content
+    .filter(isRecord)
+    .filter((block) => block.type === 'text' || block.type === 'output_text')
+    .map((block) => (typeof block.text === 'string' ? block.text : ''))
+    .join('');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { JsonValue } from '../runtime/events.js';
+import type { JsonValue } from '../protocol.js';
 
 export interface ToolPresentation {
   summary: string;
@@ -32,11 +32,29 @@ export function projectToolResult(
   toolName: string,
   rawOutput: unknown,
 ): ToolPresentation {
-  const output = unwrapToolOutput(rawOutput);
+  let output = rawOutput;
+
+  // LangChain 通常把 Tool 对象结果序列化到 ToolMessage.content 中。
+  // 直接调用 Tool 时收到的普通对象则不需要解包。
+  if (
+    typeof rawOutput === 'object' &&
+    rawOutput !== null &&
+    'tool_call_id' in rawOutput &&
+    'content' in rawOutput
+  ) {
+    output = rawOutput.content;
+    if (typeof output === 'string') {
+      try {
+        output = JSON.parse(output) as unknown;
+      } catch {
+        // 非 JSON 内容交给下方 Schema 判断，降级为仅展示完成状态。
+      }
+    }
+  }
 
   if (toolName === 'web_search') {
     const parsed = webSearchResultSchema.safeParse(output);
-    if (!parsed.success) return unknownResult('网页搜索已完成');
+    if (!parsed.success) return { summary: '网页搜索已完成', result: null };
 
     return {
       summary: `找到 ${parsed.data.results.length} 个相关网页`,
@@ -46,7 +64,7 @@ export function projectToolResult(
 
   if (toolName === 'web_fetch') {
     const parsed = webFetchResultSchema.safeParse(output);
-    if (!parsed.success) return unknownResult('网页读取已完成');
+    if (!parsed.success) return { summary: '网页读取已完成', result: null };
 
     const { url, title, truncated } = parsed.data;
     return {
@@ -56,36 +74,5 @@ export function projectToolResult(
     };
   }
 
-  return unknownResult('工具调用已完成');
-}
-
-/**
- * Agent 调用 Tool 时，LangChain 会把返回值包装成 ToolMessage。
- * 对象结果通常位于 content 中，并被 JSON.stringify() 转换成字符串。
- */
-function unwrapToolOutput(rawOutput: unknown): unknown {
-  if (
-    !isRecord(rawOutput) ||
-    !('tool_call_id' in rawOutput) ||
-    !('content' in rawOutput)
-  ) {
-    return rawOutput;
-  }
-
-  const content = rawOutput.content;
-  if (typeof content !== 'string') return content;
-
-  try {
-    return JSON.parse(content) as unknown;
-  } catch {
-    return content;
-  }
-}
-
-function unknownResult(summary: string): ToolPresentation {
-  return { summary, result: null };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return { summary: '工具调用已完成', result: null };
 }
