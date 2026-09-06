@@ -29,7 +29,8 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
  * tool() 会把执行函数、名称、描述和 Zod Schema 组合成模型可调用的 Tool。
  */
 export const webFetch = tool(
-  async ({ url, maxCharacters }) => {
+  /** 读取公开网页；config.signal 让整轮 Run 结束时也能取消网页请求。 */
+  async ({ url, maxCharacters }, config) => {
     /**
      * URL 是 Node.js 内置的标准 URL 解析器。
      * 使用它比手动截取字符串更可靠，也能正确解析协议、域名和端口。
@@ -38,6 +39,14 @@ export const webFetch = tool(
 
     /** 发起请求前检查协议、域名和真实 IP，避免访问本机或局域网。 */
     await assertPublicUrl(targetUrl);
+
+    // 限制单次网页请求等待时间。
+    const timeoutSignal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    // any() 在任一信号取消时取消请求，兼顾 Tool 自身超时和整轮 Run 取消。
+    const signal = config?.signal
+      ? AbortSignal.any([config.signal, timeoutSignal])
+      // 单独调用 Tool 时，也有自己的请求超时。
+      : timeoutSignal;
 
     let response: Response;
 
@@ -57,8 +66,7 @@ export const webFetch = tool(
          */
         redirect: 'manual',
 
-        /** AbortSignal.timeout() 会在超时后主动终止网络请求。 */
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal,
       });
     } catch (error) {
       /** cause 保留底层网络错误，方便后续通过服务端日志排查。 */

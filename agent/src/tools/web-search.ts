@@ -30,7 +30,16 @@ export function createWebSearchTool(apiKey: string) {
   }
 
   return tool(
-    async ({ query, count }) => {
+    /** 执行搜索；config 是框架传入的运行配置，其中 signal 用于取消当前 Run。 */
+    async ({ query, count }, config) => {
+      // 限制单次搜索等待时间。
+      const timeoutSignal = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+      // any() 合并信号：Run 取消或本次请求超时，任意一个发生就中止 fetch。
+      const signal = config?.signal
+        ? AbortSignal.any([config.signal, timeoutSignal])
+        // 直接调用 Tool、不传 Run 配置时，仍保留自己的超时。
+        : timeoutSignal;
+
       let response: Response;
 
       try {
@@ -42,8 +51,7 @@ export function createWebSearchTool(apiKey: string) {
             // 百度千帆通过 Bearer 方式认证 API Key，Key 不会出现在 URL 中。
             Authorization: `Bearer ${normalizedApiKey}`,
           },
-          // 超时后中止 fetch，防止搜索服务卡住整个 Agent 循环。
-          signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+          signal,
           body: JSON.stringify({
             messages: [{ role: 'user', content: query }],
             search_source: 'baidu_search_v2',

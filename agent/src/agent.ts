@@ -79,7 +79,8 @@ export function createWebAgent(options: CreateWebAgentOptions): ReactAgent {
 
   const modelCallLimit = createModelCallLimit({
     runLimit: MAX_MODEL_CALLS,
-    exitBehavior: 'end',
+    // 超限时由 Runtime 输出 run.failed，不把框架生成的提示当成模型正常答复。
+    exitBehavior: 'error',
   });
 
   const toolError = toolErrorMiddleware({

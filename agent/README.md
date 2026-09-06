@@ -5,7 +5,7 @@ Eterion 的 Node.js + TypeScript Agent 模块。当前 HTTP 服务使用 Direct 
 
 `web_search`、`web_fetch` 和 LangChain `createAgent()` 组装已有实现，
 `evals/smoke-agent.ts` 可单独调用这条 Tool Calling 链路。
-`src/runtime/agent.ts` 是尚未完成的流式适配草稿，**没有接入 HTTP 服务**。
+`src/runtime/agent.ts` 已实现文本流、Tool 生命周期和失败收尾，**尚未接入 HTTP 服务**。
 Memory、RAG、Skills 及完整前端 Tool 状态链路仍待实现，不能将一次脚本调用视为这些能力已完成。
 
 ## 目录与职责
@@ -20,7 +20,7 @@ src/
 ├── protocol.ts              请求、领域事件和 Runtime 类型契约
 ├── runtime/
 │   ├── direct.ts            普通模型的流式事件适配
-│   └── agent.ts             Agent 流式事件适配（未完成草稿）
+│   └── agent.ts             Agent 文本流、Tool 状态与运行终态适配
 └── tools/
     ├── web-search.ts        查询千帆搜索，返回相关网页标题与 URL
     ├── web-fetch.ts         读取公开网页的 HTML 或纯文本
@@ -32,7 +32,7 @@ tests/                      无需真实 API Key 的回归测试
 
 组装与执行分开：`src/agent.ts` 决定 Agent 使用什么，Runtime 将执行过程转换成领域事件。
 Prompt 直接放在组装处，不再为一段字符串单独建模块。
-`createDirectRuntime()` 和草稿中的 `createAgentRuntime()` 使用普通函数返回对象，
+`createDirectRuntime()` 和 `createAgentRuntime()` 使用普通函数返回对象，
 配置与客户端由闭包持有；每轮运行的可变状态放在 `stream()` 内，不能在会话之间共享。
 `AgentRuntime` interface 只约束 HTTP 需要的形状，不要求 class、继承或空的生命周期方法。
 
@@ -64,9 +64,8 @@ pnpm dev
 该命令启动 Direct 服务，默认监听 `http://127.0.0.1:8001`，**不是启动 Tool Calling Runtime**。
 编译结果的运行命令是 `pnpm build` 后执行 `pnpm start`。
 
-当前草稿保留了原有语法错误和未完成逻辑，会阻断 `pnpm typecheck`、`pnpm build`，
-也会阻断先构建再执行测试的 `pnpm test`。`pnpm dev` 不导入此草稿，但它不是完整类型检查。
-后续继续开发编排时再修复草稿，不通过排除文件或空实现掩盖这个状态。
+`pnpm typecheck` 检查完整源码，`pnpm test` 构建后运行离线回归测试。
+这些检查不会调用真实模型或搜索服务；`pnpm dev` 本身不进行完整类型检查。
 
 ## 服务契约
 
@@ -103,9 +102,9 @@ run.started → content.started → content.delta（多次）→ content.complet
 
 | 事件 | 用途 | 当前状态 |
 | --- | --- | --- |
-| `run.started/completed/failed` | 一次执行的生命周期 | Direct 已使用 |
-| `content.started/delta/completed` | 正式回复内容 | Direct 已使用 |
-| `tool.started/completed/failed` | 工具调用与终态 | Agent Runtime 待完成 |
+| `run.started/completed/failed` | 一次执行的生命周期 | Direct、Agent Runtime 已使用 |
+| `content.started/delta/completed` | 正式回复内容 | Direct、Agent Runtime 已使用 |
+| `tool.started/completed/failed` | 工具调用与终态 | Agent Runtime 已实现，尚未接入 HTTP |
 | `thinking.delta/completed` | 模型明确公开的思考摘要 | 可选能力，未接入 |
 
 后续 Go 适配层负责补齐 `threadId`、`seqId`、`timestamp`、`messageId`，
@@ -113,13 +112,21 @@ run.started → content.started → content.delta（多次）→ content.complet
 Tool 三种状态必须通过同一 `toolCallId` 关联；Tool 失败与整个 Run 失败不能混为一谈。
 `presentation.ts` 保留这个展示边界，网页完整正文用于模型上下文，不直接推送前端。
 
+Agent Runtime 同时消费 LangChain 的 `messages` 和 `updates`：前者输出正文增量，
+后者提供完整 Tool Call 和 ToolMessage。只在模型节点登记新调用，完成后从活动调用表删除，
+避免 Middleware 携带历史消息时重复发送工具事件。框架负责 Agent Loop，Runtime 不手动执行工具。
+模型调用上限为 6 次，工具调用上限为 4 次；图步数另设 50，因为 Middleware 也占用图步数。
+工具失败允许模型继续回答；整轮超时、执行异常或没有有效最终答复时，收尾未完成工具和正文，再发送 `run.failed`。
+
 ## 验证与已知限制
 
-`pnpm typecheck` 检查源码，`pnpm test` 构建后运行本地回归测试；当前草稿造成的阻断见上文。
+2026-09-06 验证：`pnpm typecheck`、完整构建和 40 项离线回归测试通过，
+`evals/smoke-agent.ts` 单独静态检查通过。未读取 `.env` 或使用真实 Key 调用外部服务。
 
-本轮架构整理验证（2026-09-05）：已完成模块按现有严格选项定向编译通过，
-评估脚本单独静态检查通过，22 项本地回归测试通过，未使用真实 Key 或访问外部服务。
-定向检查未包含未完成草稿，也没有修改 `tsconfig.json` 排除它；这些结果不代表全量构建或完整 Agent 编排已通过验证。
+离线测试使用脚本化假模型和模拟 HTTP 响应，验证 Runtime 事件与取消信号的行为。
+它们不能证明真实模型的工具选择质量或厂商的流式 Tool Calling 兼容性，仍需后续真实调用验证。
+当前框架在工具额度耗尽、后续调用全部被阻止时，可能不再请求模型总结；
+Runtime 会将没有最终答复的情况标为 `AGENT_INCOMPLETE_RESPONSE`，不会伪装成成功。
 
 观察真实 Tool Calling 可执行：
 
@@ -136,12 +143,13 @@ OpenAI-compatible 接口相似并不意味着这些行为一致，当前也没�
 
 `web_fetch` 不执行网页 JavaScript、不自动跟随重定向、不支持 PDF。
 现有 DNS/内网检查是基础防护，并未绑定检查后的 IP 到实际连接；
-2 MB 检查也不是下载过程中的硬上限。总 Run 取消向 Tools 的传递仍待编排实现，
+2 MB 检查也不是下载过程中的硬上限。总 Run 取消信号已传给 Tools 的 fetch，
+同时保留单次请求超时；DNS 预检本身不支持这个取消信号。
 不将当前工具描述成适合直接暴露到公网的完整安全边界。
 
 ## 后续开发与参与方式
 
-先由用户继续实现 Runtime 事件映射、Tool 生命周期和失败收敛，再接入 HTTP、Go 和前端。
+下一步验证真实模型经过 Runtime 的流式行为，再接入 HTTP、Go 和前端。
 模型根据 Prompt、Tool description 和参数 Schema 决定是否调用工具；
 少量工具阶段不额外建立 Intent Router、ContextBuilder 或动态 Registry。
 
@@ -153,4 +161,4 @@ OpenAI-compatible 接口相似并不意味着这些行为一致，当前也没�
 
 用户重点参与 Agent 编排、Tools 调用、RAG、Skills、Memory 和评估核心的设计与实现。
 环境配置、入口接线、重复类型、普通 mock、基础测试和文档同步可以由编码代理完成。
-本轮只整理已有实现和架构，不代写尚未完成的核心逻辑；完整协作要求以 [AGENTS.md](AGENTS.md) 为准。
+本轮经用户授权补齐 Runtime，并保留核心逻辑注释；完整协作要求以 [AGENTS.md](AGENTS.md) 为准。
