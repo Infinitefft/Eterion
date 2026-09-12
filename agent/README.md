@@ -1,11 +1,13 @@
 # Eterion Agent
 
-Eterion 的 Node.js + TypeScript Agent 模块。当前 HTTP 服务使用 Direct Runtime：
-接收调用方传入的对话历史，调用模型，通过 SSE 输出项目自己的 `run.*`、`content.*` 事件。
+Eterion 的 Node.js + TypeScript Agent 模块。当前 HTTP 服务使用 Agent Runtime：
+接收调用方传入的对话历史，由模型决定直接回答或调用网页工具，
+通过 SSE 输出项目自己的 `run.*`、`content.*`、`tool.*` 事件。
 
 `web_search`、`web_fetch` 和 LangChain `createAgent()` 组装已有实现，
 `evals/smoke-agent.ts` 可单独调用这条 Tool Calling 链路。
-`src/runtime/agent.ts` 已实现文本流、Tool 生命周期和失败收尾，**尚未接入 HTTP 服务**。
+`src/runtime/agent.ts` 已接入 `POST /runs`，支持文本流、Tool 生命周期、取消和失败收尾。
+`createDirectRuntime()` 保留为可手动切换的文本直出基线，没有自动回退路由。
 Memory、RAG、Skills 及完整前端 Tool 状态链路仍待实现，不能将一次脚本调用视为这些能力已完成。
 
 ## 目录与职责
@@ -61,7 +63,8 @@ pnpm install
 pnpm dev
 ```
 
-该命令启动 Direct 服务，默认监听 `http://127.0.0.1:8001`，**不是启动 Tool Calling Runtime**。
+该命令启动带 Tool Calling 的 Agent 服务，默认监听 `http://127.0.0.1:8001`。
+启动需要模型配置和 `QIANFAN_API_KEY`；启用模型仍需逐一验证真实流式 Tool Calling 兼容性。
 编译结果的运行命令是 `pnpm build` 后执行 `pnpm start`。
 
 `pnpm typecheck` 检查完整源码，`pnpm test` 构建后运行离线回归测试。
@@ -87,14 +90,15 @@ pnpm dev
 `messages` 非空且最后一条必须来自 user；只接受 user/assistant 历史，
 System Prompt 由 Agent 自己构建。目前 Thread 历史由调用方传入，Agent 不自动加载或持久化记忆。
 
-Direct 成功时按顺序输出：
+不调用工具时，成功事件按顺序输出：
 
 ```text
 run.started → content.started → content.delta（多次）→ content.completed → run.completed
 ```
 
 事件类型写在 SSE 的 `event` 字段，`data` 固定为 `{ "runId": "...", "payload": {} }`。
-失败以 `run.failed` 结束；Direct 的模型调用失败、超时或空回复会先用
+工具调用期间还会交错输出 `tool.started` 和对应的 `tool.completed` 或 `tool.failed`。
+失败以 `run.failed` 结束；模型调用失败、超时或无有效最终答复会先用
 `content.completed` 的 `status: "failed"` 结束已开始的内容块。
 心跳使用 SSE 注释，不属于领域事件。
 
@@ -104,7 +108,7 @@ run.started → content.started → content.delta（多次）→ content.complet
 | --- | --- | --- |
 | `run.started/completed/failed` | 一次执行的生命周期 | Direct、Agent Runtime 已使用 |
 | `content.started/delta/completed` | 正式回复内容 | Direct、Agent Runtime 已使用 |
-| `tool.started/completed/failed` | 工具调用与终态 | Agent Runtime 已实现，尚未接入 HTTP |
+| `tool.started/completed/failed` | 工具调用与终态 | Agent Runtime、HTTP SSE 已接入，Go/前端待适配 |
 | `thinking.delta/completed` | 模型明确公开的思考摘要 | 可选能力，未接入 |
 
 后续 Go 适配层负责补齐 `threadId`、`seqId`、`timestamp`、`messageId`，
@@ -118,10 +122,28 @@ Agent Runtime 同时消费 LangChain 的 `messages` 和 `updates`：前者输出
 模型调用上限为 6 次，工具调用上限为 4 次；图步数另设 50，因为 Middleware 也占用图步数。
 工具失败允许模型继续回答；整轮超时、执行异常或没有有效最终答复时，收尾未完成工具和正文，再发送 `run.failed`。
 
+### 取消与连接生命周期
+
+`AgentRuntime.stream(input, signal?)` 的第二个参数是进程内取消信号，不属于 HTTP 请求 JSON。
+HTTP 响应连接提前关闭时，服务层立即取消当前 Run，不等待下一条模型或 Tool 事件；
+正常响应结束不作为取消。每个请求独立持有 Controller，结束时清理心跳和关闭事件监听器。
+
+Runtime 将外部信号与自身超时信号合并，再传给模型和 Tools，使用最先取消的原因区分终态：
+
+- 主动取消：`AGENT_RUN_CANCELLED`，`retryable: false`，不记录故障日志。
+- Agent 总超时：`AGENT_RUN_TIMEOUT`，`retryable: true`。
+- Direct 超时：保留原有 `MODEL_REQUEST_FAILED` 与“模型调用超时”提示。
+
+主动取消仍沿用 `run.failed` 终态，通过错误码区分，不代表服务故障。
+若直接消费 Runtime，仍能收到已发送正文和未完成工具的收尾事件；
+若 HTTP 已断开，则不会向失效连接继续发送，Go/前端需维护自己的停止状态。
+这不是浏览器断线策略或新的取消接口；后续 Go 需要在决定停止任务时取消上游 HTTP 请求。
+
 ## 验证与已知限制
 
-2026-09-06 验证：`pnpm typecheck`、完整构建和 40 项离线回归测试通过，
-`evals/smoke-agent.ts` 单独静态检查通过。未读取 `.env` 或使用真实 Key 调用外部服务。
+2026-09-11：本轮功能代码已通过类型检查和构建，未读取 `.env` 或使用真实 Key 调用外部服务。
+本轮新增的取消链路测试已撤回，原有测试保留。当前优先完成功能，不主动新增或运行测试；
+待功能完成、前后端调通后，由用户统一安排验证，不能把编译通过视为整体链路已验收。
 
 离线测试使用脚本化假模型和模拟 HTTP 响应，验证 Runtime 事件与取消信号的行为。
 它们不能证明真实模型的工具选择质量或厂商的流式 Tool Calling 兼容性，仍需后续真实调用验证。
@@ -149,7 +171,7 @@ OpenAI-compatible 接口相似并不意味着这些行为一致，当前也没�
 
 ## 后续开发与参与方式
 
-下一步验证真实模型经过 Runtime 的流式行为，再接入 HTTP、Go 和前端。
+后续由 Go 适配 Agent 事件并接入前端展示，功能完成后再统一进行前后端联调与真实模型效果验证。
 模型根据 Prompt、Tool description 和参数 Schema 决定是否调用工具；
 少量工具阶段不额外建立 Intent Router、ContextBuilder 或动态 Registry。
 
@@ -161,4 +183,4 @@ OpenAI-compatible 接口相似并不意味着这些行为一致，当前也没�
 
 用户重点参与 Agent 编排、Tools 调用、RAG、Skills、Memory 和评估核心的设计与实现。
 环境配置、入口接线、重复类型、普通 mock、基础测试和文档同步可以由编码代理完成。
-本轮经用户授权补齐 Runtime，并保留核心逻辑注释；完整协作要求以 [AGENTS.md](AGENTS.md) 为准。
+本轮经用户授权接入 Agent 服务及取消链路，并保留核心逻辑注释；完整协作要求以 [AGENTS.md](AGENTS.md) 为准。

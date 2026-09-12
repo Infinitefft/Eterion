@@ -20,7 +20,11 @@ export function createDirectRuntime(
     defaultModelId: settings.defaultModelId,
     models: settings.models.map(toPublicModel),
 
-    async *stream(input: RunInput): AsyncGenerator<AgentEvent> {
+    /** 流式输出模型正文，并响应调用方取消或本轮超时。 */
+    async *stream(
+      input: RunInput,
+      externalSignal?: AbortSignal,
+    ): AsyncGenerator<AgentEvent> {
       const model = clients.get(input.model_id);
       if (!model) {
         yield runFailed(input.run_id, 'MODEL_NOT_AVAILABLE', '所选模型不可用', false);
@@ -41,16 +45,27 @@ export function createDirectRuntime(
       // 每轮请求独立保存正文和取消信号，不能放到共享的工厂作用域中。
       const textParts: string[] = [];
       const abortController = new AbortController();
+
+      // Direct 基线也接收外部取消，不能在切回基线后失去停止能力。
+      const signal = externalSignal
+        ? AbortSignal.any([externalSignal, abortController.signal])
+        : abortController.signal;
       const timeout = setTimeout(() => abortController.abort(), settings.runTimeoutMs);
 
       try {
+        // 已取消时不再发起模型请求。
+        signal.throwIfAborted();
+
         const messages = [
           { role: 'system', content: settings.systemPrompt },
           ...input.messages,
         ];
-        const chunks = await model.stream(messages, { signal: abortController.signal });
+        const chunks = await model.stream(messages, { signal });
 
         for await (const chunk of chunks) {
+          // 外部取消后，不再转发已经缓冲的正文片段。
+          signal.throwIfAborted();
+
           const delta = extractContentDelta(chunk);
           if (!delta) continue;
 
@@ -61,14 +76,32 @@ export function createDirectRuntime(
             payload: { delta },
           };
         }
+        // 某些流取消后直接结束，仍需要阻止下面发送成功终态。
+        signal.throwIfAborted();
       } catch (error) {
-        const agentError: AgentError = {
-          code: 'MODEL_REQUEST_FAILED',
-          message: abortController.signal.aborted ? '模型调用超时' : '模型调用失败',
-          retryable: true,
-        };
+        // 组合信号的 reason 来自最先取消的一方，不按异常名称猜测。
+        const cancelled =
+          signal.aborted && signal.reason !== abortController.signal.reason;
+        const agentError: AgentError = cancelled
+          ? {
+              code: 'AGENT_RUN_CANCELLED',
+              message: 'Agent 执行已取消',
+              retryable: false,
+            }
+          : {
+              // 保留 Direct 原有的模型失败与超时错误契约。
+              code: 'MODEL_REQUEST_FAILED',
+              message: abortController.signal.aborted ? '模型调用超时' : '模型调用失败',
+              retryable: true,
+            };
 
-        console.error('model request failed', { runId: input.run_id, error });
+        // 主动取消不记为故障；不输出可能包含密钥或取消原因的原始异常。
+        if (!cancelled) {
+          console.error('model request failed', {
+            runId: input.run_id,
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
+        }
         yield failedContent(input.run_id, textParts.join(''), agentError);
         yield runFailed(
           input.run_id,
@@ -79,6 +112,8 @@ export function createDirectRuntime(
         return;
       } finally {
         clearTimeout(timeout);
+        // 消费者提前结束迭代时，也通知仍在等待的模型请求停止。
+        abortController.abort();
       }
 
       const content = textParts.join('');
@@ -108,6 +143,7 @@ export function createDirectRuntime(
   };
 }
 
+/** 结束已开始的正文块；失败或取消时仍保留用户已经看到的内容。 */
 function failedContent(runId: string, content: string, error: AgentError): AgentEvent {
   return {
     type: 'content.completed',

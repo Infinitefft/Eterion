@@ -33,7 +33,8 @@ export interface AgentRuntime {
   readonly defaultModelId: string;
   readonly models: PublicModel[];
 
-  stream(input: RunInput): AsyncGenerator<AgentEvent>;
+  /** signal 由进程内调用方传入，用于取消本次执行，不属于请求 JSON。 */
+  stream(input: RunInput, signal?: AbortSignal): AsyncGenerator<AgentEvent>;
 }
 
 /** JSON 能安全传输的数据类型，与前端 IM 的 JsonValue 含义一致。 */

@@ -53,8 +53,11 @@ export function createAgentRuntime(
     defaultModelId: settings.defaultModelId,
     models: settings.models.map(toPublicModel),
 
-    /** 执行一次请求，把框架的文本和步骤更新转换成项目事件。 */
-    async *stream(input: RunInput): AsyncGenerator<AgentEvent> {
+    /** 执行一次请求，转换领域事件，并响应调用方取消或运行超时。 */
+    async *stream(
+      input: RunInput,
+      externalSignal?: AbortSignal,
+    ): AsyncGenerator<AgentEvent> {
       const runId = input.run_id;
       const agent = agents.get(input.model_id);
 
@@ -99,12 +102,20 @@ export function createAgentRuntime(
       // 将一次 Run 的取消信号交给框架，再由 Tool 传给实际的 fetch。
       const controller = new AbortController();
 
+      // any() 合并调用方取消与内部取消，保留最先触发取消的 reason。
+      const signal = externalSignal
+        ? AbortSignal.any([externalSignal, controller.signal])
+        : controller.signal;
+
       // 总超时限制整轮执行时间，不是每次模型或 Tool 调用重新计时。
       const timeout = setTimeout(() => {
         controller.abort();
       }, settings.runTimeoutMs);
 
       try {
+        // 已经取消的请求不再启动模型；异常统一交给 catch 收尾。
+        signal.throwIfAborted();
+
         // stream() 真正启动 Agent Loop；不用手动执行 Tool 或回填 ToolMessage。
         const events = await agent.stream(
           {
@@ -113,14 +124,17 @@ export function createAgentRuntime(
           {
             // messages 接收文本片段，updates 接收完整步骤结果。
             streamMode: STREAM_MODES,
-            // Run 超时时，框架停止后续模型与工具调用。
-            signal: controller.signal,
+            // 外部取消或 Run 超时时，框架停止后续模型与工具调用。
+            signal,
             // 图步数还包括 Middleware，不能直接等于模型调用次数；业务上限由 Middleware 控制。
             recursionLimit: 50,
           },
         );
 
         for await (const [mode, data] of events) {
+          // 消费者可能在上一次 yield 后取消，不再发送框架已缓冲的内容。
+          signal.throwIfAborted();
+
           if (mode === 'messages') {
             // messages 模式提供消息片段和产生它的节点信息。
             const [message, metadata] = data;
@@ -231,6 +245,9 @@ export function createAgentRuntime(
           }
         }
 
+        // 即使底层流正常关闭，也不能把已经取消的执行标记为成功。
+        signal.throwIfAborted();
+
         // 流结束不一定等于任务完成：还必须有最终答复，且所有工具都有终态。
         if (!hasFinalAnswer || activeTools.size > 0) {
           failure = {
@@ -243,11 +260,17 @@ export function createAgentRuntime(
         const errorName = error instanceof Error ? error.name : 'UnknownError';
 
         // 优先看 Run 的信号，避免底层 AbortError 被工具包装后误判成普通异常。
-        if (controller.signal.aborted) {
+        if (signal.aborted) {
+          // 此时尚未进入 finally，内部 controller 只可能被超时计时器取消。
+          // 两个来源都取消时，用 reason 判断最先触发的是哪一个。
+          const timedOut =
+            controller.signal.aborted &&
+            signal.reason === controller.signal.reason;
+
           failure = {
-            code: 'AGENT_RUN_TIMEOUT',
-            message: 'Agent 执行超时',
-            retryable: true,
+            code: timedOut ? 'AGENT_RUN_TIMEOUT' : 'AGENT_RUN_CANCELLED',
+            message: timedOut ? 'Agent 执行超时' : 'Agent 执行已取消',
+            retryable: timedOut,
           };
         } else if (
           errorName === 'ModelCallLimitMiddlewareError' ||
@@ -266,8 +289,10 @@ export function createAgentRuntime(
           };
         }
 
-        // 不打印原始异常或请求参数，避免日志泄露 API Key 和内部网络信息。
-        console.error('Agent run failed', { runId, errorName });
+        // 主动停止不是服务故障；其他错误也只记录安全字段，不打印原始异常。
+        if (failure.code !== 'AGENT_RUN_CANCELLED') {
+          console.error('Agent run failed', { runId, errorName });
+        }
       } finally {
         // 正常结束、异常或消费者提前结束迭代时，都释放计时器。
         clearTimeout(timeout);
