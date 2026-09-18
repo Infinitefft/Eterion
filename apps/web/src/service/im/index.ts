@@ -1,6 +1,5 @@
 import { createIMTicket } from '@/api/im';
-import { bindIMStore } from '@/store/imStore';
-
+import { useIMStore } from '@/storeyeji/im';
 import { IMService } from './imService';
 import { WebSocketTransport } from './transport';
 
@@ -48,19 +47,46 @@ async function resolveIMWebSocketUrl(): Promise<string | null> {
  */
 export function initializeIMService(): IMService {
   if (!runtime) {
-    /** 创建 Transport、IMService，并把 Service 接入全局 Store。 */
     const transport = new WebSocketTransport({
       url: resolveIMWebSocketUrl,
     });
+
     const service = new IMService({ transport });
 
+    const unbindStore = service.subscribe((event) => {
+      const store = useIMStore.getState();
+
+      switch (event.kind) {
+        case 'envelope': {
+          store.applyEnvelope(event.envelope);
+          break;
+        }
+        
+        case 'connection': {
+          // 将连接、断线、重连等状态同步给页面使用
+          store.setConnectionState(event.state);
+          break;
+        }
+      }
+    });
+
+    // 保存实例和它对应的取消订阅函数
     runtime = {
       service,
-      unbindStore: bindIMStore(service),
+      unbindStore,
     };
-  }
 
-  return runtime.service;
+    /**
+     * subscribe 只监听后续变化，不会主动发送当前状态
+     * 因此初始化时需要手动同步一次
+     */
+    useIMStore.getState().setConnectionState(
+      service.getConnectionState(),
+    );
+  }
+  
+  // 后续调用直接获取实例，不会重复创建或订阅
+  return runtime?.service;
 }
 
 /** 获取全局唯一的 IMService；尚未初始化时会自动完成初始化。 */
