@@ -462,3 +462,14 @@
 // }
 
 import { NavLink } from 'react-router-dom';
+
+import { createChatDetailPath } from '@/app/routePaths';
+import { useIMStore } from '@/store/im-store';
+
+export function ChatHistoryList({
+  onNavigate,
+}: {
+  onNavigate: () => void;
+}) {
+  
+}

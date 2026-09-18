@@ -133,6 +133,7 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run) {
 
 	input := agent.Input{
 		RunID: run.ID.String(), ThreadID: run.ChatID.String(), ModelID: run.ModelID,
+		UserID:   run.UserID.String(),
 		Messages: make([]agent.Message, 0, len(execution.Messages)),
 	}
 	for _, message := range execution.Messages {

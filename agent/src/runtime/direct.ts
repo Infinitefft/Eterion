@@ -1,4 +1,6 @@
 import type { ChatOpenAI } from '@langchain/openai';
+import type { BaseCallbackHandler } from '@langchain/core/callbacks/base';
+import { withRunRecording } from '../recording/runtime.js';
 
 import { toPublicModel, type Settings } from '../config.js';
 import { buildModelClients, extractContentDelta } from '../models.js';
@@ -16,7 +18,7 @@ export function createDirectRuntime(
   clients: Map<string, ChatOpenAI> = buildModelClients(settings),
 ): AgentRuntime {
   // 闭包让返回的 stream() 继续访问配置和客户端，无需 class、this 或全局单例。
-  return {
+  return withRunRecording(settings, {
     defaultModelId: settings.defaultModelId,
     models: settings.models.map(toPublicModel),
 
@@ -24,6 +26,7 @@ export function createDirectRuntime(
     async *stream(
       input: RunInput,
       externalSignal?: AbortSignal,
+      recordingCallbacks?: BaseCallbackHandler,
     ): AsyncGenerator<AgentEvent> {
       const model = clients.get(input.model_id);
       if (!model) {
@@ -60,7 +63,10 @@ export function createDirectRuntime(
           { role: 'system', content: settings.systemPrompt },
           ...input.messages,
         ];
-        const chunks = await model.stream(messages, { signal });
+        const chunks = await model.stream(messages, {
+          signal,
+          ...(recordingCallbacks ? { callbacks: [recordingCallbacks] } : {}),
+        });
 
         for await (const chunk of chunks) {
           // 外部取消后，不再转发已经缓冲的正文片段。
@@ -140,7 +146,7 @@ export function createDirectRuntime(
       };
       yield { type: 'run.completed', runId: input.run_id, payload: {} };
     },
-  };
+  });
 }
 
 /** 结束已开始的正文块；失败或取消时仍保留用户已经看到的内容。 */

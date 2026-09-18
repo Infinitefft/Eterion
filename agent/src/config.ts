@@ -1,5 +1,6 @@
 import { config as loadDotenv } from 'dotenv';
 import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 const DEFAULT_SYSTEM_PROMPT = '你是 Eterion 的 AI 助手。请准确、清晰地回答用户问题。';
 
@@ -13,6 +14,8 @@ export interface Settings {
   modelTimeoutMs: number;
   runTimeoutMs: number;
   heartbeatMs: number;
+  recordingEnabled: boolean;
+  recordingPath: string;
 }
 
 export interface ModelConfig {
@@ -97,6 +100,13 @@ export function loadSettings(environ?: NodeJS.ProcessEnv): Settings {
     heartbeatMs: parseDurationMs(
       value(environ, 'AGENT_HEARTBEAT', '15s'),
       'AGENT_HEARTBEAT',
+    ),
+    recordingEnabled: parseRecordingEnabled(value(environ, 'AGENT_RECORDING_ENABLED', 'false')),
+    // 相对路径基于 agent/，保证 src、dist 以及不同启动目录使用同一位置。
+    recordingPath: resolve(
+      fileURLToPath(new URL('../', import.meta.url)),
+      value(environ, 'AGENT_RECORDING_DIR', '../.run-records'),
+      'records.sqlite',
     ),
   };
 }
@@ -183,6 +193,12 @@ function parsePort(raw: string): number {
     throw new Error('AGENT_PORT must be an integer between 1 and 65535');
   }
   return port;
+}
+
+function parseRecordingEnabled(raw: string): boolean {
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new Error('AGENT_RECORDING_ENABLED must be true or false');
 }
 
 function parseDurationMs(raw: string, key: string): number {

@@ -1,5 +1,6 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
+import { recordToolInput } from '../recording/tool-input.js';
 
 const QIANFAN_SEARCH_ENDPOINT =
   'https://qianfan.baidubce.com/v2/ai_search/web_search';
@@ -32,6 +33,7 @@ export function createWebSearchTool(apiKey: string) {
   return tool(
     /** 执行搜索；config 是框架传入的运行配置，其中 signal 用于取消当前 Run。 */
     async ({ query, count }, config) => {
+      await recordToolInput({ query, count }, config);
       // 限制单次搜索等待时间。
       const timeoutSignal = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
       // any() 合并信号：Run 取消或本次请求超时，任意一个发生就中止 fetch。

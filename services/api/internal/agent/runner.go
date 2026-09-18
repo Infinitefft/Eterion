@@ -13,6 +13,7 @@ type Message struct {
 // Input contains the complete conversation required to execute one run.
 type Input struct {
 	RunID    string
+	UserID   string
 	ThreadID string
 	ModelID  string
 	Messages []Message

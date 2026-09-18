@@ -9,6 +9,8 @@ const messageInputSchema = z.object({
 export const runInputSchema = z
   .object({
     run_id: z.string().min(1),
+    // 保留旧调用方兼容；缺少可信用户身份时仅跳过记录，不阻止聊天。
+    user_id: z.string().trim().min(1).optional(),
     thread_id: z.string().min(1),
     model_id: z.string().min(1),
     messages: z.array(messageInputSchema).min(1),

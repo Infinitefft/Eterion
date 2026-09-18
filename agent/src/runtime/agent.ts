@@ -7,6 +7,7 @@ import { buildModelClients, extractContentDelta } from '../models.js';
 import { createWebSearchTool } from '../tools/web-search.js';
 import { webFetch } from '../tools/web-fetch.js';
 import { projectToolResult } from '../tools/presentation.js';
+import { withRunRecording, type RecordingCallbacks } from '../recording/runtime.js';
 import {
   runFailed,
   type AgentError,
@@ -49,7 +50,7 @@ export function createAgentRuntime(
     }));
   }
 
-  return {
+  return withRunRecording(settings, {
     defaultModelId: settings.defaultModelId,
     models: settings.models.map(toPublicModel),
 
@@ -57,6 +58,7 @@ export function createAgentRuntime(
     async *stream(
       input: RunInput,
       externalSignal?: AbortSignal,
+      recordingCallbacks?: RecordingCallbacks,
     ): AsyncGenerator<AgentEvent> {
       const runId = input.run_id;
       const agent = agents.get(input.model_id);
@@ -126,6 +128,7 @@ export function createAgentRuntime(
             streamMode: STREAM_MODES,
             // 外部取消或 Run 超时时，框架停止后续模型与工具调用。
             signal,
+            ...(recordingCallbacks ? { callbacks: [recordingCallbacks] } : {}),
             // 图步数还包括 Middleware，不能直接等于模型调用次数；业务上限由 Middleware 控制。
             recursionLimit: 50,
           },
@@ -213,6 +216,9 @@ export function createAgentRuntime(
               if (!ToolMessage.isInstance(message)) {
                 continue;
               }
+
+              // 在展示投影之前交付完整消息；采集边界自行隔离失败并忽略历史重放。
+              recordingCallbacks?.recordToolMessage?.(message);
 
               // 用调用 ID 关联，不按工具名猜测。
               const toolCallId = message.tool_call_id;
@@ -326,7 +332,7 @@ export function createAgentRuntime(
         yield { type: 'run.completed', runId, payload: {} };
       }
     },
-  };
+  });
 }
 
 /** 工具自身失败和 Run 中断共用同一种事件，避免两处返回结构不一致。 */

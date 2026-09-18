@@ -70,6 +70,38 @@ pnpm dev
 `pnpm typecheck` 检查完整源码，`pnpm test` 构建后运行离线回归测试。
 这些检查不会调用真实模型或搜索服务；`pnpm dev` 本身不进行完整类型检查。
 
+## 可选本地运行记录
+
+记录默认关闭；启用时使用 Node.js 22.19.0 或以上版本。只需在已有 `agent/.env` 中设置
+`AGENT_RECORDING_ENABLED=true`，按需设置 `AGENT_RECORDING_DIR=../.run-records`，然后重启 Agent。
+目录相对 `agent/` 解析，与启动位置无关；首次有用户身份的运行会创建 `records.sqlite`。
+本次实现没有修改本机 `.env` 或主动启动真实模型调用。
+
+Go 从已保存 Run 的用户归属传入可选 `user_id`，需要重启使用新代码的 Go 服务。
+脚本调用 `POST /runs` 时可提供明确的测试用户 ID；旧调用未提供身份时聊天照常执行，跳过记录并提示。
+Agent 是本机内部服务，这个字段不替代登录认证，不应接受不可信客户端直接声明身份。
+
+`src/recording/runtime.ts` 负责 Run 生命周期及模型、工具回调，`store.ts` 负责独立 SQLite。
+记录包含提问、输入历史、各轮实际模型消息（含 System Prompt）、选定的调用参数、模型输出、
+接口公开的推理和用量、时间及状态。数据来自 SDK 消息与回调，不是底层 HTTP 抓包；接口未提供的内容不补造。
+片段在内存合并，开始与结束时写入；失败、取消和提前结束保留部分回复。
+调用参数使用字段白名单，写入前脱敏；记录异常只打印简短提示，不改变对外业务事件。
+若进程被强制终止或存储中途失败，可能留下没有终态的不完整记录。
+
+数据库独立于业务数据库和监控页面，平台不启动也能记录；业务不引用平台代码。
+已接入模型及逐次工具记录；Skills、RAG、平台查询和删除仍待后续阶段。
+
+工具记录保留模型原始参数、工具入口的实际参数、完整 ToolMessage、错误与起止时间。
+每次调用通过模型调用 ID、toolCallId 与框架执行 ID 关联，同名和并行调用各自保存。
+参数解析/校验失败、未知工具、额度拦截记为未执行；真实执行失败与 Run 最终失败分开，
+取消单列。统计时只有实际执行的成功、失败进入成功率分母；未结束或执行事实缺失不推测为成功。
+`tool-input.ts` 用框架内部事件采集校验后的参数，现有两个工具已接入，不产生新的 SSE 事件。
+后续新工具仍可通过通用回调记录结果；若需要准确的转换后参数，也应在函数入口调用此观察函数。
+
+离线最小验证：`pnpm check:record-store`、`pnpm check:model-recording`、`pnpm check:tool-recording`。
+使用假配置、本地模拟模型和临时数据库，结束后自动清理；不读取 `.env`、不调用真实模型。
+Node.js 22.19.0 会显示 SQLite 实验性 API 提示。
+
 ## 服务契约
 
 - `GET /healthz`：返回 `{ "status": "ok" }`。
@@ -81,6 +113,7 @@ pnpm dev
 ```json
 {
   "run_id": "run-1",
+  "user_id": "test-user-1",
   "thread_id": "thread-1",
   "model_id": "deepseek-v4-pro",
   "messages": [{ "role": "user", "content": "你好" }]

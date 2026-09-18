@@ -12,6 +12,8 @@
 !/services/api/docs/spec.go
 /scripts/
 /storage/
+/monitor/
+/.run-records/
 
 # Environment variables and local secrets
 .env

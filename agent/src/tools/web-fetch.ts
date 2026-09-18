@@ -18,6 +18,7 @@ import { tool } from '@langchain/core/tools';
  */
 import * as cheerio from 'cheerio';
 import { z } from 'zod';
+import { recordToolInput } from '../recording/tool-input.js';
 
 /** 单次网页请求最多等待 10 秒。 */
 const FETCH_TIMEOUT_MS = 10_000;
@@ -31,6 +32,7 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 export const webFetch = tool(
   /** 读取公开网页；config.signal 让整轮 Run 结束时也能取消网页请求。 */
   async ({ url, maxCharacters }, config) => {
+    await recordToolInput({ url, maxCharacters }, config);
     /**
      * URL 是 Node.js 内置的标准 URL 解析器。
      * 使用它比手动截取字符串更可靠，也能正确解析协议、域名和端口。
