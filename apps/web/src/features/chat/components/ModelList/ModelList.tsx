@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { fetchChatModels, type ChatModel, type ChatModelCatalog } from '@/api/im';
 import type { ModelId } from '@/service/im/types';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStore } from '@/store/auth-store';
 
 import './ModelList.less';
 

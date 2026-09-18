@@ -1,5 +1,5 @@
 import { createIMTicket } from '@/api/im';
-import { useIMStore } from '@/storeyeji/im';
+import { useIMStore } from '@/store/im-store';
 import { IMService } from './imService';
 import { WebSocketTransport } from './transport';
 

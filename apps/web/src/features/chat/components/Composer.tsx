@@ -3,7 +3,7 @@ import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import { getIMService } from '@/service/im';
 import type { ModelId, RunId, ThreadId } from '@/service/im/types';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStore } from '@/store/auth-store';
 import { useIMStore } from '@/store/imStore';
 
 import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';

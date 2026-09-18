@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 
 import { ensureAuthInitialized } from '@/api/client';
 import { getIMService } from '@/service/im';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStore } from '@/store/auth-store';
 import { useIMStore } from '@/store/imStore';
 
 import type { PropsWithChildren } from 'react';

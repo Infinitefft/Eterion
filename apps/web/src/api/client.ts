@@ -1,7 +1,7 @@
 import axios, { AxiosHeaders } from 'axios';
 
 import { getApiError, isApiErrorCode } from '@/api/errors';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStore } from '@/store/auth-store';
 import type { ApiErrorResponse, ApiResponse } from '@/types/api';
 import type { AuthSession } from '@/types/auth';
 

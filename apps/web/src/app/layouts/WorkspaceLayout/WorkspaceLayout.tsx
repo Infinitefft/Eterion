@@ -9,7 +9,7 @@ import { clearAuthSession, retryAuthInitialization } from '@/api/client';
 import { getApiError } from '@/api/errors';
 import { routePaths } from '@/app/routePaths';
 import { AuthDialog } from '@/components/AuthDialog/AuthDialog';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStore } from '@/store/auth-store';
 import type { AuthUser } from '@/types/auth';
 
 import { ChatHistoryList } from './ChatHistoryList';
