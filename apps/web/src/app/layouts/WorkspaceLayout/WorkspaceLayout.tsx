@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
 import { logout } from '@/api/auth';
-import { clearAuthSession, retryAuthInitialization } from '@/api/client';
+import { retryAuthInitialization } from '@/api/client';
 import { getApiError } from '@/api/errors';
 import { routePaths } from '@/app/routePaths';
 import { AuthDialog } from '@/components/AuthDialog/AuthDialog';
@@ -243,7 +243,6 @@ function AnonymousAccountControl({ bootstrapStatus, onRequestAuth }: AnonymousAc
 function AuthenticatedAccountMenu({ user }: { user: AuthUser }) {
   const logoutMutation = useMutation({
     mutationFn: logout,
-    onSuccess: () => clearAuthSession(),
   });
 
   const logoutError = getApiError(logoutMutation.error);

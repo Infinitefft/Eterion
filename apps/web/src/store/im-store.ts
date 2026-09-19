@@ -24,6 +24,17 @@ type IMLoadState =
 export interface IMStore {
   threads: ThreadRecord[];
 
+  // 当前正在查看的会话由详情页登记，离开会话后恢复为 null。
+  activeThreadId: ThreadId | null;
+
+  // 未读是前端状态，独立保存可避免 HTTP 列表、标题或快照更新覆盖它。
+  // 只记录未读会话；没有对应的键就表示没有未读提醒。
+  unreadByThread: Partial<Record<ThreadId, true>>;
+
+  setActiveThread(threadId: ThreadId | null): void;
+  markThreadUnread(threadId: ThreadId): void;
+  markThreadRead(threadId: ThreadId): void;
+
   // 保存页面的所有内容 
   detailsByThread: Partial<Record<ThreadId, { 
     messages: MessageState[],
@@ -72,6 +83,8 @@ export interface IMStore {
 export const useIMStore = create<IMStore>()(
   immer((set) => ({
     threads: [],
+    activeThreadId: null,
+    unreadByThread: {},
     detailsByThread: {},
     threadListLoadState: { status: 'idle' },
     detailLoadStateByThread: {},
@@ -81,6 +94,27 @@ export const useIMStore = create<IMStore>()(
       connectedAt: null,
       disconnectedAt: null,
       lastError: null,
+    },
+
+    setActiveThread: (threadId) => {
+      set((state) => {
+        // 登记路由不代表内容已展示；清除未读由页面在消息就绪后单独触发。
+        state.activeThreadId = threadId;
+      });
+    },
+
+    markThreadUnread: (threadId) => {
+      set((state) => {
+        // 是否需要提醒由 IM 事件入口判断，这里只通过 Immer 更新状态。
+        state.unreadByThread[threadId] = true;
+      });
+    },
+
+    markThreadRead: (threadId) => {
+      set((state) => {
+        // 删除标记即可清除这一个会话的未读，不影响其他会话。
+        delete state.unreadByThread[threadId];
+      });
     },
 
     applyEnvelope: (event) => {

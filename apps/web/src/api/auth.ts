@@ -1,4 +1,5 @@
-import { apiClient, publicApiClient, refreshAuthSession } from '@/api/client';
+import { apiClient, publicApiClient } from '@/api/client';
+import { useAuthStore } from '@/store/auth-store';
 import type { ApiResponse } from '@/types/api';
 import type { AuthSession, AuthUser, LoginRequest, RegisterRequest } from '@/types/auth';
 
@@ -14,11 +15,6 @@ export async function login(payload: LoginRequest) {
   return response.data.data;
 }
 
-/** 通过 HttpOnly Refresh Token Cookie 换取新的 Access Token。 */
-export function refreshSession() {
-  return refreshAuthSession();
-}
-
 /** 使用当前 Access Token 获取后端确认过的用户信息。 */
 export async function getCurrentUser() {
   const response = await apiClient.get<ApiResponse<AuthUser>>('/auth/me');
@@ -27,5 +23,10 @@ export async function getCurrentUser() {
 
 /** 撤销当前后端会话，并由后端清除 Refresh Token Cookie。 */
 export async function logout() {
-  await apiClient.post('/auth/logout');
+  const { sessionVersion } = useAuthStore.getState();
+  await publicApiClient.post('/auth/logout');
+  const current = useAuthStore.getState();
+  if (current.sessionVersion === sessionVersion) {
+    current.clearSession();
+  }
 }

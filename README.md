@@ -230,8 +230,10 @@ Go API 默认通过 `http://127.0.0.1:8001` 访问 Node Agent，并在启动时�
 - `POST /api/auth/login`
 - `POST /api/auth/refresh`
 - `GET /api/auth/me`（需要 Bearer Access Token）
-- `POST /api/auth/logout`（需要 Bearer Access Token）
+- `POST /api/auth/logout`（使用 Refresh Token Cookie，成功或会话已失效均返回 204）
 - `GET /api/chat/models`（返回已启用模型及默认模型，需要 Bearer Access Token）
+
+认证使用内存中的 Access Token（默认 15 分钟）和 `HttpOnly` Refresh Token Cookie（默认 30 天绝对有效期）；刷新只签发新 AT，不轮换或延长 RT。前端接入、退出及多标签页边界见 [认证接入说明](services/api/AUTH.md)。
 
 ## 查看 Swagger 接口文档
 

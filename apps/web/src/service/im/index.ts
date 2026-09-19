@@ -58,7 +58,20 @@ export function initializeIMService(): IMService {
 
       switch (event.kind) {
         case 'envelope': {
-          store.applyEnvelope(event.envelope);
+          const envelope = event.envelope;
+          store.applyEnvelope(envelope);
+
+          const currentStore = useIMStore.getState();
+
+          // 仅其他会话成功完成的 AI 回复产生未读提醒。
+          if (
+            envelope.type === 'message.completed' &&
+            envelope.payload.role === 'assistant' &&
+            envelope.payload.status === 'completed' &&
+            envelope.threadId !== currentStore.activeThreadId
+          ) {
+            currentStore.markThreadUnread(envelope.threadId);
+          }
           break;
         }
         

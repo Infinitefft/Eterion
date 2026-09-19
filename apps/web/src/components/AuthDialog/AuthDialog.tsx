@@ -6,7 +6,6 @@ import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 
 import { login, register as registerAccount } from '@/api/auth';
-import { commitAuthSession } from '@/api/client';
 import { getApiError } from '@/api/errors';
 import {
   loginSchema,
@@ -15,6 +14,7 @@ import {
   registerSchema,
 } from '@/features/auth/authSchemas';
 import type { LoginFormValues, RegisterFormValues } from '@/features/auth/authSchemas';
+import { useAuthStore } from '@/store/auth-store';
 
 import './AuthDialog.less';
 
@@ -160,7 +160,7 @@ function LoginForm({ phoneId, passwordId, onSuccess }: AuthFormProps) {
   const mutation = useMutation({
     mutationFn: login,
     onSuccess: (session) => {
-      commitAuthSession(session);
+      useAuthStore.getState().setSession(session);
       onSuccess();
     },
     onError: (error) => applyLoginError(error, form.setError),
@@ -234,7 +234,7 @@ function RegisterForm({ phoneId, nicknameId, passwordId, onSuccess }: AuthFormPr
   const mutation = useMutation({
     mutationFn: registerAccount,
     onSuccess: (session) => {
-      commitAuthSession(session);
+      useAuthStore.getState().setSession(session);
       onSuccess();
     },
     onError: (error) => applyRegisterError(error, form.setError),

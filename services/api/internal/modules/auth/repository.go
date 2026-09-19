@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var (
@@ -19,16 +18,12 @@ var (
 )
 
 type Repository interface {
-	WithTransaction(ctx context.Context, fn func(Repository) error) error
 	CreateUserAndSession(ctx context.Context, user *User, session *AuthSession, token *RefreshToken) error
 	CreateSession(ctx context.Context, session *AuthSession, token *RefreshToken) error
 	FindUserByPhone(ctx context.Context, phone string) (*User, error)
 	FindUserByID(ctx context.Context, id uuid.UUID) (*User, error)
 	FindSessionByID(ctx context.Context, id uuid.UUID) (*AuthSession, error)
-	FindRefreshTokenForUpdate(ctx context.Context, tokenHash string) (*RefreshToken, error)
-	FindSessionForUpdate(ctx context.Context, id uuid.UUID) (*AuthSession, error)
-	CreateRefreshToken(ctx context.Context, token *RefreshToken) error
-	MarkRefreshTokenUsed(ctx context.Context, id, replacementID uuid.UUID, usedAt time.Time) error
+	FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error)
 	RevokeSessionAndTokens(ctx context.Context, sessionID uuid.UUID, revokedAt time.Time) error
 }
 
@@ -38,12 +33,6 @@ type GormRepository struct {
 
 func NewRepository(db *gorm.DB) *GormRepository {
 	return &GormRepository{db: db}
-}
-
-func (r *GormRepository) WithTransaction(ctx context.Context, fn func(Repository) error) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(&GormRepository{db: tx})
-	})
 }
 
 func (r *GormRepository) CreateUserAndSession(
@@ -111,10 +100,9 @@ func (r *GormRepository) FindSessionByID(ctx context.Context, id uuid.UUID) (*Au
 	return &session, nil
 }
 
-func (r *GormRepository) FindRefreshTokenForUpdate(ctx context.Context, tokenHash string) (*RefreshToken, error) {
+func (r *GormRepository) FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error) {
 	var token RefreshToken
 	err := r.db.WithContext(ctx).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("token_hash = ?", tokenHash).
 		First(&token).Error
 	if err != nil {
@@ -122,43 +110,6 @@ func (r *GormRepository) FindRefreshTokenForUpdate(ctx context.Context, tokenHas
 	}
 	return &token, nil
 }
-
-func (r *GormRepository) FindSessionForUpdate(ctx context.Context, id uuid.UUID) (*AuthSession, error) {
-	var session AuthSession
-	err := r.db.WithContext(ctx).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ?", id).
-		First(&session).Error
-	if err != nil {
-		return nil, mapNotFound(err)
-	}
-	return &session, nil
-}
-
-func (r *GormRepository) CreateRefreshToken(ctx context.Context, token *RefreshToken) error {
-	if err := r.db.WithContext(ctx).Create(token).Error; err != nil {
-		return fmt.Errorf("create replacement refresh token: %w", err)
-	}
-	return nil
-}
-
-func (r *GormRepository) MarkRefreshTokenUsed(
-	ctx context.Context,
-	id, replacementID uuid.UUID,
-	usedAt time.Time,
-) error {
-	result := r.db.WithContext(ctx).Model(&RefreshToken{}).
-		Where("id = ? AND used_at IS NULL", id).
-		Updates(map[string]any{"used_at": usedAt, "replaced_by_id": replacementID})
-	if result.Error != nil {
-		return fmt.Errorf("consume refresh token: %w", result.Error)
-	}
-	if result.RowsAffected != 1 {
-		return errors.New("consume refresh token: token state changed")
-	}
-	return nil
-}
-
 func (r *GormRepository) RevokeSessionAndTokens(
 	ctx context.Context,
 	sessionID uuid.UUID,

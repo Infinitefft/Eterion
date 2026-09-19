@@ -134,105 +134,68 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*AuthRes
 
 	now := s.now()
 	tokenHash := HashRefreshToken(rawRefreshToken)
-	var result *AuthResult
-	var authErr *apperrors.Error
+	current, err := s.repository.FindRefreshToken(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, invalidRefreshError()
+		}
+		return nil, err
+	}
+	if current.UsedAt != nil {
+		return nil, apperrors.New(
+			http.StatusUnauthorized,
+			"AUTH_REFRESH_REUSED",
+			"刷新凭证已被重复使用，请重新登录",
+			"LOGIN_AGAIN",
+		)
+	}
+	if current.RevokedAt != nil {
+		return nil, invalidRefreshError()
+	}
+	if !now.Before(current.ExpiresAt) {
+		return nil, apperrors.New(
+			http.StatusUnauthorized,
+			"AUTH_REFRESH_EXPIRED",
+			"登录状态已过期，请重新登录",
+			"LOGIN_AGAIN",
+		)
+	}
 
-	err := s.repository.WithTransaction(ctx, func(repository Repository) error {
-		current, err := repository.FindRefreshTokenForUpdate(ctx, tokenHash)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				authErr = invalidRefreshError()
-				return nil
-			}
-			return err
+	session, err := s.repository.FindSessionByID(ctx, current.SessionID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, invalidRefreshError()
 		}
+		return nil, err
+	}
+	if session.RevokedAt != nil {
+		return nil, invalidRefreshError()
+	}
+	if !now.Before(session.ExpiresAt) {
+		return nil, apperrors.New(
+			http.StatusUnauthorized,
+			"AUTH_REFRESH_EXPIRED",
+			"登录状态已过期，请重新登录",
+			"LOGIN_AGAIN",
+		)
+	}
 
-		session, err := repository.FindSessionForUpdate(ctx, current.SessionID)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				authErr = invalidRefreshError()
-				return nil
-			}
-			return err
+	user, err := s.repository.FindUserByID(ctx, session.UserID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, invalidRefreshError()
 		}
+		return nil, err
+	}
+	if user.Status != UserStatusActive {
+		return nil, accountDisabledError()
+	}
 
-		if current.UsedAt != nil {
-			if err := repository.RevokeSessionAndTokens(ctx, session.ID, now); err != nil {
-				return err
-			}
-			authErr = apperrors.New(
-				http.StatusUnauthorized,
-				"AUTH_REFRESH_REUSED",
-				"刷新凭证已被重复使用，请重新登录",
-				"LOGIN_AGAIN",
-			)
-			return nil
-		}
-		if current.RevokedAt != nil || session.RevokedAt != nil {
-			authErr = invalidRefreshError()
-			return nil
-		}
-		if !now.Before(current.ExpiresAt) || !now.Before(session.ExpiresAt) {
-			authErr = apperrors.New(
-				http.StatusUnauthorized,
-				"AUTH_REFRESH_EXPIRED",
-				"登录状态已过期，请重新登录",
-				"LOGIN_AGAIN",
-			)
-			return nil
-		}
-
-		user, err := repository.FindUserByID(ctx, session.UserID)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				authErr = invalidRefreshError()
-				return nil
-			}
-			return err
-		}
-		if user.Status != UserStatusActive {
-			if err := repository.RevokeSessionAndTokens(ctx, session.ID, now); err != nil {
-				return err
-			}
-			authErr = accountDisabledError()
-			return nil
-		}
-
-		rawReplacement, err := GenerateRefreshToken()
-		if err != nil {
-			return err
-		}
-		accessToken, accessExpiresAt, err := s.tokens.CreateAccessToken(user.ID, session.ID, now)
-		if err != nil {
-			return err
-		}
-		replacement := &RefreshToken{
-			ID:        uuid.New(),
-			SessionID: session.ID,
-			TokenHash: HashRefreshToken(rawReplacement),
-			ExpiresAt: session.ExpiresAt,
-			CreatedAt: now,
-		}
-		if err := repository.CreateRefreshToken(ctx, replacement); err != nil {
-			return err
-		}
-		if err := repository.MarkRefreshTokenUsed(ctx, current.ID, replacement.ID, now); err != nil {
-			return err
-		}
-
-		result = makeAuthResult(user, accessToken, accessExpiresAt, rawReplacement, session.ExpiresAt, now)
-		return nil
-	})
+	accessToken, accessExpiresAt, err := s.tokens.CreateAccessToken(user.ID, session.ID, now)
 	if err != nil {
 		return nil, err
 	}
-	if authErr != nil {
-		return nil, authErr
-	}
-	if result == nil {
-		return nil, errors.New("refresh completed without an authentication result")
-	}
-	return result, nil
+	return makeAuthResult(user, accessToken, accessExpiresAt, rawRefreshToken, session.ExpiresAt, now), nil
 }
 
 func (s *Service) AuthenticateAccess(ctx context.Context, rawAccessToken string) (*Identity, error) {
@@ -287,8 +250,22 @@ func (s *Service) AuthenticateAccess(ctx context.Context, rawAccessToken string)
 	}, nil
 }
 
-func (s *Service) Logout(ctx context.Context, sessionID uuid.UUID) error {
-	return s.repository.RevokeSessionAndTokens(ctx, sessionID, s.now())
+func (s *Service) Logout(ctx context.Context, rawRefreshToken string) error {
+	if rawRefreshToken == "" || ValidateRefreshToken(rawRefreshToken) != nil {
+		return nil
+	}
+
+	current, err := s.repository.FindRefreshToken(ctx, HashRefreshToken(rawRefreshToken))
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if current.UsedAt != nil || current.RevokedAt != nil || !s.now().Before(current.ExpiresAt) {
+		return nil
+	}
+	return s.repository.RevokeSessionAndTokens(ctx, current.SessionID, s.now())
 }
 
 func (s *Service) newSession(user *User, now time.Time) (*AuthResult, *AuthSession, *RefreshToken, error) {

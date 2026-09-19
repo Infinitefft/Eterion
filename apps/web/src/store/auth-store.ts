@@ -16,11 +16,9 @@ type AuthState = {
   user: AuthUser | null;
   /** 启动恢复状态，用于控制账户入口的加载、正常和重试界面。 */
   bootstrapStatus: AuthBootstrapStatus;
-  /**
-   * 会话变化版本号，用于让局部 UI 感知登录或退出事件，避免旧弹窗再次打开。
-   */
+  /** 身份建立或退出时递增，防止旧请求覆盖新会话；普通 AT 续期不递增。 */
   sessionVersion: number;
-  /** 原子写入 Access Token 和用户信息。 */
+  /** 建立新的登录身份，包括同一账号重新登录。 */
   setSession: (session: AuthSession) => void;
   /** 原子清空本地认证会话。 */
   clearSession: () => void;

@@ -72,7 +72,7 @@ func (h *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	authGroup.POST("/login", h.Login)
 	authGroup.POST("/refresh", h.Refresh)
 	authGroup.GET("/me", h.RequireAccessToken(), h.Me)
-	authGroup.POST("/logout", h.RequireAccessToken(), h.Logout)
+	authGroup.POST("/logout", h.Logout)
 }
 
 func (h *Handler) Register(c *gin.Context) {
@@ -121,14 +121,9 @@ func (h *Handler) Refresh(c *gin.Context) {
 	}
 	result, err := h.service.Refresh(c.Request.Context(), rawRefreshToken)
 	if err != nil {
-		var appErr *apperrors.Error
-		if errors.As(err, &appErr) && appErr.Status >= 400 && appErr.Status < 500 {
-			h.clearRefreshCookie(c)
-		}
 		h.handleError(c, err)
 		return
 	}
-	h.setRefreshCookie(c, result.RefreshToken, result.RefreshExpiresAt)
 	response.JSON(c, http.StatusOK, result.Response)
 }
 
@@ -142,12 +137,22 @@ func (h *Handler) Me(c *gin.Context) {
 }
 
 func (h *Handler) Logout(c *gin.Context) {
-	identity, ok := IdentityFromContext(c)
-	if !ok {
-		h.handleError(c, errors.New("authenticated identity is missing from context"))
+	if origin := c.GetHeader("Origin"); origin != "" && !h.config.IsAllowedOrigin(origin) {
+		response.Error(c, apperrors.New(
+			http.StatusForbidden,
+			"AUTH_ORIGIN_FORBIDDEN",
+			"请求来源不受信任",
+			"USE_ALLOWED_ORIGIN",
+		))
 		return
 	}
-	if err := h.service.Logout(c.Request.Context(), identity.SessionID); err != nil {
+
+	rawRefreshToken, err := c.Cookie(h.config.RefreshCookieName)
+	if err != nil && !errors.Is(err, http.ErrNoCookie) {
+		h.handleError(c, err)
+		return
+	}
+	if err := h.service.Logout(c.Request.Context(), rawRefreshToken); err != nil {
 		h.handleError(c, err)
 		return
 	}

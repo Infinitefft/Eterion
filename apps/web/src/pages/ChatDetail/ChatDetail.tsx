@@ -5,14 +5,14 @@ import { routePaths } from '@/app/routePaths';
 import { ChatConversation } from '@/features/chat/components/ChatConversation';
 import { Composer } from '@/features/chat/components/Composer';
 import type { ThreadId } from '@/service/im/types';
-import { useIMStore } from '@/store/imStore';
+import { useIMStore } from '@/store/im-store';
 
 import './ChatDetail.less';
 
 /** Snapshot 成功且用户仍停留在这个 Thread 时，才把会话标记为已读。 */
 async function synchronizeVisibleThread(threadId: ThreadId): Promise<void> {
   await useIMStore.getState().synchronizeThread(threadId);
-
+s
   const store = useIMStore.getState();
   if (store.activeThreadId === threadId) {
     store.markThreadRead(threadId);

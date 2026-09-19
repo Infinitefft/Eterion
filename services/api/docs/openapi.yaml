@@ -14,7 +14,7 @@ tags:
   - name: Health
     description: 服务健康状态
   - name: Auth
-    description: 注册、登录、JWT 鉴权、Refresh Token 轮换和退出登录
+    description: 注册、登录、JWT 鉴权、固定有效期 Refresh Token 续期和退出登录
   - name: Chat
     description: 对话、模型目录和实时消息接口
 
@@ -150,23 +150,21 @@ paths:
       operationId: refreshAccessToken
       summary: 使用 RT 刷新 AT
       description: |
-        从 `eterion_rt` HttpOnly Cookie 读取 RT。在数据库事务中消费旧 RT、
-        创建替代 RT 并签发新 AT。Swagger UI 与 API 同源，注册或登录成功后
-        浏览器会自动保存 Cookie，可直接调用此接口。
+        从 `eterion_rt` HttpOnly Cookie 读取 RT，签发新 AT，响应 DTO 与登录相同。
+        不轮换 RT、不延长其默认 30 天的绝对有效期，也不写入 Set-Cookie。
+        历史轮换机制留下的已使用 RT 仍拒绝刷新，但不会因此撤销有效会话。
+        Swagger UI 与 API 同源，注册或登录成功后浏览器会自动保存 Cookie。
       security:
         - refreshCookie: []
       responses:
         "200":
-          description: Token 轮换成功
-          headers:
-            Set-Cookie:
-              $ref: "#/components/headers/RefreshTokenCookie"
+          description: 刷新 AT 成功；不写入 Refresh Token Cookie
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthSuccessResponse"
         "401":
-          description: RT 缺失、无效、过期、已撤销或发生重放
+          description: RT 缺失、无效、过期、已撤销，或历史 RT 已使用
           content:
             application/json:
               schema:
@@ -191,6 +189,7 @@ paths:
                       message: 登录状态已过期，请重新登录
                       next_action: LOGIN_AGAIN
                 reused:
+                  summary: 历史已使用 RT 不可继续刷新，但不撤销有效会话
                   value:
                     error:
                       code: AUTH_REFRESH_REUSED
@@ -245,19 +244,31 @@ paths:
       tags: [Auth]
       operationId: logout
       summary: 退出当前登录会话
-      description: 撤销 AT 中 sid 对应的会话及其全部 RT，并清除 RT Cookie；当前会话签发的旧 AT 会立即失效。
+      description: |
+        从 `eterion_rt` HttpOnly Cookie 读取 RT，撤销对应认证会话并清除 Cookie。
+        缺失、无效、过期或已撤销的 RT 也清除 Cookie 并返回 204，便于幂等退出。
+        当前会话的旧 AT 随会话撤销失效；不保证立即断开其他标签页已建立的 WebSocket。
+        携带 Origin 的请求必须来自允许的来源。
       security:
-        - accessBearer: []
+        - refreshCookie: []
+        - {}
       responses:
         "204":
-          description: 退出成功
+          description: 已退出或本来就无有效登录会话
           headers:
             Set-Cookie:
               $ref: "#/components/headers/ClearedRefreshTokenCookie"
-        "401":
-          $ref: "#/components/responses/AccessUnauthorized"
         "403":
-          $ref: "#/components/responses/AccountForbidden"
+          description: 请求 Origin 不受信任
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: AUTH_ORIGIN_FORBIDDEN
+                  message: 请求来源不受信任
+                  next_action: USE_ALLOWED_ORIGIN
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -312,12 +323,12 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: 注册、登录或刷新成功后，通过 JSON 返回的 Access Token。
+      description: 注册、登录或刷新成功后，通过 JSON 返回的 Access Token；默认有效 15 分钟。
     refreshCookie:
       type: apiKey
       in: cookie
       name: eterion_rt
-      description: 登录或注册成功后由服务端设置的 HttpOnly Refresh Token Cookie。
+      description: 登录或注册成功后由服务端设置的 HttpOnly Refresh Token Cookie；默认 30 天绝对有效期，刷新不轮换。
 
   headers:
     RefreshTokenCookie:
