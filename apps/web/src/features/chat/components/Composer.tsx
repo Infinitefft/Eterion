@@ -1,16 +1,22 @@
 import { ArrowUp, LoaderCircle, Paperclip, Square } from 'lucide-react';
-import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import { getIMService } from '@/service/im';
-import type { ModelId, RunId, ThreadId } from '@/service/im/types';
+import type { MessageId, ModelId, ProtocolError, RunId, ThreadId } from '@/service/im/types';
 import { useAuthStore } from '@/store/auth-store';
-import { useIMStore } from '@/store/imStore';
+import { useIMStore } from '@/store/im-store';
 
+import { selectActiveRunId, selectIsChatBusy } from '../model/chatSelectors';
 import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';
 import ModelList from './ModelList/ModelList';
 
 interface ComposerProps {
   threadId: ThreadId;
+}
+
+interface ComposerView {
+  sessionVersion: number;
+  cancelRequestedRunId: RunId | null;
 }
 
 const TEXTAREA_MIN_HEIGHT = 44;
@@ -31,42 +37,90 @@ export function Composer({ threadId }: ComposerProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const user = useAuthStore((state) => state.user);
+  const sessionVersion = useAuthStore((state) => state.sessionVersion);
+  const [scope, setScope] = useState({ threadId, sessionVersion });
+  const viewRef = useRef<ComposerView | null>(null);
+
+  // 草稿和模型沿用，只有与旧会话请求有关的临时状态需要重置。
+  if (scope.threadId !== threadId || scope.sessionVersion !== sessionVersion) {
+    setScope({ threadId, sessionVersion });
+    setIsSubmitting(false);
+    setCancelRequestedRunId(null);
+    setSubmitError(null);
+  }
+
+  useLayoutEffect(() => {
+    viewRef.current = { sessionVersion: scope.sessionVersion, cancelRequestedRunId: null };
+    return () => { viewRef.current = null; };
+  }, [scope]);
+
   const snapshotStatus = useIMStore(
-    (state) => state.detailsByThread[threadId]?.snapshotStatus ?? 'idle',
+    (state) => state.detailLoadStateByThread[threadId]?.status ?? 'idle',
   );
-  const activeRunId = useIMStore((state) => {
-    const runs = state.detailsByThread[threadId]?.runs ?? [];
-
-    for (let index = runs.length - 1; index >= 0; index -= 1) {
-      const run = runs[index];
-
-      if (run.status === 'pending' || run.status === 'running' || run.status === 'waiting_user') {
-        return run.id;
-      }
-    }
-
-    return null;
-  });
+  const activeRunId = useIMStore((state) => selectActiveRunId(state, threadId));
+  const isThreadBusy = useIMStore((state) => selectIsChatBusy(state, threadId));
+  const isConnected = useIMStore((state) => state.connection.status === 'connected');
   const isThreadReady = snapshotStatus === 'ready';
-  const isThreadBusy = activeRunId !== null;
 
   const normalizedPrompt = prompt.trim();
   const isCancelling = activeRunId !== null && cancelRequestedRunId === activeRunId;
   const canSubmit =
-    user !== null && isThreadReady && normalizedPrompt.length > 0 && !isThreadBusy && !isSubmitting;
+    user !== null && isThreadReady && isConnected && normalizedPrompt.length > 0 &&
+    !isThreadBusy && !isSubmitting;
+
+  function isCurrentView(view: ComposerView | null): view is ComposerView {
+    return view !== null && viewRef.current === view &&
+      useAuthStore.getState().sessionVersion === view.sessionVersion;
+  }
 
   function handlePromptChange(event: ChangeEvent<HTMLTextAreaElement>) {
     setPrompt(event.target.value);
     setSubmitError(null);
   }
 
+  // 保持发送前校验、乐观更新和 ACK 处理在同一条流程，便于核对状态顺序。
+  // eslint-disable-next-line complexity
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!canSubmit) return;
+    const view = viewRef.current;
+    const store = useIMStore.getState();
+    if (
+      !canSubmit || !isCurrentView(view) ||
+      store.connection.status !== 'connected' ||
+      store.detailLoadStateByThread[threadId]?.status !== 'ready' ||
+      selectIsChatBusy(store, threadId)
+    ) return;
 
     setIsSubmitting(true);
     setSubmitError(null);
+    let messageId: MessageId | null = null;
+
+    function handleFailure(error: ProtocolError) {
+      if (useAuthStore.getState().sessionVersion !== sessionVersion) return;
+
+      if (messageId !== null) {
+        const currentStore = useIMStore.getState();
+        const message = currentStore.detailsByThread[threadId]?.messages.find(
+          (item) => item.id === messageId,
+        );
+        // 已确认或已删除的消息，不受迟到的 ACK 错误影响。
+        if (message?.status !== 'sending') return;
+        currentStore.failSendingMessage(threadId, messageId, error);
+      }
+
+      if (!isCurrentView(view)) return;
+      setPrompt((current) => (current.length === 0 ? normalizedPrompt : current));
+      setSubmitError(error.message);
+      window.requestAnimationFrame(() => {
+        if (isCurrentView(view) && textareaRef.current) {
+          resizeComposerTextarea(textareaRef.current, {
+            minHeight: TEXTAREA_MIN_HEIGHT,
+            maxHeight: TEXTAREA_MAX_HEIGHT,
+          });
+        }
+      });
+    }
 
     try {
       /** ACK 只确认服务端接收；消息和 Run 最终仍由 Envelope 写入 Store。 */
@@ -75,6 +129,8 @@ export function Composer({ threadId }: ComposerProps) {
         content: normalizedPrompt,
         modelId: selectedModelId ?? undefined,
       });
+      messageId = dispatch.command.messageId;
+      useIMStore.getState().addSendingMessage(threadId, messageId, normalizedPrompt);
 
       setPrompt('');
       if (textareaRef.current) {
@@ -85,40 +141,47 @@ export function Composer({ threadId }: ComposerProps) {
       const ack = await dispatch.ack;
 
       if (!ack.ok) {
-        throw new Error(ack.error.message);
+        handleFailure(ack.error);
       }
     } catch (error) {
-      /** 服务端没有接收时恢复原文；用户已经输入新内容则不覆盖。 */
-      setPrompt((current) => (current.length === 0 ? normalizedPrompt : current));
-      window.requestAnimationFrame(() => {
-        if (textareaRef.current) {
-          resizeComposerTextarea(textareaRef.current, {
-            minHeight: TEXTAREA_MIN_HEIGHT,
-            maxHeight: TEXTAREA_MAX_HEIGHT,
-          });
-        }
+      handleFailure({
+        code: 'CLIENT_SEND_FAILED',
+        message: error instanceof Error ? error.message : '消息发送失败，请稍后重试',
       });
-      setSubmitError(error instanceof Error ? error.message : '消息发送失败，请稍后重试');
     } finally {
-      setIsSubmitting(false);
-      textareaRef.current?.focus();
+      if (isCurrentView(view)) {
+        setIsSubmitting(false);
+        textareaRef.current?.focus();
+      }
     }
   }
 
   async function handleCancelRun() {
-    if (!activeRunId || isCancelling) return;
+    const view = viewRef.current;
+    const store = useIMStore.getState();
+    const runId = selectActiveRunId(store, threadId);
+    if (
+      !isCurrentView(view) || !runId || view.cancelRequestedRunId === runId ||
+      store.connection.status !== 'connected'
+    ) return;
 
-    setCancelRequestedRunId(activeRunId);
+    // 同步锁住本次 Run，避免 React 提交下一次渲染前连续点击重复取消。
+    view.cancelRequestedRunId = runId;
+    setCancelRequestedRunId(runId);
     setSubmitError(null);
 
     try {
-      const dispatch = getIMService().cancelRun({ threadId, runId: activeRunId });
+      const dispatch = getIMService().cancelRun({ threadId, runId });
       const ack = await dispatch.ack;
 
       if (!ack.ok) {
         throw new Error(ack.error.message);
       }
     } catch (error) {
+      if (!isCurrentView(view) || selectActiveRunId(useIMStore.getState(), threadId) !== runId) {
+        return;
+      }
+      view.cancelRequestedRunId = null;
       setCancelRequestedRunId(null);
       setSubmitError(error instanceof Error ? error.message : '停止生成失败，请稍后重试');
     }
@@ -184,7 +247,7 @@ export function Composer({ threadId }: ComposerProps) {
               className='chat-detail-send-button is-stop'
               type='button'
               aria-label='停止生成'
-              disabled={isCancelling}
+              disabled={isCancelling || !isConnected}
               onClick={() => {
                 void handleCancelRun();
               }}

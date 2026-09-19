@@ -84,8 +84,7 @@ function ThreadHistoryItem({ threadId, onNavigate }: ThreadHistoryItemProps) {
   });
   const isGenerating = latestRunStatus === 'pending' || latestRunStatus === 'running';
   const isWaitingForAnswer = latestRunStatus === 'waiting_user';
-  // TODO：下一模块接入 Store 的全局未读状态；这里先保留原红点 UI，不伪造未读数据。
-  const hasUnread = false;
+  const hasUnread = useIMStore((state) => state.unreadByThread[threadId] === true);
   const location = useLocation();
   const navigate = useNavigate();
   const saveInFlightRef = useRef(false);
@@ -183,6 +182,7 @@ function ThreadHistoryItem({ threadId, onNavigate }: ThreadHistoryItemProps) {
         delete state.detailsByThread[threadId];
         delete state.detailLoadStateByThread[threadId];
       });
+      useIMStore.getState().markThreadRead(threadId);
       if (location.pathname === threadPath) {
         void navigate(routePaths.chat, { replace: true });
       }

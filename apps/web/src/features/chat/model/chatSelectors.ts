@@ -1,8 +1,13 @@
-import type { RunId, RunStatus, ThreadId } from '@/service/im/types';
-import type { IMStore } from '@/store/imStore';
-
-/** PendingAssistant 使用的稳定占位值，不会与 UUID 格式的 RunId 冲突。 */
-export const PENDING_ASSISTANT_WAITING_FOR_RUN = '__waiting_for_agent_run__';
+import type {
+  AgentBlockState,
+  MessageId,
+  MessageState,
+  RunId,
+  RunState,
+  RunStatus,
+  ThreadId,
+} from '@/service/im/types';
+import type { IMStore } from '@/store/im-store';
 
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(['pending', 'running', 'waiting_user']);
 
@@ -51,26 +56,41 @@ export function selectIsChatBusy(state: IMStore, threadId: ThreadId): boolean {
   return matchingRun ? isRunActive(matchingRun.status) : true;
 }
 
-/** 决定是否需要在用户消息后展示等待 Agent 的临时 Assistant 区域。 */
-export function selectPendingAssistantKey(state: IMStore, threadId: ThreadId): string | null {
-  const detail = state.detailsByThread[threadId];
-  const latestMessage = detail?.messages[detail.messages.length - 1];
+/** 当前会话各用户消息后的过程区域；值为 null 表示正在等待 Run，缺少 key 表示不展示。 */
+export function getAssistantPlaceholders(
+  messages: readonly MessageState[],
+  runs: readonly RunState[],
+  blocks: readonly AgentBlockState[],
+): Map<MessageId, RunId | null> {
+  const userMessageIds = new Set(
+    messages.filter((message) => message.role === 'user').map((message) => message.id),
+  );
+  const outputMessageIds = new Set(
+    messages.filter((message) => message.role === 'assistant').map((message) => message.id),
+  );
+  const runsByInput = new Map(runs.map((run) => [run.inputMessageId, run]));
+  const runsWithBlocks = new Set(blocks.map((block) => block.runId));
+  const placeholders = new Map<MessageId, RunId | null>();
 
-  if (!detail || !latestMessage || latestMessage.role !== 'user') return null;
-
-  if (latestMessage.status !== 'sending' && latestMessage.status !== 'completed') {
-    return null;
+  for (const [inputMessageId, run] of runsByInput) {
+    if (!userMessageIds.has(inputMessageId) || outputMessageIds.has(run.outputMessageId)) {
+      continue;
+    }
+    // 已完成且没有正文或过程的 Run 不应留下只有头像的空区域。
+    if (run.status === 'completed' && !runsWithBlocks.has(run.id)) {
+      continue;
+    }
+    placeholders.set(inputMessageId, run.id);
   }
 
-  for (let index = detail.runs.length - 1; index >= 0; index -= 1) {
-    const run = detail.runs[index];
-
-    if (run.inputMessageId !== latestMessage.id) continue;
-
-    const hasOutputMessage = detail.messages.some((message) => message.id === run.outputMessageId);
-
-    return hasOutputMessage ? null : run.id;
+  const latestMessage = messages.at(-1);
+  if (
+    latestMessage?.role === 'user' &&
+    ['sending', 'completed'].includes(latestMessage.status) &&
+    !runsByInput.has(latestMessage.id)
+  ) {
+    placeholders.set(latestMessage.id, null);
   }
 
-  return PENDING_ASSISTANT_WAITING_FOR_RUN;
+  return placeholders;
 }

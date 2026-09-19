@@ -2,7 +2,7 @@ import { ArrowDown } from 'lucide-react';
 import { useEffect, useRef, useState, type UIEvent } from 'react';
 
 import type { ThreadId } from '@/service/im/types';
-import { useIMStore } from '@/store/imStore';
+import { useIMStore } from '@/store/im-store';
 
 import { ChatMessageList } from './ChatMessageList';
 

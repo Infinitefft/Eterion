@@ -1,14 +1,15 @@
-import {
-  PENDING_ASSISTANT_WAITING_FOR_RUN,
-  selectPendingAssistantKey,
-} from '@/features/chat/model/chatSelectors';
-import type { MessageState, ThreadId } from '@/service/im/types';
-import { useIMStore } from '@/store/imStore';
+import { Fragment } from 'react';
+
+import { getAssistantPlaceholders } from '@/features/chat/model/chatSelectors';
+import type { AgentBlockState, MessageState, RunId, RunState, ThreadId } from '@/service/im/types';
+import { useIMStore } from '@/store/im-store';
 
 import { AgentRunTrace } from './agent/AgentRunTrace';
 import { ThinkingIndicator } from './agent/ThinkingIndicator';
 
 const EMPTY_MESSAGES: MessageState[] = [];
+const EMPTY_RUNS: RunState[] = [];
+const EMPTY_BLOCKS: AgentBlockState[] = [];
 
 interface ChatMessageListProps {
   threadId: ThreadId;
@@ -71,7 +72,7 @@ function getAssistantStatus(message: MessageState): string | null {
 /** Assistant 正文及其关联 Run 的公开过程。 */
 function AssistantMessage({ message }: MessageProps) {
   const statusText = getAssistantStatus(message);
-  const isStreaming = message.status === 'sending' || message.status === 'streaming';
+  const isStreaming = message.status === 'streaming';
   const isWaitingForContent = isStreaming && !message.content;
   const isError = message.status === 'failed';
 
@@ -115,24 +116,20 @@ function AssistantMessage({ message }: MessageProps) {
   );
 }
 
-/** 用户消息后、Assistant 正式 Message 尚未出现时的过渡区域。 */
-function PendingAssistantMessage({ threadId }: { threadId: ThreadId }) {
-  const pendingKey = useIMStore((state) => selectPendingAssistantKey(state, threadId));
-
-  if (!pendingKey) return null;
-
+/** 正式 AI 消息出现前的过程区域，也保留没有正文的历史运行结果。 */
+function PendingAssistantMessage({ threadId, runId }: { threadId: ThreadId; runId: RunId | null }) {
   return (
     <article className='chat-message-row chat-message-row-assistant' aria-live='polite'>
       <div className='chat-assistant-avatar' aria-hidden='true'>
         <img src='/eterion-icon-transparent.png' alt='' />
       </div>
       <div className='chat-assistant-content'>
-        {pendingKey === PENDING_ASSISTANT_WAITING_FOR_RUN ? (
+        {runId === null ? (
           <p className='chat-assistant-thinking'>
             <ThinkingIndicator />
           </p>
         ) : (
-          <AgentRunTrace threadId={threadId} runId={pendingKey} />
+          <AgentRunTrace threadId={threadId} runId={runId} />
         )}
       </div>
     </article>
@@ -144,6 +141,8 @@ export function ChatMessageList({ threadId }: ChatMessageListProps) {
   const messages = useIMStore(
     (state) => state.detailsByThread[threadId]?.messages ?? EMPTY_MESSAGES,
   );
+  const runs = useIMStore((state) => state.detailsByThread[threadId]?.runs ?? EMPTY_RUNS);
+  const blocks = useIMStore((state) => state.detailsByThread[threadId]?.blocks ?? EMPTY_BLOCKS);
 
   if (messages.length === 0) {
     return (
@@ -154,16 +153,23 @@ export function ChatMessageList({ threadId }: ChatMessageListProps) {
     );
   }
 
+  const placeholders = getAssistantPlaceholders(messages, runs, blocks);
+
   return (
     <div className='chat-message-list' role='log' aria-label='会话消息'>
-      {messages.map((message) =>
-        message.role === 'user' ? (
-          <UserMessage key={message.id} message={message} />
+      {messages.map((message) => {
+        const runId = placeholders.get(message.id);
+        return message.role === 'user' ? (
+          <Fragment key={message.id}>
+            <UserMessage message={message} />
+            {runId !== undefined ? (
+              <PendingAssistantMessage threadId={threadId} runId={runId} />
+            ) : null}
+          </Fragment>
         ) : (
           <AssistantMessage key={message.id} message={message} />
-        ),
-      )}
-      <PendingAssistantMessage threadId={threadId} />
+        );
+      })}
     </div>
   );
 }

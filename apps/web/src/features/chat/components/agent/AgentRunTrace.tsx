@@ -14,7 +14,7 @@ import type {
   ThreadId,
   ToolCallBlockState,
 } from '@/service/im/types';
-import { useIMStore } from '@/store/imStore';
+import { useIMStore } from '@/store/im-store';
 
 import { ThinkingIndicator } from './ThinkingIndicator';
 
