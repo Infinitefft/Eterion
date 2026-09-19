@@ -3,7 +3,7 @@ import { useState } from 'react';
 
 import { getIMService } from '@/service/im';
 import type { IMConnectionStatus } from '@/service/im/transport';
-import { useIMStore } from '@/store/imStore';
+import { useIMStore } from '@/store/im-store';
 
 const CONNECTION_LABELS: Record<IMConnectionStatus, string> = {
   disabled: '连接未启用',

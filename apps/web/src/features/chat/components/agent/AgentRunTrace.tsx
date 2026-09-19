@@ -1,27 +1,28 @@
 import { Ban, Check, CircleAlert, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 
+import { getAssistantContentParts } from '@/features/chat/model/chatSelectors';
 import { getIMService } from '@/service/im';
 import type {
   AgentBlockState,
   HITLAnswer,
   HITLInteractionState,
   HITLQuestion,
-  JsonValue,
   RunId,
   RunState,
   RunStatus,
   ThreadId,
-  ToolCallBlockState,
 } from '@/service/im/types';
 import { useIMStore } from '@/store/im-store';
 
 import { ThinkingIndicator } from './ThinkingIndicator';
+import { ToolCallItem } from './ToolCallItem';
 
 interface AgentRunTraceProps {
   threadId: ThreadId;
   runId: RunId;
   hideThinkingIndicator?: boolean;
+  content?: string;
 }
 
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(['pending', 'running', 'waiting_user']);
@@ -40,29 +41,6 @@ function getRunStatusLabel(run: RunState): string {
       return '本次运行已停止';
     case 'completed':
       return 'Agent 过程';
-  }
-}
-
-function formatJsonValue(value: JsonValue | null): string | null {
-  if (value === null) return null;
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value);
-}
-
-function getToolLabel(block: ToolCallBlockState): string {
-  const name = block.displayName || block.name;
-
-  switch (block.status) {
-    case 'running': {
-      const args = formatJsonValue(block.args);
-      return args ? `${name} · ${args}` : `${name} · 执行中`;
-    }
-    case 'completed': {
-      const result = block.summary || formatJsonValue(block.result);
-      return result ? `${name} · ${result}` : `${name} · 已完成`;
-    }
-    case 'failed':
-      return `${name} · ${block.error?.message || '调用失败'}`;
   }
 }
 
@@ -94,7 +72,7 @@ function getBlockLabel(block: AgentBlockState): string {
     case 'thinking':
       return block.content || (block.status === 'streaming' ? '正在思考' : '思考完成');
     case 'tool':
-      return getToolLabel(block);
+      return block.displayName || block.name;
     case 'hitl':
       return getInteractionLabel(block);
   }
@@ -301,7 +279,9 @@ function AgentBlockList({ blocks }: { blocks: AgentBlockState[] }) {
   return (
     <ul className='chat-run-steps'>
       {blocks.map((block) =>
-        block.kind === 'hitl' && block.status === 'requested' ? (
+        block.kind === 'tool' ? (
+          <ToolCallItem key={`${block.kind}:${block.id}`} block={block} />
+        ) : block.kind === 'hitl' && block.status === 'requested' ? (
           <HITLResponseForm key={`${block.kind}:${block.id}`} block={block} />
         ) : (
           <AgentBlockItem key={`${block.kind}:${block.id}`} block={block} />
@@ -329,6 +309,10 @@ function RunStatusIcon({ run }: { run: RunState }) {
 function CompletedRunTrace({ blocks }: { blocks: AgentBlockState[] }) {
   if (blocks.length === 0) return null;
 
+  if (blocks.some((block) => block.kind === 'tool')) {
+    return <div className='chat-run-trace chat-run-trace-completed'><AgentBlockList blocks={blocks} /></div>;
+  }
+
   return (
     <details className='chat-run-trace chat-run-trace-completed'>
       <summary>
@@ -344,10 +328,12 @@ function RunTraceContent({
   run,
   blocks,
   hideThinkingIndicator,
+  showHeading = true,
 }: {
   run: RunState;
   blocks: AgentBlockState[];
   hideThinkingIndicator: boolean;
+  showHeading?: boolean;
 }) {
   const isActive = ACTIVE_RUN_STATUSES.has(run.status);
   const statusLabel = getRunStatusLabel(run);
@@ -362,16 +348,18 @@ function RunTraceContent({
 
   return (
     <div className='chat-run-trace' data-status={run.status}>
-      <div className='chat-run-heading'>
-        {run.status === 'running' && !hideThinkingIndicator ? (
-          <ThinkingIndicator />
-        ) : (
-          <>
-            <RunStatusIcon run={run} />
-            <span>{statusLabel}</span>
-          </>
-        )}
-      </div>
+      {showHeading ? (
+        <div className='chat-run-heading'>
+          {run.status === 'running' && !hideThinkingIndicator ? (
+            <ThinkingIndicator />
+          ) : (
+            <>
+              <RunStatusIcon run={run} />
+              <span>{statusLabel}</span>
+            </>
+          )}
+        </div>
+      ) : null}
       <AgentBlockList blocks={blocks} />
     </div>
   );
@@ -382,15 +370,37 @@ export function AgentRunTrace({
   threadId,
   runId,
   hideThinkingIndicator = false,
+  content,
 }: AgentRunTraceProps) {
   const detail = useIMStore((state) => state.detailsByThread[threadId]);
   const run = detail?.runs.find((current) => current.id === runId);
 
-  if (!detail || !run) return null;
+  if (!detail || !run) {
+    return content ? <p className='chat-message-text'>{content}</p> : null;
+  }
 
   const blocks = detail.blocks.filter((block) => block.runId === runId);
 
-  return (
-    <RunTraceContent run={run} blocks={blocks} hideThinkingIndicator={hideThinkingIndicator} />
-  );
+  if (content === undefined || blocks.length === 0) {
+    return (
+      <>
+        <RunTraceContent run={run} blocks={blocks} hideThinkingIndicator={hideThinkingIndicator} />
+        {content ? <p className='chat-message-text'>{content}</p> : null}
+      </>
+    );
+  }
+
+  const parts = getAssistantContentParts(content, blocks);
+  const firstBlockPart = parts.find((part) => part.kind === 'blocks');
+  return parts.map((part) => part.kind === 'text' ? (
+    <p key={`text:${part.key}`} className='chat-message-text'>{part.content}</p>
+  ) : (
+    <RunTraceContent
+      key={`blocks:${part.key}`}
+      run={run}
+      blocks={part.blocks}
+      hideThinkingIndicator={hideThinkingIndicator}
+      showHeading={part === firstBlockPart}
+    />
+  ));
 }

@@ -483,6 +483,9 @@ export interface MessageCompletedEvent extends ThreadEventEnvelope<
 
 /** Tool 开始调用时的数据。 */
 export interface ToolStartedPayload {
+  /** 工具插入正文的位置，按 UTF-16 计数；未提供时前端由已接收正文计算。 */
+  contentOffset?: number;
+
   /** Tool 在 Agent 注册表中的稳定名称。 */
   name: string;
 

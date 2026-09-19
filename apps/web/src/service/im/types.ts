@@ -187,6 +187,9 @@ export interface ToolCallBlockState {
   /** Tool Call 所属的 Run。 */
   runId: RunId;
 
+  /** 工具开始时，所属 Run 正文已输出的 UTF-16 长度；旧快照可能未提供。 */
+  contentOffset?: number;
+
   /** Tool 当前执行状态。 */
   status: ToolCallStatus;
 

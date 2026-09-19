@@ -92,6 +92,7 @@ function AssistantMessage({ message }: MessageProps) {
             threadId={message.threadId}
             runId={message.runId}
             hideThinkingIndicator={isStreaming}
+            content={message.content}
           />
         ) : null}
 
@@ -101,7 +102,9 @@ function AssistantMessage({ message }: MessageProps) {
           </p>
         ) : null}
 
-        {message.content ? <p className='chat-message-text'>{message.content}</p> : null}
+        {!message.runId && message.content ? (
+          <p className='chat-message-text'>{message.content}</p>
+        ) : null}
 
         {statusText ? (
           <span

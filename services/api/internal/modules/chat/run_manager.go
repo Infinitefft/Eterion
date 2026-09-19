@@ -24,7 +24,7 @@ type RunRepository interface {
 	StartMessage(ctx context.Context, runID, messageID uuid.UUID, format TextFormat, now time.Time) (int64, error)
 	AppendDelta(ctx context.Context, runID, messageID uuid.UUID, delta string, now time.Time) (int64, error)
 	CompleteRun(ctx context.Context, runID, messageID uuid.UUID, fullText string, format TextFormat, now time.Time) (int64, int64, error)
-	EndRun(ctx context.Context, runID, messageID uuid.UUID, status RunStatus, code, message string, retryable bool, now time.Time) (RunStatus, int64, int64, error)
+	EndRun(ctx context.Context, runID, messageID uuid.UUID, status RunStatus, code, message string, retryable bool, now time.Time) (EndRunResult, error)
 	SaveThinking(ctx context.Context, runID uuid.UUID, blockID, content, status string, now time.Time) (int64, error)
 	SaveTool(ctx context.Context, runID uuid.UUID, blockID, status string, data toolBlockData, now time.Time) (int64, error)
 }
@@ -390,15 +390,18 @@ func (m *RunManager) endRun(
 		eventError = &ProtocolError{Code: code, Message: message}
 	}
 	now := m.now()
-	_, messageSeq, statusSeq, err := m.repository.EndRun(
+	result, err := m.repository.EndRun(
 		ctx, run.ID, run.OutputMessageID, status, code, message, retryable, now,
 	)
 	if err != nil {
 		return err
 	}
 	applyTerminalState(run, output, status, code, message, retryable, now)
-	m.publisher.MessageCompleted(*run, *output, messageSeq, eventError)
-	m.publisher.RunStatus(*run, statusSeq)
+	for _, tool := range result.ToolFailures {
+		m.publisher.ToolFailed(*run, tool.ToolCallID, tool.Seq, tool.Error)
+	}
+	m.publisher.MessageCompleted(*run, *output, result.MessageSeq, eventError)
+	m.publisher.RunStatus(*run, result.StatusSeq)
 	return nil
 }
 

@@ -11,6 +11,47 @@ import type { IMStore } from '@/store/im-store';
 
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(['pending', 'running', 'waiting_user']);
 
+type AssistantContentPart =
+  | { kind: 'text'; key: string; content: string }
+  | { kind: 'blocks'; key: string; blocks: AgentBlockState[] };
+
+/** 正文只在工具开始的位置分段；同一位置的过程块仍使用原来的列表展示。 */
+export function getAssistantContentParts(
+  content: string,
+  blocks: readonly AgentBlockState[],
+): AssistantContentPart[] {
+  const blocksByOffset = new Map<number, AgentBlockState[]>();
+  for (const block of blocks) {
+    const position = block.kind === 'tool' ? block.contentOffset : undefined;
+    const offset = position !== undefined && Number.isInteger(position) && position >= 0
+      ? Math.min(position, content.length)
+      : 0;
+    const group = blocksByOffset.get(offset);
+    if (group) {
+      group.push(block);
+    } else {
+      blocksByOffset.set(offset, [block]);
+    }
+  }
+
+  const parts: AssistantContentPart[] = [];
+  let cursor = 0;
+  let textKey = 'start';
+  for (const [offset, group] of [...blocksByOffset].sort(([left], [right]) => left - right)) {
+    if (offset > cursor) {
+      parts.push({ kind: 'text', key: textKey, content: content.slice(cursor, offset) });
+    }
+    const key = `${group[0].kind}:${group[0].id}`;
+    parts.push({ kind: 'blocks', key, blocks: group });
+    cursor = offset;
+    textKey = key;
+  }
+  if (cursor < content.length) {
+    parts.push({ kind: 'text', key: textKey, content: content.slice(cursor) });
+  }
+  return parts;
+}
+
 export function isRunActive(status: RunStatus): boolean {
   return ACTIVE_RUN_STATUSES.has(status);
 }

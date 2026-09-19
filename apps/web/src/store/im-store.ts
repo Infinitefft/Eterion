@@ -304,6 +304,9 @@ export const useIMStore = create<IMStore>()(
               threadId: event.threadId,
               runId: event.runId,
               ...event.payload,
+              contentOffset: event.payload.contentOffset ?? detail.messages.find(
+                (message) => message.role === 'assistant' && message.runId === event.runId,
+              )?.content.length ?? 0,
               status: 'running',
               summary: null,
               result: null,
@@ -317,6 +320,11 @@ export const useIMStore = create<IMStore>()(
             if (index === -1) {
               detail.blocks.push(tool);
             } else {
+              // 重复的开始事件不能把工具移动到后续正文之后。
+              const previous = detail.blocks[index];
+              if (previous.kind === 'tool') {
+                tool.contentOffset = previous.contentOffset ?? tool.contentOffset;
+              }
               detail.blocks[index] = tool;
             }
 
@@ -416,6 +424,11 @@ export const useIMStore = create<IMStore>()(
     applySnapshot: (snapshot) => {
       set((state) => {
         const { thread, messages, runs, blocks } = snapshot;
+        const previousTools = new Map(
+          state.detailsByThread[thread.id]?.blocks
+            .filter((block) => block.kind === 'tool')
+            .map((block) => [`${block.runId}:${block.id}`, block]) ?? [],
+        );
 
         const loadMessages = 
           state.detailsByThread[thread.id]?.messages.filter(
@@ -431,7 +444,14 @@ export const useIMStore = create<IMStore>()(
             a.createdAt - b.createdAt
           )),
           runs,
-          blocks,
+          // 后端尚未提供位置的快照，保留当前页面已从实时事件记录的位置。
+          blocks: blocks.map((block) => {
+            if (block.kind !== 'tool' || block.contentOffset !== undefined) return block;
+            return {
+              ...block,
+              contentOffset: previousTools.get(`${block.runId}:${block.id}`)?.contentOffset,
+            };
+          }),
         };
 
         state.detailLoadStateByThread[thread.id] = { status: 'ready' };

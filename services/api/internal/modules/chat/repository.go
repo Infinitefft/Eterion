@@ -3,6 +3,7 @@ package chat
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +37,19 @@ type RunExecution struct {
 	Run           Run
 	OutputMessage Message
 	Messages      []Message
+}
+
+type ToolFailure struct {
+	ToolCallID string
+	Seq        int64
+	Error      ProtocolError
+}
+
+type EndRunResult struct {
+	PreviousStatus RunStatus
+	ToolFailures   []ToolFailure
+	MessageSeq     int64
+	StatusSeq      int64
 }
 
 // Repository 让 Service 和 RunManager 不依赖 GORM 的具体写法，方便后续测试。
@@ -127,7 +141,7 @@ type Repository interface {
 		message string,
 		retryable bool,
 		now time.Time,
-	) (RunStatus, int64, int64, error)
+	) (EndRunResult, error)
 	SaveThinking(ctx context.Context, runID uuid.UUID, blockID, content, status string, now time.Time) (int64, error)
 	SaveTool(ctx context.Context, runID uuid.UUID, blockID, status string, data toolBlockData, now time.Time) (int64, error)
 }
@@ -271,36 +285,39 @@ func (r *GormRepository) Snapshot(
 	userID uuid.UUID,
 	chatID uuid.UUID,
 ) (*Chat, []Message, []Run, []AgentBlock, error) {
-	chat, err := r.FindChatOwned(ctx, userID, chatID)
+	var chat Chat
+	var messages []Message
+	var runs []Run
+	var blocks []AgentBlock
+	// The cursor and entities must describe the same committed view, otherwise
+	// resuming after the snapshot can append a delta already present in content.
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.Where("id = ? AND user_id = ?", chatID, userID).First(&chat).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrRepositoryChatNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("find chat: %w", err)
+		}
+		if err := tx.Where("chat_id = ?", chatID).
+			Order("created_at ASC, id ASC").Find(&messages).Error; err != nil {
+			return fmt.Errorf("load chat messages: %w", err)
+		}
+		if err := tx.Where("chat_id = ? AND user_id = ?", chatID, userID).
+			Order("created_at ASC, id ASC").Find(&runs).Error; err != nil {
+			return fmt.Errorf("load chat runs: %w", err)
+		}
+		if err := tx.Where("chat_id = ?", chatID).
+			Order("sequence ASC, id ASC").Find(&blocks).Error; err != nil {
+			return fmt.Errorf("load chat agent blocks: %w", err)
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	var messages []Message
-	if err := r.db.WithContext(ctx).
-		Where("chat_id = ?", chatID).
-		Order("created_at ASC, id ASC").
-		Find(&messages).Error; err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("load chat messages: %w", err)
-	}
-
-	var runs []Run
-	if err := r.db.WithContext(ctx).
-		Where("chat_id = ? AND user_id = ?", chatID, userID).
-		Order("created_at ASC, id ASC").
-		Find(&runs).Error; err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("load chat runs: %w", err)
-	}
-
-	var blocks []AgentBlock
-	if err := r.db.WithContext(ctx).
-		Where("chat_id = ?", chatID).
-		Order("sequence ASC, id ASC").
-		Find(&blocks).Error; err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("load chat agent blocks: %w", err)
-	}
-
-	return chat, messages, runs, blocks, nil
+	return &chat, messages, runs, blocks, nil
 }
 
 func (r *GormRepository) StartChat(
@@ -748,14 +765,12 @@ func (r *GormRepository) EndRun(
 	message string,
 	retryable bool,
 	now time.Time,
-) (RunStatus, int64, int64, error) {
+) (EndRunResult, error) {
 	if status != RunStatusFailed && status != RunStatusCancelled {
-		return "", 0, 0, errors.New("end run requires failed or cancelled status")
+		return EndRunResult{}, errors.New("end run requires failed or cancelled status")
 	}
 
-	var previous RunStatus
-	var messageSeq int64
-	var statusSeq int64
+	var result EndRunResult
 	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
 		if !containsRunStatus(
 			[]RunStatus{RunStatusPending, RunStatusRunning, RunStatusWaitingUser},
@@ -764,13 +779,43 @@ func (r *GormRepository) EndRun(
 			return ErrRepositoryInvalidRunState
 		}
 
-		previous = run.Status
-		first, last, err := reserveThreadSeq(tx, run.ChatID, 2)
+		var tools []AgentBlock
+		if err := tx.Where("run_id = ? AND kind = ? AND status = ?", runID, BlockKindTool, "running").
+			Order("sequence ASC, id ASC").Find(&tools).Error; err != nil {
+			return fmt.Errorf("load unfinished tools: %w", err)
+		}
+
+		result.PreviousStatus = run.Status
+		first, last, err := reserveThreadSeq(tx, run.ChatID, int64(len(tools))+2)
 		if err != nil {
 			return err
 		}
-		messageSeq = first
-		statusSeq = last
+		result.MessageSeq = last - 1
+		result.StatusSeq = last
+		toolError := ProtocolError{Code: code, Message: message}
+		if status == RunStatusCancelled {
+			toolError = ProtocolError{Code: "RUN_CANCELLED", Message: "工具调用已取消"}
+		}
+		for index, block := range tools {
+			var data toolBlockData
+			if err := json.Unmarshal(block.Data, &data); err != nil {
+				return fmt.Errorf("decode unfinished tool %s: %w", block.ID, err)
+			}
+			data.Error = &toolError
+			raw, err := json.Marshal(data)
+			if err != nil {
+				return fmt.Errorf("encode failed tool %s: %w", block.ID, err)
+			}
+			if err := tx.Model(&block).Updates(map[string]any{
+				"status": "failed", "data": json.RawMessage(raw), "updated_at": now,
+			}).Error; err != nil {
+				return fmt.Errorf("fail unfinished tool %s: %w", block.ID, err)
+			}
+			result.ToolFailures = append(result.ToolFailures, ToolFailure{
+				ToolCallID: block.ID, Seq: first + int64(index), Error: toolError,
+			})
+		}
+
 		messageStatus := MessageStatusFailed
 		if status == RunStatusCancelled {
 			messageStatus = MessageStatusCancelled
@@ -809,7 +854,10 @@ func (r *GormRepository) EndRun(
 		}
 		return tx.Model(run).Updates(updates).Error
 	})
-	return previous, messageSeq, statusSeq, err
+	if err != nil {
+		return EndRunResult{}, err
+	}
+	return result, nil
 }
 
 func (r *GormRepository) SaveThinking(
@@ -890,7 +938,8 @@ func reserveThreadSeq(tx *gorm.DB, chatID uuid.UUID, count int64) (int64, int64,
 	}
 	first := chat.LastSeq + 1
 	last := chat.LastSeq + count
-	if err := tx.Model(&chat).Update("last_seq", last).Error; err != nil {
+	// Cursor updates must not change metadata without a thread.updated event.
+	if err := tx.Model(&chat).UpdateColumn("last_seq", last).Error; err != nil {
 		return 0, 0, fmt.Errorf("advance thread sequence: %w", err)
 	}
 	return first, last, nil
