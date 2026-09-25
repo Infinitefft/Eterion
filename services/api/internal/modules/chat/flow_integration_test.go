@@ -24,11 +24,13 @@ import (
 )
 
 type integrationAgentRequest struct {
-	RunID    string          `json:"run_id"`
-	UserID   string          `json:"user_id"`
-	ThreadID string          `json:"thread_id"`
-	ModelID  string          `json:"model_id"`
-	Messages []agent.Message `json:"messages"`
+	RunID          string          `json:"run_id"`
+	UserID         string          `json:"user_id"`
+	ThreadID       string          `json:"thread_id"`
+	ModelID        string          `json:"model_id"`
+	InputMessageID string          `json:"input_message_id"`
+	HistoryToken   string          `json:"history_token"`
+	Messages       []agent.Message `json:"-"`
 }
 
 type integrationFrame struct {
@@ -96,6 +98,7 @@ func newIntegrationChat(t *testing.T) *integrationChat {
 	handler := NewHandler(service, NewTicketService(time.Minute), hub, publisher, commands,
 		config.Config{AllowedOrigins: []string{origin}}, logger, runner)
 	engine := gin.New()
+	RegisterHistoryRoute(engine, runs, repository)
 	// Authentication is already covered separately. Only this test server injects
 	// its seeded identity; ticket creation, ticket consumption and WS are real.
 	handler.RegisterRoutes(engine.Group("/api"), func(c *gin.Context) {
@@ -151,8 +154,44 @@ func (h *integrationChat) serveAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	var input integrationAgentRequest
 	if r.Method != http.MethodPost || r.URL.Path != "/runs" ||
-		json.NewDecoder(r.Body).Decode(&input) != nil || len(input.Messages) == 0 {
+		json.NewDecoder(r.Body).Decode(&input) != nil || input.InputMessageID == "" || input.HistoryToken == "" {
 		http.Error(w, "invalid fixture request", http.StatusBadRequest)
+		return
+	}
+	// Simulate Node fetching raw history instead of receiving Go-built context.
+	cursor := ""
+	for {
+		request, _ := http.NewRequestWithContext(r.Context(), http.MethodGet,
+			h.server.URL+"/internal/agent/runs/"+input.RunID+"/messages?after="+cursor, nil)
+		request.Header.Set("Authorization", "Bearer "+input.HistoryToken)
+		response, err := h.server.Client().Do(request)
+		if err != nil {
+			h.t.Errorf("fetch history: %v", err)
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		var page historyPage
+		err = json.NewDecoder(response.Body).Decode(&page)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || err != nil {
+			h.t.Error("invalid history response")
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		for _, message := range page.Messages {
+			if message.Status == MessageStatusCompleted && message.Content != "" &&
+				(message.Role == MessageRoleUser || message.Role == MessageRoleAssistant) {
+				input.Messages = append(input.Messages, agent.Message{Role: string(message.Role), Content: message.Content})
+			}
+		}
+		if page.NextCursor == nil {
+			break
+		}
+		cursor = *page.NextCursor
+	}
+	if len(input.Messages) == 0 {
+		h.t.Error("missing input in history")
+		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
 	h.requests <- input

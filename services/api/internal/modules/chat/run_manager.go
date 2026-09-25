@@ -15,7 +15,11 @@ import (
 
 var errUserRequestedCancel = errors.New("user requested run cancellation")
 
-type activeRun struct{ cancel context.CancelCauseFunc }
+type activeRun struct {
+	cancel       context.CancelCauseFunc
+	run          Run
+	historyToken string
+}
 
 type RunRepository interface {
 	LoadRunExecution(ctx context.Context, runID uuid.UUID) (*RunExecution, error)
@@ -79,14 +83,15 @@ func (m *RunManager) Start(run Run) bool {
 		return false
 	}
 	runContext, cancel := context.WithCancelCause(m.appContext)
-	m.active[run.ID] = activeRun{cancel: cancel}
+	historyToken := uuid.NewString()
+	m.active[run.ID] = activeRun{cancel: cancel, run: run, historyToken: historyToken}
 	m.runs.Add(1)
 	m.mu.Unlock()
 
 	go func() {
 		defer m.runs.Done()
 		defer m.remove(run.ID)
-		m.execute(runContext, run)
+		m.execute(runContext, run, historyToken)
 	}()
 	return true
 }
@@ -122,7 +127,7 @@ func (m *RunManager) Close() error {
 	return m.runner.Close()
 }
 
-func (m *RunManager) execute(ctx context.Context, initialRun Run) {
+func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken string) {
 	execution, err := m.repository.LoadRunExecution(ctx, initialRun.ID)
 	if err != nil {
 		m.finishWithError(ctx, &initialRun, nil, err)
@@ -133,11 +138,8 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run) {
 
 	input := agent.Input{
 		RunID: run.ID.String(), ThreadID: run.ChatID.String(), ModelID: run.ModelID,
-		UserID:   run.UserID.String(),
-		Messages: make([]agent.Message, 0, len(execution.Messages)),
-	}
-	for _, message := range execution.Messages {
-		input.Messages = append(input.Messages, agent.Message{Role: string(message.Role), Content: message.Content})
+		UserID:         run.UserID.String(),
+		InputMessageID: run.InputMessageID.String(), HistoryToken: historyToken,
 	}
 
 	var (

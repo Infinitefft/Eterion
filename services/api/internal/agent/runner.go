@@ -10,13 +10,14 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-// Input contains the complete conversation required to execute one run.
+// Input identifies one run; the Agent fetches history and builds its own context.
 type Input struct {
-	RunID    string
-	UserID   string
-	ThreadID string
-	ModelID  string
-	Messages []Message
+	RunID          string
+	UserID         string
+	ThreadID       string
+	ModelID        string
+	InputMessageID string
+	HistoryToken   string
 }
 
 // ModelInfo is the public, credential-free model catalog entry.

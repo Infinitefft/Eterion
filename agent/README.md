@@ -1,7 +1,7 @@
 # Eterion Agent
 
 Eterion 的 Node.js + TypeScript Agent 模块。当前 HTTP 服务使用 Agent Runtime：
-接收调用方传入的对话历史，由模型决定直接回答或调用网页工具，
+接收 Go 传入的本轮身份，主动查询原始聊天历史并组装上下文，由模型决定直接回答或调用网页工具，
 通过 SSE 输出项目自己的 `run.*`、`content.*`、`tool.*` 事件。
 
 `web_search`、`web_fetch` 和 LangChain `createAgent()` 组装已有实现，
@@ -20,6 +20,7 @@ src/
 ├── models.ts                模型客户端创建、正文提取
 ├── agent.ts                 Agent、Prompt、Tools、Middleware 组装
 ├── protocol.ts              请求、领域事件和 Runtime 类型契约
+├── context.ts               查询原始历史、筛选并组装本轮模型上下文
 ├── runtime/
 │   ├── direct.ts            普通模型的流式事件适配
 │   └── agent.ts             Agent 文本流、Tool 状态与运行终态适配
@@ -120,8 +121,19 @@ Node.js 22.19.0 会显示 SQLite 实验性 API 提示。
 }
 ```
 
-`messages` 非空且最后一条必须来自 user；只接受 user/assistant 历史，
-System Prompt 由 Agent 自己构建。目前 Thread 历史由调用方传入，Agent 不自动加载或持久化记忆。
+以上 `messages` 形式保留给独立脚本和直接调用；非空且最后一条必须来自 user。
+平台 Go 请求改为传入 `run_id`、`user_id`、`thread_id`、`model_id`、`input_message_id`、`history_token`，不再推送完整历史。
+Node 的 `context.ts` 通过 `GO_API_BASE_URL`（默认 `http://127.0.0.1:8080`）分页查询
+`GET /internal/agent/runs/:runId/messages`，在 Authorization Bearer 头中携带本轮凭证。
+Go 根据活动 Run 校验访问范围，按时间和 ID 返回截至本轮输入的原始消息，每页最多 100 条。
+凭证只授权当前 Run，执行结束后失效，不进入模型输入和 SQLite 运行记录。
+
+当前 Node 保留原有上下文行为：读取所有历史页，仅选择非空、已完成的 user/assistant 消息。
+本轮输入已在历史中，不重复追加；缺失本轮输入或查询失败会产生 `AGENT_CONTEXT_LOAD_FAILED`，不静默退化成单轮回答。
+整个历史加载阶段最多 30 秒，支持调用方取消。System Prompt 仍由 Agent 组装。
+这次只迁移上下文职责，没有实现 Token 裁剪、摘要、Skills、RAG 或长期记忆。
+Go 继续负责业务消息持久化、资源归属、Run 展示状态和 IM 事件，Node 不直连 Go 的业务数据库。
+升级时需同时重启 Node Agent 与 Go API；若 Go 端口不同，应同步设置 `GO_API_BASE_URL`。
 
 不调用工具时，成功事件按顺序输出：
 
@@ -152,7 +164,7 @@ Tool 三种状态必须通过同一 `toolCallId` 关联；Tool 失败与整个 R
 Agent Runtime 同时消费 LangChain 的 `messages` 和 `updates`：前者输出正文增量，
 后者提供完整 Tool Call 和 ToolMessage。只在模型节点登记新调用，完成后从活动调用表删除，
 避免 Middleware 携带历史消息时重复发送工具事件。框架负责 Agent Loop，Runtime 不手动执行工具。
-模型调用上限为 6 次，工具调用上限为 4 次；图步数另设 50，因为 Middleware 也占用图步数。
+模型调用上限为 6 次，工具调用上限为 10 次；图步数另设 50，因为 Middleware 也占用图步数。
 工具失败允许模型继续回答；整轮超时、执行异常或没有有效最终答复时，收尾未完成工具和正文，再发送 `run.failed`。
 
 ### 取消与连接生命周期

@@ -48,11 +48,12 @@ type modelCatalogResponse struct {
 }
 
 type runRequest struct {
-	RunID    string          `json:"run_id"`
-	UserID   string          `json:"user_id,omitempty"`
-	ThreadID string          `json:"thread_id"`
-	ModelID  string          `json:"model_id"`
-	Messages []agent.Message `json:"messages"`
+	RunID          string `json:"run_id"`
+	UserID         string `json:"user_id,omitempty"`
+	ThreadID       string `json:"thread_id"`
+	ModelID        string `json:"model_id"`
+	InputMessageID string `json:"input_message_id"`
+	HistoryToken   string `json:"history_token"`
 }
 
 type streamEnvelope struct {
@@ -180,7 +181,8 @@ func (r *Runner) Run(ctx context.Context, input agent.Input, handle func(agent.E
 	}
 	defer cancel()
 	body, err := json.Marshal(runRequest{
-		RunID: input.RunID, UserID: input.UserID, ThreadID: input.ThreadID, ModelID: input.ModelID, Messages: input.Messages,
+		RunID: input.RunID, UserID: input.UserID, ThreadID: input.ThreadID, ModelID: input.ModelID,
+		InputMessageID: input.InputMessageID, HistoryToken: input.HistoryToken,
 	})
 	if err != nil {
 		return fmt.Errorf("encode Agent run request: %w", err)

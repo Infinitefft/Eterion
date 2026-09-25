@@ -11,7 +11,7 @@ import {
 import type { createWebSearchTool } from './tools/web-search.js';
 import type { webFetch } from './tools/web-fetch.js';
 
-const MAX_TOOL_CALLS = 4;
+const MAX_TOOL_CALLS = 10;
 const MAX_MODEL_CALLS = 6;
 
 interface ToolCallLimitOptions {

@@ -1,7 +1,8 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 
 import type { Settings } from './config.js';
-import { runFailed, runInputSchema, type AgentEvent, type AgentRuntime } from './protocol.js';
+import { runFailed, runRequestSchema, type AgentEvent, type AgentRuntime, type RunInput } from './protocol.js';
+import { buildRunInput } from './context.js';
 
 /** 创建 HTTP 服务，负责请求校验、领域事件传输和连接生命周期。 */
 export function createApp(settings: Settings, runtime: AgentRuntime): FastifyInstance {
@@ -15,7 +16,7 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
   }));
 
   app.post('/runs', async (request, reply) => {
-    const parsed = runInputSchema.safeParse(request.body);
+    const parsed = runRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
         error: {
@@ -55,8 +56,17 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
     response.once('close', onClose);
 
     try {
-      // signal 是进程内控制参数，不混入经过 Schema 校验的请求 JSON。
-      for await (const event of runtime.stream(parsed.data, controller.signal)) {
+      // 先由 Agent 获取并选择历史，再进入运行时；访问凭证不会进入模型或运行记录。
+      let input: RunInput;
+      try {
+        input = await buildRunInput(parsed.data, settings.apiBaseUrl, controller.signal);
+      } catch {
+        if (!response.destroyed) {
+          response.write(encodeSse(runFailed(runId, 'AGENT_CONTEXT_LOAD_FAILED', '读取会话历史失败', true)));
+        }
+        return reply;
+      }
+      for await (const event of runtime.stream(input, controller.signal)) {
         if (response.destroyed) break;
         response.write(encodeSse(event));
       }

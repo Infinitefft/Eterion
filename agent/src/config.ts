@@ -16,6 +16,7 @@ export interface Settings {
   heartbeatMs: number;
   recordingEnabled: boolean;
   recordingPath: string;
+  apiBaseUrl: string;
 }
 
 export interface ModelConfig {
@@ -83,6 +84,7 @@ export function loadSettings(environ?: NodeJS.ProcessEnv): Settings {
 
   return {
     host: value(environ, 'AGENT_HOST', '127.0.0.1'),
+    apiBaseUrl: value(environ, 'GO_API_BASE_URL', 'http://127.0.0.1:8080'),
     port: parsePort(value(environ, 'AGENT_PORT', '8001')),
     defaultModelId,
     models,

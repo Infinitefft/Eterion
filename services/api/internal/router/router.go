@@ -144,6 +144,7 @@ func New(
 	)
 
 	api := engine.Group("/api")
+	chat.RegisterHistoryRoute(engine, runManager, chatRepository)
 	authHandler.RegisterRoutes(api)
 	chatHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
 	apidocs.RegisterRoutes(engine, cfg.AppEnv)

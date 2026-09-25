@@ -43,7 +43,7 @@ func TestRunPassesUserIDWithoutChangingEvents(t *testing.T) {
 	var events []agent.Event
 	err = runner.Run(context.Background(), agent.Input{
 		RunID: "run-1", UserID: "trusted-user", ThreadID: "thread-1", ModelID: "test",
-		Messages: []agent.Message{{Role: "user", Content: "你好"}},
+		InputMessageID: "message-1", HistoryToken: "run-scoped-test-token",
 	}, func(event agent.Event) error {
 		events = append(events, event)
 		return nil
@@ -56,8 +56,8 @@ func TestRunPassesUserIDWithoutChangingEvents(t *testing.T) {
 		if request.UserID != "trusted-user" || request.RunID != "run-1" || request.ThreadID != "thread-1" {
 			t.Fatalf("unexpected identity: %+v", request)
 		}
-		if len(request.Messages) != 1 || request.Messages[0].Content != "你好" {
-			t.Fatalf("identity must not be inserted into model messages: %+v", request.Messages)
+		if request.InputMessageID != "message-1" || request.HistoryToken != "run-scoped-test-token" {
+			t.Fatal("request must carry input identity and history capability")
 		}
 	default:
 		t.Fatal("missing Agent request")

@@ -36,7 +36,6 @@ type SubmitRecord struct {
 type RunExecution struct {
 	Run           Run
 	OutputMessage Message
-	Messages      []Message
 }
 
 type ToolFailure struct {
@@ -535,19 +534,6 @@ func (r *GormRepository) LoadRunExecution(
 		return nil, fmt.Errorf("load run: %w", err)
 	}
 
-	var messages []Message
-	if err := r.db.WithContext(ctx).
-		Where(
-			"chat_id = ? AND id <> ? AND content <> '' AND status = ? AND role IN ?",
-			run.ChatID,
-			run.OutputMessageID,
-			MessageStatusCompleted,
-			[]MessageRole{MessageRoleUser, MessageRoleAssistant},
-		).
-		Order("created_at ASC, id ASC").
-		Find(&messages).Error; err != nil {
-		return nil, fmt.Errorf("load agent message history: %w", err)
-	}
 	var outputMessage Message
 	if err := r.db.WithContext(ctx).
 		First(&outputMessage, "id = ?", run.OutputMessageID).Error; err != nil {
@@ -557,7 +543,6 @@ func (r *GormRepository) LoadRunExecution(
 	return &RunExecution{
 		Run:           run,
 		OutputMessage: outputMessage,
-		Messages:      messages,
 	}, nil
 }
 

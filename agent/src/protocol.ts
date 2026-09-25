@@ -22,6 +22,19 @@ export const runInputSchema = z
 
 export type RunInput = z.infer<typeof runInputSchema>;
 
+// 平台调用只传本轮身份与历史读取凭证；显式 messages 继续用于独立脚本和 Direct 基线。
+export const historyRunInputSchema = z.object({
+  run_id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  thread_id: z.string().uuid(),
+  model_id: z.string().min(1),
+  input_message_id: z.string().uuid(),
+  history_token: z.string().min(1),
+}).strict();
+
+export const runRequestSchema = z.union([historyRunInputSchema, runInputSchema.strict()]);
+export type RunRequest = z.infer<typeof runRequestSchema>;
+
 export interface PublicModel {
   id: string;
   modelName: string;
