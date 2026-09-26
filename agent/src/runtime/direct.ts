@@ -61,7 +61,7 @@ export function createDirectRuntime(
 
         const messages = [
           { role: 'system', content: settings.systemPrompt },
-          ...input.messages,
+          ...(input.contextMessages ?? input.messages),
         ];
         const chunks = await model.stream(messages, {
           signal,

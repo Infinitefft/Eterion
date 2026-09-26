@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { BaseMessage } from '@langchain/core/messages';
 
 const messageInputSchema = z.object({
   // System Prompt 由 Agent 自己构建，调用方只传用户和 Assistant 历史。
@@ -20,7 +21,7 @@ export const runInputSchema = z
     path: ['messages'],
   });
 
-export type RunInput = z.infer<typeof runInputSchema>;
+export type RunInput = z.infer<typeof runInputSchema> & { contextMessages?: BaseMessage[] };
 
 // 平台调用只传本轮身份与历史读取凭证；显式 messages 继续用于独立脚本和 Direct 基线。
 export const historyRunInputSchema = z.object({
@@ -50,6 +51,11 @@ export interface AgentRuntime {
 
   /** signal 由进程内调用方传入，用于取消本次执行，不属于请求 JSON。 */
   stream(input: RunInput, signal?: AbortSignal): AsyncGenerator<AgentEvent>;
+  compact?(modelId: string, messages: BaseMessage[], signal: AbortSignal): Promise<{
+    messages: BaseMessage[];
+    changed: boolean;
+    truncated: boolean;
+  }>;
 }
 
 /** JSON 能安全传输的数据类型，与前端 IM 的 JsonValue 含义一致。 */

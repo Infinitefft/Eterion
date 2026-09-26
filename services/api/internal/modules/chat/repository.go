@@ -129,6 +129,7 @@ type Repository interface {
 		messageID uuid.UUID,
 		fullText string,
 		format TextFormat,
+		agentContext json.RawMessage,
 		now time.Time,
 	) (int64, int64, error)
 	EndRun(
@@ -298,7 +299,8 @@ func (r *GormRepository) Snapshot(
 		if err != nil {
 			return fmt.Errorf("find chat: %w", err)
 		}
-		if err := tx.Where("chat_id = ?", chatID).
+		// 前端历史只读取展示字段，避免每条回答的完整上下文拖慢快照加载。
+		if err := tx.Omit("AgentContext").Where("chat_id = ?", chatID).
 			Order("created_at ASC, id ASC").Find(&messages).Error; err != nil {
 			return fmt.Errorf("load chat messages: %w", err)
 		}
@@ -431,9 +433,12 @@ func (r *GormRepository) Submit(
 		// 锁定 Chat 可以串行化同一 Chat 的并发提交。
 		var lockedChat Chat
 		err := tx.
-			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Clauses(clause.Locking{Strength: "UPDATE", Options: "NOWAIT"}).
 			Where("id = ? AND user_id = ?", chatID, userID).
 			First(&lockedChat).Error
+		if isChatLockBusy(err) {
+			return ErrRepositoryRunActive
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrRepositoryChatNotFound
 		}
@@ -694,6 +699,7 @@ func (r *GormRepository) CompleteRun(
 	messageID uuid.UUID,
 	fullText string,
 	format TextFormat,
+	agentContext json.RawMessage,
 	now time.Time,
 ) (int64, int64, error) {
 	var messageSeq int64
@@ -711,6 +717,7 @@ func (r *GormRepository) CompleteRun(
 			Where("id = ? AND run_id = ?", messageID, runID).
 			Updates(map[string]any{
 				"content":        fullText,
+				"agent_context":  agentContext,
 				"content_format": format,
 				"status":         MessageStatusCompleted,
 				"updated_at":     now,

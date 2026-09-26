@@ -74,16 +74,19 @@ func (Chat) TableName() string {
 // Message 第一阶段直接保存文本快照。
 // RunID 为空表示这条消息不是由某次 Agent Run 产生。
 type Message struct {
-	ID            uuid.UUID  `gorm:"type:uuid;primaryKey"`
-	ChatID        uuid.UUID  `gorm:"type:uuid;index"`
-	RunID         *uuid.UUID `gorm:"type:uuid;index"`
-	Role          MessageRole
-	Status        MessageStatus
-	Content       string
-	ContentFormat TextFormat `gorm:"column:content_format"`
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	CompletedAt   *time.Time
+	ID      uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	ChatID  uuid.UUID  `gorm:"type:uuid;index"`
+	RunID   *uuid.UUID `gorm:"type:uuid;index"`
+	Role    MessageRole
+	Status  MessageStatus
+	Content string
+	// 仅供 Agent 恢复上下文，不包含在前端聊天消息 JSON 中。
+	AgentContext     json.RawMessage `gorm:"type:jsonb" json:"-"`
+	ContextTruncated bool            `gorm:"-" json:"-"`
+	ContentFormat    TextFormat      `gorm:"column:content_format"`
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	CompletedAt      *time.Time
 }
 
 func (Message) TableName() string {

@@ -4,6 +4,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -27,7 +28,7 @@ type RunRepository interface {
 	TransitionRun(ctx context.Context, runID uuid.UUID, allowed []RunStatus, next RunStatus, now time.Time) (RunStatus, int64, error)
 	StartMessage(ctx context.Context, runID, messageID uuid.UUID, format TextFormat, now time.Time) (int64, error)
 	AppendDelta(ctx context.Context, runID, messageID uuid.UUID, delta string, now time.Time) (int64, error)
-	CompleteRun(ctx context.Context, runID, messageID uuid.UUID, fullText string, format TextFormat, now time.Time) (int64, int64, error)
+	CompleteRun(ctx context.Context, runID, messageID uuid.UUID, fullText string, format TextFormat, agentContext json.RawMessage, now time.Time) (int64, int64, error)
 	EndRun(ctx context.Context, runID, messageID uuid.UUID, status RunStatus, code, message string, retryable bool, now time.Time) (EndRunResult, error)
 	SaveThinking(ctx context.Context, runID uuid.UUID, blockID, content, status string, now time.Time) (int64, error)
 	SaveTool(ctx context.Context, runID uuid.UUID, blockID, status string, data toolBlockData, now time.Time) (int64, error)
@@ -308,12 +309,13 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 			}
 			now := m.now()
 			messageSeq, statusSeq, err := m.repository.CompleteRun(
-				ctx, run.ID, run.OutputMessageID, fullText, contentFormat, now,
+				ctx, run.ID, run.OutputMessageID, fullText, contentFormat, event.AgentContext, now,
 			)
 			if err != nil {
 				return err
 			}
 			output.Content, output.ContentFormat, output.Status = fullText, contentFormat, MessageStatusCompleted
+			output.ContextTruncated = event.ContextTruncated
 			output.UpdatedAt, output.CompletedAt = now, timePointer(now)
 			run.Status, run.UpdatedAt, run.CompletedAt = RunStatusCompleted, now, timePointer(now)
 			run.ErrorCode, run.ErrorMessage = nil, nil

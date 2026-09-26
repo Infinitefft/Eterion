@@ -79,6 +79,7 @@ export type MessageStateStatus = 'sending' | 'streaming' | MessageCompletionStat
 
 /** 用户消息或 Assistant 正式回复在前端组装后的完整状态。 */
 export interface MessageState {
+  contextTruncated?: boolean;
   /** Message 的稳定 ID。 */
   id: MessageId;
 

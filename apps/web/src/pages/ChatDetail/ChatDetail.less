@@ -475,6 +475,27 @@ button.chat-tool-heading {
   backdrop-filter: blur(8px);
 }
 
+.chat-detail-compaction-notice {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(880px, calc(100% - 40px));
+  margin: 10px auto 0;
+  padding: 4px 10px;
+  color: var(--quiet);
+  font-size: 12px;
+  line-height: 1.5;
+  background: #f7f7f8;
+  border-radius: 12px;
+
+  .chat-detail-tool-button {
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+}
+
 .chat-detail-composer {
   position: relative;
   z-index: 2;
@@ -696,6 +717,10 @@ button.chat-tool-heading {
   .chat-assistant-avatar img {
     width: 27px;
     height: 27px;
+  }
+
+  .chat-detail-compaction-notice {
+    width: min(100% - 24px, 760px);
   }
 
   .chat-detail-composer {

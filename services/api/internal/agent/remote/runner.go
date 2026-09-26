@@ -254,6 +254,22 @@ func decodeEvent(eventType agent.EventType, envelope streamEnvelope) (agent.Even
 		}
 		event.ModelID = payload.ModelID
 	case agent.EventRunCompleted:
+		var payload struct {
+			AgentContext     json.RawMessage `json:"agentContext"`
+			ContextTruncated bool            `json:"contextTruncated"`
+		}
+		if err := decodePayload(envelope.Payload, &payload); err != nil {
+			return event, false, protocolFailure("invalid run.completed payload", nil)
+		}
+		// Direct 模式和旧调用方可不提供上下文；消息内容由 Agent 校验，Go 只检查容器。
+		raw := bytes.TrimSpace(payload.AgentContext)
+		event.ContextTruncated = payload.ContextTruncated
+		if len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+			if raw[0] != '[' {
+				return event, false, protocolFailure("agentContext must be an array", nil)
+			}
+			event.AgentContext = raw
+		}
 		return event, true, nil
 	case agent.EventRunFailed:
 		var payload errorPayload

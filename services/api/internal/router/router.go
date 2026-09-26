@@ -147,6 +147,7 @@ func New(
 	chat.RegisterHistoryRoute(engine, runManager, chatRepository)
 	authHandler.RegisterRoutes(api)
 	chatHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
+	chatHandler.RegisterCompactionRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)
 	apidocs.RegisterRoutes(engine, cfg.AppEnv)
 
 	return engine, &Runtime{

@@ -54,21 +54,22 @@ function ThreadLinkLabel({
   isWaitingForAnswer,
   hasUnread,
 }: ThreadLinkLabelProps) {
-  const prefix = isGenerating ? (
-    <span aria-label='正在生成'>生成中 · </span>
-  ) : isWaitingForAnswer ? (
-    <span aria-label='待回答'>待回答 · </span>
-  ) : hasUnread ? (
-    <span style={{ color: '#e5484d' }} aria-label='有新消息'>
-      ●{' '}
-    </span>
-  ) : null;
-
   return (
-    <span>
-      {prefix}
-      {title}
-    </span>
+    <>
+      <span>
+        {!isGenerating && isWaitingForAnswer ? <span aria-label='待回答'>待回答 · </span> : null}
+        {title}
+      </span>
+      {isGenerating ? (
+        <span className='conversation-status' role='status' aria-label='正在生成'>
+          <i className='conversation-spinner' aria-hidden='true' />
+        </span>
+      ) : !isWaitingForAnswer && hasUnread ? (
+        <span className='conversation-status' role='status' aria-label='有新消息'>
+          <i className='conversation-unread-dot' aria-hidden='true' />
+        </span>
+      ) : null}
+    </>
   );
 }
 
@@ -212,6 +213,7 @@ function ThreadHistoryItem({ threadId, onNavigate }: ThreadHistoryItemProps) {
       data-generating={isGenerating || undefined}
       data-waiting-user={isWaitingForAnswer || undefined}
       data-unread={hasUnread || undefined}
+      data-status-indicator={isGenerating || (!isWaitingForAnswer && hasUnread) || undefined}
     >
       <NavLink
         className={({ isActive }) => `conversation-link ${isActive ? 'is-active' : ''}`}

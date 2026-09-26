@@ -124,6 +124,15 @@ export async function deleteThread(threadId: ThreadId): Promise<void> {
   await apiClient.delete(`/chat/${encodeURIComponent(threadId)}`);
 }
 
+export async function compactThreadContext(threadId: ThreadId, modelId: ModelId | null, signal: AbortSignal) {
+  const response = await apiClient.post<ApiResponse<{ changed: boolean; truncated: boolean }>>(
+    `/chat/${encodeURIComponent(threadId)}/context/compact`,
+    modelId ? { model_id: modelId } : {},
+    { signal, timeout: 310_000 },
+  );
+  return response.data.data;
+}
+
 /**
  * 获取一个 Thread 的权威 Snapshot。
  *

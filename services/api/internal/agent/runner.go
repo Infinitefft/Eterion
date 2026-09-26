@@ -2,7 +2,10 @@
 // the independent Node.js Agent service.
 package agent
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Message is one persisted conversation message sent to the Agent.
 type Message struct {
@@ -66,15 +69,18 @@ type ToolEvent struct {
 
 // Event is the normalized Agent event consumed by the chat RunManager.
 type Event struct {
-	Type    EventType
-	RunID   string
-	ModelID string
-	Format  string
-	Delta   string
-	Content string
-	Status  string
-	Tool    *ToolEvent
-	Error   *Failure
+	// AgentContext is internal persistence data, not frontend presentation data.
+	AgentContext     json.RawMessage
+	ContextTruncated bool
+	Type             EventType
+	RunID            string
+	ModelID          string
+	Format           string
+	Delta            string
+	Content          string
+	Status           string
+	Tool             *ToolEvent
+	Error            *Failure
 }
 
 // Failure is safe to expose after Cause is removed at the IM boundary.
@@ -98,4 +104,27 @@ func (e *Failure) Unwrap() error { return e.Cause }
 type Runner interface {
 	Run(ctx context.Context, input Input, handle func(Event) error) error
 	Close() error
+}
+
+type ContextHistoryMessage struct {
+	ID      string `json:"id"`
+	Role    string `json:"role"`
+	Status  string `json:"status"`
+	Content string `json:"content"`
+}
+
+type CompactInput struct {
+	ModelID      string                  `json:"model_id"`
+	AgentContext json.RawMessage         `json:"agent_context"`
+	History      []ContextHistoryMessage `json:"history"`
+}
+
+type CompactResult struct {
+	AgentContext json.RawMessage `json:"agent_context"`
+	Changed      bool            `json:"changed"`
+	Truncated    bool            `json:"truncated"`
+}
+
+type ContextCompactor interface {
+	Compact(context.Context, CompactInput) (*CompactResult, error)
 }

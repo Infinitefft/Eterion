@@ -80,7 +80,8 @@ func (p *Publisher) MessageCompleted(run Run, message Message, seq int64, eventE
 		Type: EventMessageCompleted, ThreadID: run.ChatID.String(), SeqID: seq,
 		Timestamp: p.now().UnixMilli(), RunID: run.ID.String(), MessageID: message.ID.String(),
 		Payload: MessageCompletedPayload{
-			Role: message.Role, Content: message.Content, Format: message.ContentFormat,
+			ContextTruncated: message.ContextTruncated,
+			Role:             message.Role, Content: message.Content, Format: message.ContentFormat,
 			Status: message.Status, CreatedAt: message.CreatedAt.UnixMilli(),
 			CompletedAt: completedAt.UnixMilli(), Error: eventError,
 		},

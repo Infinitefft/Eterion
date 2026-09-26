@@ -3,12 +3,14 @@ package chat
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type historyMessage struct {
@@ -19,8 +21,9 @@ type historyMessage struct {
 }
 
 type historyPage struct {
-	Messages   []historyMessage `json:"messages"`
-	NextCursor *string          `json:"next_cursor"`
+	AgentContext json.RawMessage  `json:"agent_context,omitempty"`
+	Messages     []historyMessage `json:"messages"`
+	NextCursor   *string          `json:"next_cursor"`
 }
 
 // Only an active Run's bearer capability can read its history. The capability
@@ -48,7 +51,7 @@ func RegisterHistoryRoute(engine *gin.Engine, runs *RunManager, repository *Gorm
 				return
 			}
 		}
-		page, err := repository.readHistoryPage(c.Request.Context(), active.run, cursor)
+		page, err := repository.readHistoryPage(c.Request.Context(), active.run, cursor, c.Query("context") == "1")
 		if err != nil {
 			if errors.Is(err, ErrRepositoryChatNotFound) {
 				c.Status(http.StatusNotFound)
@@ -64,7 +67,7 @@ func RegisterHistoryRoute(engine *gin.Engine, runs *RunManager, repository *Gorm
 
 // Return raw facts, including status. Model-context selection belongs to Node.
 // The input message bounds every page so later turns cannot enter this Run.
-func (r *GormRepository) readHistoryPage(ctx context.Context, run Run, cursor uuid.UUID) (*historyPage, error) {
+func (r *GormRepository) readHistoryPage(ctx context.Context, run Run, cursor uuid.UUID, includeContext ...bool) (*historyPage, error) {
 	if _, err := r.FindChatOwned(ctx, run.UserID, run.ChatID); err != nil {
 		return nil, err
 	}
@@ -74,6 +77,20 @@ func (r *GormRepository) readHistoryPage(ctx context.Context, run Run, cursor uu
 	}
 	query := r.db.WithContext(ctx).Model(&Message{}).
 		Where("chat_id = ? AND (created_at, id) <= (?, ?)", run.ChatID, anchor.CreatedAt, anchor.ID)
+	var saved json.RawMessage
+	if cursor == uuid.Nil && len(includeContext) > 0 && includeContext[0] {
+		var latest Message
+		err := r.db.WithContext(ctx).Where("chat_id = ? AND role = ? AND status = ? AND agent_context IS NOT NULL AND (created_at, id) < (?, ?)",
+			run.ChatID, MessageRoleAssistant, MessageStatusCompleted, anchor.CreatedAt, anchor.ID).
+			Order("created_at DESC, id DESC").First(&latest).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if err == nil {
+			saved = latest.AgentContext
+			query = query.Where("(created_at, id) > (?, ?)", latest.CreatedAt, latest.ID)
+		}
+	}
 	if cursor != uuid.Nil {
 		var after Message
 		if err := r.db.WithContext(ctx).Where("id = ? AND chat_id = ?", cursor, run.ChatID).First(&after).Error; err != nil {
@@ -83,10 +100,10 @@ func (r *GormRepository) readHistoryPage(ctx context.Context, run Run, cursor uu
 	}
 	const pageSize = 100
 	var rows []Message
-	if err := query.Order("created_at ASC, id ASC").Limit(pageSize + 1).Find(&rows).Error; err != nil {
+	if err := query.Omit("AgentContext").Order("created_at ASC, id ASC").Limit(pageSize + 1).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	page := &historyPage{Messages: make([]historyMessage, 0, len(rows))}
+	page := &historyPage{AgentContext: saved, Messages: make([]historyMessage, 0, len(rows))}
 	if len(rows) > pageSize {
 		rows = rows[:pageSize]
 		cursor := rows[len(rows)-1].ID.String()

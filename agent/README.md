@@ -8,7 +8,7 @@ Eterion 的 Node.js + TypeScript Agent 模块。当前 HTTP 服务使用 Agent R
 `evals/smoke-agent.ts` 可单独调用这条 Tool Calling 链路。
 `src/runtime/agent.ts` 已接入 `POST /runs`，支持文本流、Tool 生命周期、取消和失败收尾。
 `createDirectRuntime()` 保留为可手动切换的文本直出基线，没有自动回退路由。
-Memory、RAG、Skills 及完整前端 Tool 状态链路仍待实现，不能将一次脚本调用视为这些能力已完成。
+会话 Memory 已接入代码链路，真实模型与数据库联调仍待进行；RAG、Skills 仍待实现。
 
 ## 目录与职责
 
@@ -21,6 +21,7 @@ src/
 ├── agent.ts                 Agent、Prompt、Tools、Middleware 组装
 ├── protocol.ts              请求、领域事件和 Runtime 类型契约
 ├── context.ts               查询原始历史、筛选并组装本轮模型上下文
+├── memory/                  消息序列化、最终上下文采集、自动与手动压缩
 ├── runtime/
 │   ├── direct.ts            普通模型的流式事件适配
 │   └── agent.ts             Agent 文本流、Tool 状态与运行终态适配
@@ -128,12 +129,59 @@ Node 的 `context.ts` 通过 `GO_API_BASE_URL`（默认 `http://127.0.0.1:8080`�
 Go 根据活动 Run 校验访问范围，按时间和 ID 返回截至本轮输入的原始消息，每页最多 100 条。
 凭证只授权当前 Run，执行结束后失效，不进入模型输入和 SQLite 运行记录。
 
-当前 Node 保留原有上下文行为：读取所有历史页，仅选择非空、已完成的 user/assistant 消息。
+当前 Node 在首次读取时携带 `context=1`：Go 返回最近成功回答的 `agent_context` 和它之后的历史。
+Node 恢复已保存的框架消息，再从新增历史中选择非空、已完成的 user/assistant 消息。
+没有已保存上下文的旧会话继续读取所有历史页；后续分页通过 `after` 游标继续，不重复读取快照。
 本轮输入已在历史中，不重复追加；缺失本轮输入或查询失败会产生 `AGENT_CONTEXT_LOAD_FAILED`，不静默退化成单轮回答。
 整个历史加载阶段最多 30 秒，支持调用方取消。System Prompt 仍由 Agent 组装。
-这次只迁移上下文职责，没有实现 Token 裁剪、摘要、Skills、RAG 或长期记忆。
+成功的 `run.completed` 内部事件携带 `agentContext`；Go 与消息、Run 完成状态在同一事务中保存，
+前端事件不携带此数组。Direct 基线不保存框架上下文。业务数据全部使用 PostgreSQL，不依赖监控数据库。
 Go 继续负责业务消息持久化、资源归属、Run 展示状态和 IM 事件，Node 不直连 Go 的业务数据库。
 升级时需同时重启 Node Agent 与 Go API；若 Go 端口不同，应同步设置 `GO_API_BASE_URL`。
+
+## 会话上下文与压缩
+
+启动新后端前，按仓库已有 goose 流程应用 `services/api/migrations/00007_add_agent_context.sql`。
+它增加可空的 `messages.agent_context JSONB`，旧数据无需回填。迁移文件已提供，本次开发未连接数据库执行迁移。
+
+- 每轮成功结束后保存完整消息数组，包括摘要、未压缩历史、工具调用与结果、最终回答。
+- 自动压缩在每次主模型调用前执行；默认采用 `MODEL_CONTEXT_WINDOW=32768` 的项目预算。
+  该值不是厂商最大窗口，可用各模型的 `*_CONTEXT_WINDOW` 覆盖，必须不超过实际模型容量。
+- 主模型输出上限 4096 tokens；从窗口中扣除该预留、主提示词、工具定义和 2048 tokens 余量，
+  消息达到剩余预算的 80% 时触发。摘要使用同一模型配置的独立无工具客户端，输出上限 2048 tokens。
+- 默认保留最近 10 条消息；近期内容过大时缩小目标窗口，工具配对边界由内置实现调整。
+  手动压缩短会话时目标保留约一半消息（最多 10 条、至少 2 条），没有可压缩内容或没有缩小则返回无需压缩。
+- token 数为偏保守的字符估算，不是模型 tokenizer 的精确计数；System Prompt 不进入摘要。
+- 使用内置 `summarizationMiddleware`，通过 `patches/langchain@1.5.10.patch` 修正吞异常行为，
+  pnpm 安装时自动应用。升级 LangChain 时需要重新核对该补丁。
+- 禁用内置默认的静默摘要前裁剪。只有摘要请求明确超限时，才截掉最旧的一半消息并按工具边界调整，
+  保留最近用户请求，再尝试一次摘要。失败、空摘要或无效结果不替换上下文；取消信号传递到摘要调用。
+- 主模型在摘要后仍超限时明确失败，不再循环压缩。截断成功会通过完成事件提醒前端；该提示不改变原聊天正文。
+
+用户通过输入框工具栏的“压缩上下文”按钮主动触发：
+
+```text
+POST /api/chat/:id/context/compact  { "model_id": "可选模型 ID" }
+→ Go 鉴权、锁定空闲会话、读取上下文
+→ POST /context/compact（Agent 内部接口）
+→ Go 更新最近成功 assistant 的 agent_context
+→ { data: { changed: boolean, truncated: boolean } }
+```
+
+手动压缩只覆盖截至最近成功助手消息的内容，不把其后的失败轮次写入较早边界。
+若没有成功回答则无需压缩。Go 用有界事务持有会话行锁，最多等待 Agent 5 分钟；
+压缩期间新消息提交和另一次压缩返回忙碌，失败时事务回滚。页面离开时取消请求。
+Agent `/runs` 与 `/context/compact` 都只应放在本机或可信服务网络，浏览器必须通过 Go 鉴权入口访问。
+
+### 验证状态与待联调场景
+
+只执行类型／编译检查，未新增或执行测试脚本，也未调用真实模型。以下场景仍需要用户安排联调：
+
+1. 新会话保存上下文，下一轮和重新进入历史会话时恢复，消息不重复。
+2. 多次工具调用期间自动压缩；随后继续执行，最终保存摘要和新增工具消息。
+3. 主动压缩成功、无需压缩、会话忙碌、失败与取消；原始聊天正文不变。
+4. 摘要超限的一次截断重试、空摘要与普通网络错误不替换旧上下文。
+5. 多会话同时运行互不影响；关闭监控记录后以上业务仍可运行。
 
 不调用工具时，成功事件按顺序输出：
 

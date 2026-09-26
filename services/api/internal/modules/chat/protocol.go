@@ -121,13 +121,14 @@ type MessageDeltaPayload struct {
 }
 
 type MessageCompletedPayload struct {
-	Role        MessageRole    `json:"role"`
-	Content     string         `json:"content"`
-	Format      TextFormat     `json:"format"`
-	Status      MessageStatus  `json:"status"`
-	CreatedAt   int64          `json:"createdAt"`
-	CompletedAt int64          `json:"completedAt"`
-	Error       *ProtocolError `json:"error"`
+	ContextTruncated bool           `json:"contextTruncated,omitempty"`
+	Role             MessageRole    `json:"role"`
+	Content          string         `json:"content"`
+	Format           TextFormat     `json:"format"`
+	Status           MessageStatus  `json:"status"`
+	CreatedAt        int64          `json:"createdAt"`
+	CompletedAt      int64          `json:"completedAt"`
+	Error            *ProtocolError `json:"error"`
 }
 
 type ToolStartedPayload struct {

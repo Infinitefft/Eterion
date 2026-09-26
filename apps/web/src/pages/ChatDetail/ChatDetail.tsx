@@ -82,12 +82,6 @@ export function ChatDetail() {
 
   return (
     <section className='chat-detail-page'>
-      {snapshotStatus === 'loading' ? (
-        <p className='chat-detail-alert' role='status'>
-          正在加载会话…
-        </p>
-      ) : null}
-
       {snapshotError ? (
         <div className='chat-detail-alert' role='alert'>
           <span>{snapshotError}</span>

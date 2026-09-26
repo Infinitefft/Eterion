@@ -1,9 +1,13 @@
-import { AIMessage, AIMessageChunk, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, AIMessageChunk, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { ChatOpenAI } from '@langchain/openai';
+import { z } from 'zod';
 
-import { createWebAgent, type WebAgent } from '../agent.js';
+import { createWebAgent, buildSystemPrompt, type WebAgent } from '../agent.js';
+import { toJsonSchema } from '@langchain/core/utils/json_schema';
+import { createContextCompaction, estimateTokens, isContextLimitError } from '../memory/compaction.js';
 import { toPublicModel, type Settings } from '../config.js';
 import { buildModelClients, extractContentDelta } from '../models.js';
+import { serializeContext } from '../memory/messages.js';
 import { createWebSearchTool } from '../tools/web-search.js';
 import { webFetch } from '../tools/web-fetch.js';
 import { projectToolResult } from '../tools/presentation.js';
@@ -14,6 +18,7 @@ import {
   type AgentEvent,
   type AgentRuntime,
   type RunInput,
+  type JsonValue,
 } from '../protocol.js';
 
 // 当前锁定版本的模型节点名；框架细节只留在 Runtime，不进入前端协议。
@@ -40,19 +45,34 @@ export function createAgentRuntime(
   ] as const;
 
   const agents = new Map<string, WebAgent>();
+  const compactions = new Map<string, ReturnType<typeof createContextCompaction>>();
+  const summaryClients = buildModelClients(settings, true);
+  const fixedInputTokens = estimateTokens(buildSystemPrompt(settings.systemPrompt))
+    + estimateTokens(tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: toJsonSchema(tool.schema) })));
 
   // 按模型组装一次；每次 stream() 的消息和运行状态仍彼此独立。
   for (const [modelId, model] of clients) {
+    const config = settings.models.find((entry) => entry.id === modelId);
+    const summaryModel = summaryClients.get(modelId);
+    if (!config || !summaryModel) throw new Error('Missing memory model configuration');
+    const compaction = createContextCompaction(summaryModel, config.contextWindow, fixedInputTokens);
+    compactions.set(modelId, compaction);
     agents.set(modelId, createWebAgent({
       model,
       prompt: settings.systemPrompt,
       tools,
+      compaction: compaction.middleware,
     }));
   }
 
   return withRunRecording(settings, {
     defaultModelId: settings.defaultModelId,
     models: settings.models.map(toPublicModel),
+    async compact(modelId, messages, signal) {
+      const compaction = compactions.get(modelId);
+      if (!compaction) throw new Error('Model not available');
+      return compaction.compact(messages, { signal, context: {} }, true);
+    },
 
     /** 执行一次请求，转换领域事件，并响应调用方取消或运行超时。 */
     async *stream(
@@ -94,6 +114,9 @@ export function createAgentRuntime(
       let content = '';
       // 有中途说明不等于最后已经生成有效答复。
       let hasFinalAnswer = false;
+      // Agent 按模型复用，但接收结果的变量与回调属于本次 Run，不能共享。
+      let finalContext: JsonValue[] | undefined;
+      let contextTruncated = false;
 
       // 保存本次运行的失败原因，统一在最后输出终态。
       let failure: AgentError | undefined;
@@ -121,11 +144,20 @@ export function createAgentRuntime(
         // stream() 真正启动 Agent Loop；不用手动执行 Tool 或回填 ToolMessage。
         const events = await agent.stream(
           {
-            messages: input.messages,
+            messages: input.contextMessages ?? input.messages,
           },
           {
             // messages 接收文本片段，updates 接收完整步骤结果。
             streamMode: STREAM_MODES,
+            context: {
+              onContextTruncated() { contextTruncated = true; },
+              captureMessages(messages: BaseMessage[]) {
+                // 先完成 JSON 编码转换，去掉可选的 undefined 字段，并在成功终态前发现编码错误。
+                finalContext = z.array(z.json()).parse(
+                  JSON.parse(JSON.stringify(serializeContext(messages))),
+                );
+              },
+            },
             // 外部取消或 Run 超时时，框架停止后续模型与工具调用。
             signal,
             ...(recordingCallbacks ? { callbacks: [recordingCallbacks] } : {}),
@@ -254,8 +286,8 @@ export function createAgentRuntime(
         // 即使底层流正常关闭，也不能把已经取消的执行标记为成功。
         signal.throwIfAborted();
 
-        // 流结束不一定等于任务完成：还必须有最终答复，且所有工具都有终态。
-        if (!hasFinalAnswer || activeTools.size > 0) {
+        // 除有效答复和工具终态外，还必须取得最终上下文，供后续持久化使用。
+        if (!hasFinalAnswer || activeTools.size > 0 || finalContext === undefined) {
           failure = {
             code: 'AGENT_INCOMPLETE_RESPONSE',
             message: 'Agent 未生成有效的最终答复',
@@ -287,6 +319,8 @@ export function createAgentRuntime(
             message: 'Agent 已达到本轮调用上限',
             retryable: false,
           };
+        } else if (isContextLimitError(error)) {
+          failure = { code: 'AGENT_CONTEXT_LIMIT', message: '上下文仍超过模型限制，请缩短输入或手动压缩后重试', retryable: false };
         } else {
           failure = {
             code: 'AGENT_EXECUTION_FAILED',
@@ -329,7 +363,11 @@ export function createAgentRuntime(
       if (failure) {
         yield runFailed(runId, failure.code, failure.message, failure.retryable);
       } else {
-        yield { type: 'run.completed', runId, payload: {} };
+        yield {
+          type: 'run.completed', runId,
+          // 内部上下文由 Go 保存，不进入前端的消息完成事件。
+          payload: { agentContext: finalContext ?? null, contextTruncated },
+        };
       }
     },
   });

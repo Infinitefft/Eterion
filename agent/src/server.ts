@@ -1,4 +1,8 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { HumanMessage, AIMessage } from '@langchain/core/messages';
+import { restoreContext, serializeContext } from './memory/messages.js';
+import { isContextLimitError } from './memory/compaction.js';
 
 import type { Settings } from './config.js';
 import { runFailed, runRequestSchema, type AgentEvent, type AgentRuntime, type RunInput } from './protocol.js';
@@ -14,6 +18,45 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
     default_model_id: runtime.defaultModelId,
     models: runtime.models,
   }));
+
+  // 与 /runs 一样，仅供 Go 在可信服务网络内调用；浏览器通过 Go 鉴权入口访问。
+  app.post('/context/compact', { bodyLimit: 4 << 20 }, async (request, reply) => {
+    const parsed = z.object({
+      model_id: z.string().min(1),
+      agent_context: z.unknown().optional(),
+      history: z.array(z.object({
+        id: z.string().uuid(), role: z.enum(['user', 'assistant', 'system']),
+        status: z.string(), content: z.string(),
+      })),
+    }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_CONTEXT', message: '上下文参数不合法' } });
+    if (!runtime.compact) return reply.code(409).send({ error: { code: 'COMPACTION_UNAVAILABLE', message: '当前模式不支持压缩' } });
+    if (!runtime.models.some((model) => model.id === parsed.data.model_id)) {
+      return reply.code(400).send({ error: { code: 'MODEL_NOT_AVAILABLE', message: '所选模型不可用' } });
+    }
+    const controller = new AbortController();
+    const onClose = () => { if (!reply.raw.writableEnded) controller.abort(); };
+    reply.raw.once('close', onClose);
+    try {
+      const messages = parsed.data.agent_context == null ? [] : restoreContext(parsed.data.agent_context);
+      for (const message of parsed.data.history) {
+        if (message.status !== 'completed' || !message.content || message.role === 'system') continue;
+        messages.push(message.role === 'user'
+          ? new HumanMessage({ id: message.id, content: message.content })
+          : new AIMessage({ id: message.id, content: message.content }));
+      }
+      const result = await runtime.compact(parsed.data.model_id, messages,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(settings.runTimeoutMs)]));
+      return { agent_context: serializeContext(result.messages), changed: result.changed, truncated: result.truncated };
+    } catch (error) {
+      return reply.code(isContextLimitError(error) ? 413 : 502).send({ error: {
+        code: isContextLimitError(error) ? 'AGENT_CONTEXT_LIMIT' : 'COMPACTION_FAILED',
+        message: '上下文压缩失败，原有上下文未修改',
+      } });
+    } finally {
+      reply.raw.off('close', onClose);
+    }
+  });
 
   app.post('/runs', async (request, reply) => {
     const parsed = runRequestSchema.safeParse(request.body);
@@ -97,7 +140,7 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
   return app;
 }
 
-/** 将项目事件编码为一帧 SSE，不暴露框架内部消息结构。 */
+  /** 编码内部 SSE；完成事件中的上下文由 Go 保存，不转发给前端。 */
 function encodeSse(event: AgentEvent): string {
   return `event: ${event.type}\ndata: ${JSON.stringify({
     runId: event.runId,

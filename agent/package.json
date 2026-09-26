@@ -4,6 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@10.20.0",
+  "pnpm": {
+    "patchedDependencies": {
+      "langchain@1.5.10": "patches/langchain@1.5.10.patch"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",

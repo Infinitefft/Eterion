@@ -1,0 +1,96 @@
+--- a/dist/agents/middleware/summarization.js
++++ b/dist/agents/middleware/summarization.js
+@@ -532,26 +532,25 @@
+ 	* ```
+ 	*/
+ 	const formattedMessages = getBufferString(trimmedMessages);
+-	try {
+-		const formattedPrompt = summaryPrompt.replace("{messages}", formattedMessages);
+-		const config = mergeConfigs(pickRunnableConfigKeys(runtime) ?? {}, {
+-			metadata: { lc_source: "summarization" },
+-			tags: [INTERNAL_CALL_TAG]
+-		});
+-		const content = (await model.invoke(formattedPrompt, config)).content;
+-		/**
+-		* Handle both string content and MessageContent array
+-		*/
+-		if (typeof content === "string") return content.trim();
+-		else if (Array.isArray(content)) return content.map((item) => {
+-			if (typeof item === "string") return item;
+-			if (typeof item === "object" && item !== null && "text" in item) return item.text;
+-			return "";
+-		}).join("").trim();
+-		return "Error generating summary: Invalid response format";
+-	} catch (e) {
+-		return `Error generating summary: ${e}`;
+-	}
++	const formattedPrompt = summaryPrompt.replace("{messages}", formattedMessages);
++	const config = mergeConfigs(pickRunnableConfigKeys(runtime) ?? {}, {
++		metadata: { lc_source: "summarization" },
++		tags: [INTERNAL_CALL_TAG]
++	});
++	const content = (await model.invoke(formattedPrompt, config)).content;
++	/**
++	* Handle both string content and MessageContent array
++	*/
++	if (typeof content === "string") {
++		if (!content.trim()) throw new Error("Empty summary response");
++		return content.trim();
++	}
++	else if (Array.isArray(content)) return content.map((item) => {
++		if (typeof item === "string") return item;
++		if (typeof item === "object" && item !== null && "text" in item) return item.text;
++		return "";
++	}).join("").trim();
++	throw new Error("Invalid summary response format");
+ }
+ /**
+ * Trim messages to fit within summary generation limits
+--- a/dist/agents/middleware/summarization.cjs
++++ b/dist/agents/middleware/summarization.cjs
+@@ -532,26 +532,25 @@
+ 	* ```
+ 	*/
+ 	const formattedMessages = (0, _langchain_core_messages.getBufferString)(trimmedMessages);
+-	try {
+-		const formattedPrompt = summaryPrompt.replace("{messages}", formattedMessages);
+-		const config = (0, _langchain_core_runnables.mergeConfigs)((0, _langchain_core_runnables.pickRunnableConfigKeys)(runtime) ?? {}, {
+-			metadata: { lc_source: "summarization" },
+-			tags: [require_constants.INTERNAL_CALL_TAG]
+-		});
+-		const content = (await model.invoke(formattedPrompt, config)).content;
+-		/**
+-		* Handle both string content and MessageContent array
+-		*/
+-		if (typeof content === "string") return content.trim();
+-		else if (Array.isArray(content)) return content.map((item) => {
+-			if (typeof item === "string") return item;
+-			if (typeof item === "object" && item !== null && "text" in item) return item.text;
+-			return "";
+-		}).join("").trim();
+-		return "Error generating summary: Invalid response format";
+-	} catch (e) {
+-		return `Error generating summary: ${e}`;
+-	}
++	const formattedPrompt = summaryPrompt.replace("{messages}", formattedMessages);
++	const config = (0, _langchain_core_runnables.mergeConfigs)((0, _langchain_core_runnables.pickRunnableConfigKeys)(runtime) ?? {}, {
++		metadata: { lc_source: "summarization" },
++		tags: [require_constants.INTERNAL_CALL_TAG]
++	});
++	const content = (await model.invoke(formattedPrompt, config)).content;
++	/**
++	* Handle both string content and MessageContent array
++	*/
++	if (typeof content === "string") {
++		if (!content.trim()) throw new Error("Empty summary response");
++		return content.trim();
++	}
++	else if (Array.isArray(content)) return content.map((item) => {
++		if (typeof item === "string") return item;
++		if (typeof item === "object" && item !== null && "text" in item) return item.text;
++		return "";
++	}).join("").trim();
++	throw new Error("Invalid summary response format");
+ }
+ /**
+ * Trim messages to fit within summary generation limits

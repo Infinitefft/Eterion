@@ -87,6 +87,11 @@ function AssistantMessage({ message }: MessageProps) {
       </div>
 
       <div className='chat-assistant-content'>
+        {message.contextTruncated ? (
+          <p className='chat-message-status' role='status'>
+            为继续处理任务，已舍弃部分较早上下文；原始聊天记录仍保留。
+          </p>
+        ) : null}
         {message.runId ? (
           <AgentRunTrace
             threadId={message.threadId}

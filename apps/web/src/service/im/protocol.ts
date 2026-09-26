@@ -442,6 +442,7 @@ export interface MessageDeltaEvent extends ThreadEventEnvelope<
 
 /** 一条用户或 Assistant 消息进入终态时的完整数据。 */
 export interface MessageCompletedPayload {
+  contextTruncated?: boolean;
   /** 消息发送方。 */
   role: MessageRole;
 

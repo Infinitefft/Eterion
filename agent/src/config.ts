@@ -28,6 +28,8 @@ export interface ModelConfig {
   apiKey: string;
   baseUrl: string;
   providerModel: string;
+  // 项目的保守上下文预算，不代表厂商声明的最大窗口。
+  contextWindow: number;
 }
 
 const MODEL_DEFINITIONS = [
@@ -157,6 +159,7 @@ function loadModelCatalog(environ: NodeJS.ProcessEnv): ModelConfig[] {
         definition.baseUrl,
       ),
       providerModel,
+      contextWindow: parseContextWindow(value(environ, `${definition.modelPrefix}_CONTEXT_WINDOW`, value(environ, 'MODEL_CONTEXT_WINDOW', '32768'))),
     });
   }
 
@@ -181,6 +184,7 @@ function loadModelCatalog(environ: NodeJS.ProcessEnv): ModelConfig[] {
       apiKey,
       baseUrl: value(environ, 'MODEL_BASE_URL'),
       providerModel,
+      contextWindow: parseContextWindow(value(environ, 'MODEL_CONTEXT_WINDOW', '32768')),
     },
   ];
 }
@@ -195,6 +199,14 @@ function parsePort(raw: string): number {
     throw new Error('AGENT_PORT must be an integer between 1 and 65535');
   }
   return port;
+}
+
+function parseContextWindow(raw: string): number {
+  const size = Number(raw);
+  if (!Number.isSafeInteger(size) || size < 16384) {
+    throw new Error('MODEL_CONTEXT_WINDOW must be an integer of at least 16384');
+  }
+  return size;
 }
 
 function parseRecordingEnabled(raw: string): boolean {

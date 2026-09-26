@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { runInputSchema, type RunInput, type RunRequest } from './protocol.js';
+import { HumanMessage, AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { restoreContext } from './memory/messages.js';
 
 const historyPageSchema = z.object({
   messages: z.array(z.object({
@@ -9,11 +11,12 @@ const historyPageSchema = z.object({
     content: z.string(),
   })),
   next_cursor: z.string().uuid().nullable(),
+  agent_context: z.unknown().optional(),
 });
 
 /**
- * 当前只迁移原有历史选择规则，不做摘要或长期记忆。
- * Go 返回原始消息；哪些内容进入模型，由 Agent 在这里决定。
+ * 恢复最近一份运行上下文，再按原有状态规则追加新的历史消息。
+ * Go 返回业务数据；消息转换和是否进入模型由 Agent 决定。
  */
 export async function buildRunInput(
   request: RunRequest,
@@ -25,12 +28,14 @@ export async function buildRunInput(
   // 限制整个历史加载阶段，同时响应 Go 取消；失败不能静默降级为无历史回答。
   const signal = AbortSignal.any([externalSignal, AbortSignal.timeout(30_000)]);
   const messages: RunInput['messages'] = [];
+  const contextMessages: BaseMessage[] = [];
   let cursor: string | null = null;
   let lastMessageId: string | undefined;
   const cursors = new Set<string>();
   do {
     const url = new URL(`/internal/agent/runs/${request.run_id}/messages`, apiBaseUrl);
     if (cursor) url.searchParams.set('after', cursor);
+    else url.searchParams.set('context', '1');
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${request.history_token}` },
       // 凭证只交给已配置的 Go 服务，不跟随跳转。
@@ -39,9 +44,15 @@ export async function buildRunInput(
     });
     if (!response.ok) throw new Error('Conversation history request failed');
     const page = historyPageSchema.parse(await response.json());
+    if (!cursor && page.agent_context != null) {
+      contextMessages.push(...restoreContext(page.agent_context));
+    }
     for (const message of page.messages) {
       if (message.status !== 'completed' || !message.content || message.role === 'system') continue;
       messages.push({ role: message.role, content: message.content });
+      contextMessages.push(message.role === 'user'
+        ? new HumanMessage({ content: message.content, id: message.id })
+        : new AIMessage({ content: message.content, id: message.id }));
       lastMessageId = message.id;
     }
     cursor = page.next_cursor;
@@ -53,8 +64,8 @@ export async function buildRunInput(
 
   // 本轮输入已包含在有界历史里，不能再追加一次，也不能接受缺少本轮输入的快照。
   if (lastMessageId !== request.input_message_id) throw new Error('Conversation history input mismatch');
-  return runInputSchema.parse({
+  return { ...runInputSchema.parse({
     run_id: request.run_id, user_id: request.user_id,
     thread_id: request.thread_id, model_id: request.model_id, messages,
-  });
+  }), contextMessages };
 }

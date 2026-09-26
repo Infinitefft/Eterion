@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  langchain@1.5.10:
+    hash: 3c2034e946b0a1c68ce6cf4ac5ea9876679db467a2be4fa91dd4ed7ae6485d24
+    path: patches/langchain@1.5.10.patch
+
 importers:
 
   .:
@@ -25,7 +30,7 @@ importers:
         version: 5.12.1
       langchain:
         specifier: 1.5.10
-        version: 1.5.10(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))(openai@7.5.0(zod@4.4.3))
+        version: 1.5.10(patch_hash=3c2034e946b0a1c68ce6cf4ac5ea9876679db467a2be4fa91dd4ed7ae6485d24)(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))(openai@7.5.0(zod@4.4.3))
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -995,7 +1000,7 @@ snapshots:
 
   json-schema-traverse@1.0.0: {}
 
-  langchain@1.5.10(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))(openai@7.5.0(zod@4.4.3)):
+  langchain@1.5.10(patch_hash=3c2034e946b0a1c68ce6cf4ac5ea9876679db467a2be4fa91dd4ed7ae6485d24)(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))(openai@7.5.0(zod@4.4.3)):
     dependencies:
       '@langchain/core': 1.2.9(openai@7.5.0(zod@4.4.3))
       '@langchain/langgraph': 1.4.13(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))(zod@4.4.3)

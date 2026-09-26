@@ -1,4 +1,6 @@
-import { ArrowUp, LoaderCircle, Paperclip, Square } from 'lucide-react';
+import { ArrowUp, LoaderCircle, Paperclip, Square, Minimize2, X } from 'lucide-react';
+import { compactThreadContext } from '@/api/im';
+import { getApiError } from '@/api/errors';
 import { useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import { getIMService } from '@/service/im';
@@ -35,6 +37,10 @@ export function Composer({ threadId }: ComposerProps) {
   const [selectedModelId, setSelectedModelId] = useState<ModelId | null>(null);
   const [cancelRequestedRunId, setCancelRequestedRunId] = useState<RunId | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isCompacting, setIsCompacting] = useState(false);
+  const [compactionNotice, setCompactionNotice] = useState<string | null>(null);
+  const [compactionNoticeDismissed, setCompactionNoticeDismissed] = useState(false);
+  const compactionController = useRef<AbortController | null>(null);
 
   const user = useAuthStore((state) => state.user);
   const sessionVersion = useAuthStore((state) => state.sessionVersion);
@@ -47,11 +53,18 @@ export function Composer({ threadId }: ComposerProps) {
     setIsSubmitting(false);
     setCancelRequestedRunId(null);
     setSubmitError(null);
+    setIsCompacting(false);
+    setCompactionNotice(null);
+    setCompactionNoticeDismissed(false);
   }
 
   useLayoutEffect(() => {
     viewRef.current = { sessionVersion: scope.sessionVersion, cancelRequestedRunId: null };
-    return () => { viewRef.current = null; };
+    return () => {
+      viewRef.current = null;
+      compactionController.current?.abort();
+      compactionController.current = null;
+    };
   }, [scope]);
 
   const snapshotStatus = useIMStore(
@@ -66,7 +79,34 @@ export function Composer({ threadId }: ComposerProps) {
   const isCancelling = activeRunId !== null && cancelRequestedRunId === activeRunId;
   const canSubmit =
     user !== null && isThreadReady && isConnected && normalizedPrompt.length > 0 &&
-    !isThreadBusy && !isSubmitting;
+    !isThreadBusy && !isSubmitting && !isCompacting;
+
+  async function handleCompact() {
+    const view = viewRef.current;
+    if (!isCurrentView(view) || compactionController.current || isCompacting || isSubmitting || !isThreadReady
+      || selectIsChatBusy(useIMStore.getState(), threadId)) return;
+    const controller = new AbortController();
+    compactionController.current = controller;
+    setIsCompacting(true);
+    setCompactionNotice(null);
+    setCompactionNoticeDismissed(false);
+    setSubmitError(null);
+    try {
+      const result = await compactThreadContext(threadId, selectedModelId, controller.signal);
+      if (!isCurrentView(view)) return;
+      setCompactionNotice(result.truncated
+        ? '上下文已压缩，部分较早内容已舍弃；原始聊天记录仍保留。'
+        : result.changed ? '上下文已压缩，聊天记录保持不变。' : '当前无需压缩。');
+    } catch (error) {
+      if (!isCurrentView(view) || controller.signal.aborted) return;
+      setCompactionNotice(getApiError(error)?.message ?? '压缩未完成，请稍后重试');
+    } finally {
+      if (isCurrentView(view)) {
+        setIsCompacting(false);
+        compactionController.current = null;
+      }
+    }
+  }
 
   function isCurrentView(view: ComposerView | null): view is ComposerView {
     return view !== null && viewRef.current === view &&
@@ -194,94 +234,122 @@ export function Composer({ threadId }: ComposerProps) {
     : '登录后继续对话';
 
   return (
-    <form
-      className='chat-detail-composer'
-      onSubmit={(event) => {
-        void handleSubmit(event);
-      }}
-    >
-      <label className='sr-only' htmlFor='chat-detail-prompt'>
-        输入消息
-      </label>
-
-      <textarea
-        ref={textareaRef}
-        id='chat-detail-prompt'
-        name='prompt'
-        rows={1}
-        value={prompt}
-        placeholder={placeholder}
-        disabled={user === null}
-        aria-describedby={submitError ? 'chat-detail-submit-error' : undefined}
-        onChange={handlePromptChange}
-        onKeyDown={(event) => submitComposerOnEnter(event, canSubmit)}
-        onInput={(event) =>
-          resizeComposerTextarea(event.currentTarget, {
-            minHeight: TEXTAREA_MIN_HEIGHT,
-            maxHeight: TEXTAREA_MAX_HEIGHT,
-          })
-        }
-      />
-
-      <div className='chat-detail-composer-toolbar'>
-        <button
-          className='chat-detail-tool-button'
-          type='button'
-          disabled
-          title='附件功能稍后接入'
-          aria-label='添加附件（暂不可用）'
-        >
-          <Paperclip size={18} />
-        </button>
-
-        <div className='chat-detail-composer-actions'>
-          <ModelList
-            value={selectedModelId}
-            onChange={setSelectedModelId}
-            disabled={!isThreadReady || isThreadBusy || isSubmitting}
-            side='top'
-          />
-
-          {activeRunId ? (
-            <button
-              className='chat-detail-send-button is-stop'
-              type='button'
-              aria-label='停止生成'
-              disabled={isCancelling || !isConnected}
-              onClick={() => {
-                void handleCancelRun();
-              }}
-            >
-              {isCancelling ? (
-                <LoaderCircle className='chat-run-spinner' size={17} />
-              ) : (
-                <Square size={13} fill='currentColor' />
-              )}
-            </button>
-          ) : (
-            <button
-              className='chat-detail-send-button'
-              type='submit'
-              aria-label={
-                !isThreadReady ? '等待会话同步完成' : isThreadBusy ? '等待当前回答完成' : '发送消息'
-              }
-              disabled={!canSubmit}
-            >
-              {isSubmitting || isThreadBusy ? (
-                <LoaderCircle className='chat-run-spinner' size={17} />
-              ) : (
-                <ArrowUp size={19} strokeWidth={2.3} />
-              )}
-            </button>
-          )}
+    <>
+      {!compactionNoticeDismissed && (compactionNotice || isCompacting) ? (
+        <div className='chat-detail-compaction-notice'>
+          <span role='status'>
+            {isCompacting ? '正在压缩上下文…' : compactionNotice}
+          </span>
+          <button
+            className='chat-detail-tool-button'
+            type='button'
+            aria-label='关闭压缩提示'
+            title='关闭提示'
+            onClick={() => setCompactionNoticeDismissed(true)}
+          >
+            <X size={16} />
+          </button>
         </div>
-      </div>
-
-      {submitError ? (
-        <p id='chat-detail-submit-error' className='chat-detail-submit-error' role='alert'>
-          {submitError}
-        </p>
       ) : null}
-    </form>
+      <form
+        className='chat-detail-composer'
+        onSubmit={(event) => {
+          void handleSubmit(event);
+        }}
+      >
+        <label className='sr-only' htmlFor='chat-detail-prompt'>
+          输入消息
+        </label>
+
+        <textarea
+          ref={textareaRef}
+          id='chat-detail-prompt'
+          name='prompt'
+          rows={1}
+          value={prompt}
+          placeholder={placeholder}
+          disabled={user === null}
+          aria-describedby={submitError ? 'chat-detail-submit-error' : undefined}
+          onChange={handlePromptChange}
+          onKeyDown={(event) => submitComposerOnEnter(event, canSubmit)}
+          onInput={(event) =>
+            resizeComposerTextarea(event.currentTarget, {
+              minHeight: TEXTAREA_MIN_HEIGHT,
+              maxHeight: TEXTAREA_MAX_HEIGHT,
+            })
+          }
+        />
+
+        <div className='chat-detail-composer-toolbar'>
+          <button
+            className='chat-detail-tool-button'
+            type='button'
+            disabled
+            title='附件功能稍后接入'
+            aria-label='添加附件（暂不可用）'
+          >
+            <Paperclip size={18} />
+          </button>
+
+          <div className='chat-detail-composer-actions'>
+            <button
+              className='chat-detail-tool-button'
+              type='button'
+              title={isCompacting ? '正在压缩上下文' : '压缩上下文，保留原始聊天记录'}
+              aria-label={isCompacting ? '正在压缩上下文' : '压缩上下文'}
+              disabled={!user || !isThreadReady || isThreadBusy || isSubmitting || isCompacting}
+              onClick={() => { void handleCompact(); }}
+            >
+              {isCompacting ? <LoaderCircle className='chat-run-spinner' size={18} /> : <Minimize2 size={18} />}
+            </button>
+            <ModelList
+              value={selectedModelId}
+              onChange={setSelectedModelId}
+              disabled={!isThreadReady || isThreadBusy || isSubmitting || isCompacting}
+              side='top'
+            />
+
+            {activeRunId ? (
+              <button
+                className='chat-detail-send-button is-stop'
+                type='button'
+                aria-label='停止生成'
+                disabled={isCancelling || !isConnected}
+                onClick={() => {
+                  void handleCancelRun();
+                }}
+              >
+                {isCancelling ? (
+                  <LoaderCircle className='chat-run-spinner' size={17} />
+                ) : (
+                  <Square size={13} fill='currentColor' />
+                )}
+              </button>
+            ) : (
+              <button
+                className='chat-detail-send-button'
+                type='submit'
+                aria-label={
+                  !isThreadReady ? '等待会话同步完成' : isThreadBusy ? '等待当前回答完成' : '发送消息'
+                }
+                disabled={!canSubmit}
+              >
+                {isSubmitting || isThreadBusy ? (
+                  <LoaderCircle className='chat-run-spinner' size={17} />
+                ) : (
+                  <ArrowUp size={19} strokeWidth={2.3} />
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {submitError ? (
+          <p id='chat-detail-submit-error' className='chat-detail-submit-error' role='alert'>
+            {submitError}
+          </p>
+        ) : null}
+      </form>
+    </>
   );
 }
