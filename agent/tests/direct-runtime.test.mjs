@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { loadSettings } from '../dist/config.js';
-import { createDirectRuntime } from '../dist/runtime/direct.js';
+import { createDirectRuntime } from '../dist/runtime/direct-runtime.js';
 
 // 注入假客户端，只验证 Runtime 行为，不读取 .env 或发起模型请求。
 const settings = loadSettings({ MODEL_NAME: 'test-model', MODEL_API_KEY: 'test-key' });

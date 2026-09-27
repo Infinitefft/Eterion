@@ -1,6 +1,6 @@
 import { ChatOpenAI } from '@langchain/openai';
 
-import type { Settings } from './config.js';
+import type { Settings } from '../config.js';
 
 /** SDK 创建集中在这里，Runtime 不感知 API Key、Base URL 等厂商细节。 */
 export function buildModelClients(settings: Settings, summary = false): Map<string, ChatOpenAI> {

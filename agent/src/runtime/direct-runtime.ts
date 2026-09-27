@@ -1,9 +1,9 @@
 import type { ChatOpenAI } from '@langchain/openai';
 import type { BaseCallbackHandler } from '@langchain/core/callbacks/base';
-import { withRunRecording } from '../recording/runtime.js';
+import { withRunRecording } from '../recording/with-run-recording.js';
 
 import { toPublicModel, type Settings } from '../config.js';
-import { buildModelClients, extractContentDelta } from '../models.js';
+import { buildModelClients, extractContentDelta } from './models.js';
 import {
   runFailed,
   type AgentError,

@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { runInputSchema, type RunInput, type RunRequest } from './protocol.js';
+import { runInputSchema, type RunInput, type RunRequest } from '../protocol.js';
 import { HumanMessage, AIMessage, type BaseMessage } from '@langchain/core/messages';
-import { restoreContext } from './memory/messages.js';
+import { restoreContext } from './messages.js';
 
 const historyPageSchema = z.object({
   messages: z.array(z.object({

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { extractContentDelta } from '../dist/models.js';
+import { extractContentDelta } from '../dist/runtime/models.js';
 
 test('正文提取兼容 text 和字符串 content，并保持 text 优先级', () => {
   assert.equal(extractContentDelta({ text: '正文', content: '备用正文' }), '正文');

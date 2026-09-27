@@ -9,13 +9,13 @@ import {
   toolErrorMiddleware,
 } from 'langchain';
 
-import type { createWebSearchTool } from './tools/web-search.js';
-import type { webFetch } from './tools/web-fetch.js';
-import { captureContextMiddleware, captureContextSchema } from './memory/capture.js';
-import type { createContextCompaction } from './memory/compaction.js';
+import type { createWebSearchTool } from '../tools/web-search.js';
+import type { webFetch } from '../tools/web-fetch.js';
+import { captureContextMiddleware, captureContextSchema } from '../memory/capture.js';
+import type { createContextCompaction } from '../memory/compaction.js';
 
-const MAX_TOOL_CALLS = 10;
-const MAX_MODEL_CALLS = 6;
+const MAX_TOOL_CALLS = 30;
+const MAX_MODEL_CALLS = 20;
 
 interface ToolCallLimitOptions {
   runLimit: number;

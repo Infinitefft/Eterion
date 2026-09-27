@@ -8,8 +8,8 @@ import { AIMessage, AIMessageChunk } from '@langchain/core/messages';
 import { ChatGenerationChunk } from '@langchain/core/outputs';
 import { loadSettings } from '../dist/config.js';
 import { runInputSchema } from '../dist/protocol.js';
-import { createAgentRuntime } from '../dist/runtime/agent.js';
-import { createDirectRuntime } from '../dist/runtime/direct.js';
+import { createAgentRuntime } from '../dist/runtime/agent-runtime.js';
+import { createDirectRuntime } from '../dist/runtime/direct-runtime.js';
 import { openRecordStore } from '../dist/recording/store.js';
 
 // 显式假配置和本地模型，既不读取 .env，也不调用真实模型或工具。

@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage } from '@langchain/core/messages';
 import { loadSettings } from '../dist/config.js';
-import { createAgentRuntime } from '../dist/runtime/agent.js';
+import { createAgentRuntime } from '../dist/runtime/agent-runtime.js';
 import { openRecordStore } from '../dist/recording/store.js';
 
 // 固定模型帧驱动真实框架和现有工具，只替换 HTTP；不读取 .env 或调用外部服务。

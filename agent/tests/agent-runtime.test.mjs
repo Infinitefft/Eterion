@@ -5,7 +5,7 @@ import { AIMessage, AIMessageChunk } from '@langchain/core/messages';
 import { ChatGenerationChunk } from '@langchain/core/outputs';
 
 import { loadSettings } from '../dist/config.js';
-import { createAgentRuntime } from '../dist/runtime/agent.js';
+import { createAgentRuntime } from '../dist/runtime/agent-runtime.js';
 
 // 显式传入测试配置，不读取 .env；真实 createAgent() 循环只连接下面的假模型。
 const settings = loadSettings({

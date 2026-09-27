@@ -148,6 +148,7 @@ func New(
 	authHandler.RegisterRoutes(api)
 	chatHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
 	chatHandler.RegisterCompactionRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)
+	chatHandler.RegisterContextUsageRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)
 	apidocs.RegisterRoutes(engine, cfg.AppEnv)
 
 	return engine, &Runtime{

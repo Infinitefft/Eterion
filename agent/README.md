@@ -6,7 +6,7 @@ Eterion 的 Node.js + TypeScript Agent 模块。当前 HTTP 服务使用 Agent R
 
 `web_search`、`web_fetch` 和 LangChain `createAgent()` 组装已有实现，
 `evals/smoke-agent.ts` 可单独调用这条 Tool Calling 链路。
-`src/runtime/agent.ts` 已接入 `POST /runs`，支持文本流、Tool 生命周期、取消和失败收尾。
+`src/runtime/agent-runtime.ts` 已接入 `POST /runs`，支持文本流、Tool 生命周期、取消和失败收尾。
 `createDirectRuntime()` 保留为可手动切换的文本直出基线，没有自动回退路由。
 会话 Memory 已接入代码链路，真实模型与数据库联调仍待进行；RAG、Skills 仍待实现。
 
@@ -17,14 +17,21 @@ src/
 ├── index.ts                 服务启动与接线
 ├── server.ts                HTTP 路由、SSE 编码与连接清理
 ├── config.ts                环境变量、模型目录与配置校验
-├── models.ts                模型客户端创建、正文提取
-├── agent.ts                 Agent、Prompt、Tools、Middleware 组装
 ├── protocol.ts              请求、领域事件和 Runtime 类型契约
-├── context.ts               查询原始历史、筛选并组装本轮模型上下文
-├── memory/                  消息序列化、最终上下文采集、自动与手动压缩
+├── memory/
+│   ├── load-context.ts      查询历史、恢复并组装本轮模型上下文
+│   ├── messages.ts          框架消息的序列化与恢复
+│   ├── capture.ts           采集本轮最终上下文
+│   └── compaction.ts        自动与主动压缩
 ├── runtime/
-│   ├── direct.ts            普通模型的流式事件适配
-│   └── agent.ts             Agent 文本流、Tool 状态与运行终态适配
+│   ├── create-agent.ts      Agent、Prompt、Tools、Middleware 组装
+│   ├── models.ts            模型客户端创建、正文提取
+│   ├── direct-runtime.ts    普通模型的流式事件适配
+│   └── agent-runtime.ts     Agent 文本流、Tool 状态与运行终态适配
+├── recording/              独立监控采集，不参与业务记忆存储
+│   ├── with-run-recording.ts Run 生命周期及模型、工具回调采集
+│   ├── store.ts            监控 SQLite 数据读写
+│   └── tool-input.ts       工具输入的监控记录整理
 └── tools/
     ├── web-search.ts        查询千帆搜索，返回相关网页标题与 URL
     ├── web-fetch.ts         读取公开网页的 HTML 或纯文本
@@ -34,7 +41,7 @@ evals/
 tests/                      无需真实 API Key 的回归测试
 ```
 
-组装与执行分开：`src/agent.ts` 决定 Agent 使用什么，Runtime 将执行过程转换成领域事件。
+组装与执行分开：`src/runtime/create-agent.ts` 决定 Agent 使用什么，Runtime 将执行过程转换成领域事件。
 Prompt 直接放在组装处，不再为一段字符串单独建模块。
 `createDirectRuntime()` 和 `createAgentRuntime()` 使用普通函数返回对象，
 配置与客户端由闭包持有；每轮运行的可变状态放在 `stream()` 内，不能在会话之间共享。
@@ -83,7 +90,7 @@ Go 从已保存 Run 的用户归属传入可选 `user_id`，需要重启使用�
 脚本调用 `POST /runs` 时可提供明确的测试用户 ID；旧调用未提供身份时聊天照常执行，跳过记录并提示。
 Agent 是本机内部服务，这个字段不替代登录认证，不应接受不可信客户端直接声明身份。
 
-`src/recording/runtime.ts` 负责 Run 生命周期及模型、工具回调，`store.ts` 负责独立 SQLite。
+`src/recording/with-run-recording.ts` 负责 Run 生命周期及模型、工具回调，`store.ts` 负责独立 SQLite。
 记录包含提问、输入历史、各轮实际模型消息（含 System Prompt）、选定的调用参数、模型输出、
 接口公开的推理和用量、时间及状态。数据来自 SDK 消息与回调，不是底层 HTTP 抓包；接口未提供的内容不补造。
 片段在内存合并，开始与结束时写入；失败、取消和提前结束保留部分回复。
@@ -124,7 +131,7 @@ Node.js 22.19.0 会显示 SQLite 实验性 API 提示。
 
 以上 `messages` 形式保留给独立脚本和直接调用；非空且最后一条必须来自 user。
 平台 Go 请求改为传入 `run_id`、`user_id`、`thread_id`、`model_id`、`input_message_id`、`history_token`，不再推送完整历史。
-Node 的 `context.ts` 通过 `GO_API_BASE_URL`（默认 `http://127.0.0.1:8080`）分页查询
+Node 的 `memory/load-context.ts` 通过 `GO_API_BASE_URL`（默认 `http://127.0.0.1:8080`）分页查询
 `GET /internal/agent/runs/:runId/messages`，在 Authorization Bearer 头中携带本轮凭证。
 Go 根据活动 Run 校验访问范围，按时间和 ID 返回截至本轮输入的原始消息，每页最多 100 条。
 凭证只授权当前 Run，执行结束后失效，不进入模型输入和 SQLite 运行记录。

@@ -1,13 +1,14 @@
-import { ArrowUp, LoaderCircle, Paperclip, Square, Minimize2, X } from 'lucide-react';
-import { compactThreadContext } from '@/api/im';
-import { getApiError } from '@/api/errors';
+import { ArrowUp, LoaderCircle, Paperclip, Square, Minimize2, X, Gauge } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
+import { getApiError } from '@/api/errors';
+import { compactThreadContext } from '@/api/im';
 import { getIMService } from '@/service/im';
 import type { MessageId, ModelId, ProtocolError, RunId, ThreadId } from '@/service/im/types';
 import { useAuthStore } from '@/store/auth-store';
 import { useIMStore } from '@/store/im-store';
 
+import { ContextUsageNotice } from './ContextUsageNotice';
 import { selectActiveRunId, selectIsChatBusy } from '../model/chatSelectors';
 import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';
 import ModelList from './ModelList/ModelList';
@@ -40,6 +41,8 @@ export function Composer({ threadId }: ComposerProps) {
   const [isCompacting, setIsCompacting] = useState(false);
   const [compactionNotice, setCompactionNotice] = useState<string | null>(null);
   const [compactionNoticeDismissed, setCompactionNoticeDismissed] = useState(false);
+  const [showContextUsage, setShowContextUsage] = useState(false);
+  const [contextRevision, setContextRevision] = useState(0);
   const compactionController = useRef<AbortController | null>(null);
 
   const user = useAuthStore((state) => state.user);
@@ -56,6 +59,8 @@ export function Composer({ threadId }: ComposerProps) {
     setIsCompacting(false);
     setCompactionNotice(null);
     setCompactionNoticeDismissed(false);
+    setShowContextUsage(false);
+    setContextRevision(0);
   }
 
   useLayoutEffect(() => {
@@ -94,6 +99,7 @@ export function Composer({ threadId }: ComposerProps) {
     try {
       const result = await compactThreadContext(threadId, selectedModelId, controller.signal);
       if (!isCurrentView(view)) return;
+      setContextRevision((value) => value + 1);
       setCompactionNotice(result.truncated
         ? '上下文已压缩，部分较早内容已舍弃；原始聊天记录仍保留。'
         : result.changed ? '上下文已压缩，聊天记录保持不变。' : '当前无需压缩。');
@@ -235,6 +241,15 @@ export function Composer({ threadId }: ComposerProps) {
 
   return (
     <>
+      {showContextUsage ? (
+        <ContextUsageNotice
+          threadId={threadId}
+          modelId={selectedModelId}
+          busy={!isThreadReady || isThreadBusy || isSubmitting || isCompacting}
+          revision={contextRevision}
+          onClose={() => setShowContextUsage(false)}
+        />
+      ) : null}
       {!compactionNoticeDismissed && (compactionNotice || isCompacting) ? (
         <div className='chat-detail-compaction-notice'>
           <span role='status'>
@@ -292,6 +307,18 @@ export function Composer({ threadId }: ComposerProps) {
           </button>
 
           <div className='chat-detail-composer-actions'>
+            <button
+              className='chat-detail-tool-button'
+              type='button'
+              title='查看上下文余量'
+              aria-label='查看上下文余量'
+              aria-expanded={showContextUsage}
+              aria-controls={showContextUsage ? 'chat-context-usage' : undefined}
+              disabled={!user || !isThreadReady}
+              onClick={() => setShowContextUsage((value) => !value)}
+            >
+              <Gauge size={18} />
+            </button>
             <button
               className='chat-detail-tool-button'
               type='button'

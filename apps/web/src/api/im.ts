@@ -133,6 +133,21 @@ export async function compactThreadContext(threadId: ThreadId, modelId: ModelId 
   return response.data.data;
 }
 
+export interface ContextUsage {
+  modelId: ModelId;
+  contextWindow: number;
+  usedTokens: number;
+  remainingTokens: number;
+}
+
+export async function fetchContextUsage(threadId: ThreadId, modelId: ModelId | null, signal: AbortSignal) {
+  const response = await apiClient.get<ApiResponse<ContextUsage>>(
+    `/chat/${encodeURIComponent(threadId)}/context/usage`,
+    { params: modelId ? { model_id: modelId } : {}, signal, timeout: 20_000 },
+  );
+  return response.data.data;
+}
+
 /**
  * 获取一个 Thread 的权威 Snapshot。
  *

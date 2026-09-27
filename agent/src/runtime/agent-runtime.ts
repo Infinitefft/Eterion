@@ -2,16 +2,16 @@ import { AIMessage, AIMessageChunk, ToolMessage, type BaseMessage } from '@langc
 import type { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
 
-import { createWebAgent, buildSystemPrompt, type WebAgent } from '../agent.js';
+import { createWebAgent, buildSystemPrompt, type WebAgent } from './create-agent.js';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { createContextCompaction, estimateTokens, isContextLimitError } from '../memory/compaction.js';
 import { toPublicModel, type Settings } from '../config.js';
-import { buildModelClients, extractContentDelta } from '../models.js';
+import { buildModelClients, extractContentDelta } from './models.js';
 import { serializeContext } from '../memory/messages.js';
 import { createWebSearchTool } from '../tools/web-search.js';
 import { webFetch } from '../tools/web-fetch.js';
 import { projectToolResult } from '../tools/presentation.js';
-import { withRunRecording, type RecordingCallbacks } from '../recording/runtime.js';
+import { withRunRecording, type RecordingCallbacks } from '../recording/with-run-recording.js';
 import {
   runFailed,
   type AgentError,
@@ -68,6 +68,14 @@ export function createAgentRuntime(
   return withRunRecording(settings, {
     defaultModelId: settings.defaultModelId,
     models: settings.models.map(toPublicModel),
+    contextUsage(modelId, messages) {
+      const config = settings.models.find((entry) => entry.id === modelId);
+      if (!config) throw new Error('Model not available');
+      // 与压缩阈值共用估算口径，包含主提示词与工具定义；不调用模型。
+      const usedTokens = fixedInputTokens + estimateTokens(messages.map((message) => message.toDict()));
+      return { modelId, contextWindow: config.contextWindow, usedTokens,
+        remainingTokens: Math.max(0, config.contextWindow - usedTokens) };
+    },
     async compact(modelId, messages, signal) {
       const compaction = compactions.get(modelId);
       if (!compaction) throw new Error('Model not available');

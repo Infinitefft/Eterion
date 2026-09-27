@@ -6,7 +6,28 @@ import { isContextLimitError } from './memory/compaction.js';
 
 import type { Settings } from './config.js';
 import { runFailed, runRequestSchema, type AgentEvent, type AgentRuntime, type RunInput } from './protocol.js';
-import { buildRunInput } from './context.js';
+import { buildRunInput } from './memory/load-context.js';
+
+const contextRequestSchema = z.object({
+  model_id: z.string().min(1),
+  agent_context: z.unknown().optional(),
+  history: z.array(z.object({
+    id: z.string().uuid(), role: z.enum(['user', 'assistant', 'system']),
+    status: z.string(), content: z.string(),
+  })),
+});
+
+// 查询与手动压缩必须恢复同一份消息，避免余量统计漏掉工具结果或摘要。
+function restoreRequestContext(input: z.infer<typeof contextRequestSchema>) {
+  const messages = input.agent_context == null ? [] : restoreContext(input.agent_context);
+  for (const message of input.history) {
+    if (message.status !== 'completed' || !message.content || message.role === 'system') continue;
+    messages.push(message.role === 'user'
+      ? new HumanMessage({ id: message.id, content: message.content })
+      : new AIMessage({ id: message.id, content: message.content }));
+  }
+  return messages;
+}
 
 /** 创建 HTTP 服务，负责请求校验、领域事件传输和连接生命周期。 */
 export function createApp(settings: Settings, runtime: AgentRuntime): FastifyInstance {
@@ -20,15 +41,22 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
   }));
 
   // 与 /runs 一样，仅供 Go 在可信服务网络内调用；浏览器通过 Go 鉴权入口访问。
+  app.post('/context/usage', { bodyLimit: 4 << 20 }, async (request, reply) => {
+    const parsed = contextRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_CONTEXT', message: '上下文参数不合法' } });
+    if (!runtime.contextUsage) return reply.code(409).send({ error: { code: 'CONTEXT_USAGE_UNAVAILABLE', message: '当前模式不支持上下文统计' } });
+    if (!runtime.models.some((model) => model.id === parsed.data.model_id)) {
+      return reply.code(400).send({ error: { code: 'MODEL_NOT_AVAILABLE', message: '所选模型不可用' } });
+    }
+    try {
+      return runtime.contextUsage(parsed.data.model_id, restoreRequestContext(parsed.data));
+    } catch {
+      return reply.code(502).send({ error: { code: 'CONTEXT_USAGE_FAILED', message: '无法读取上下文用量' } });
+    }
+  });
+
   app.post('/context/compact', { bodyLimit: 4 << 20 }, async (request, reply) => {
-    const parsed = z.object({
-      model_id: z.string().min(1),
-      agent_context: z.unknown().optional(),
-      history: z.array(z.object({
-        id: z.string().uuid(), role: z.enum(['user', 'assistant', 'system']),
-        status: z.string(), content: z.string(),
-      })),
-    }).safeParse(request.body);
+    const parsed = contextRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_CONTEXT', message: '上下文参数不合法' } });
     if (!runtime.compact) return reply.code(409).send({ error: { code: 'COMPACTION_UNAVAILABLE', message: '当前模式不支持压缩' } });
     if (!runtime.models.some((model) => model.id === parsed.data.model_id)) {
@@ -38,13 +66,7 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
     const onClose = () => { if (!reply.raw.writableEnded) controller.abort(); };
     reply.raw.once('close', onClose);
     try {
-      const messages = parsed.data.agent_context == null ? [] : restoreContext(parsed.data.agent_context);
-      for (const message of parsed.data.history) {
-        if (message.status !== 'completed' || !message.content || message.role === 'system') continue;
-        messages.push(message.role === 'user'
-          ? new HumanMessage({ id: message.id, content: message.content })
-          : new AIMessage({ id: message.id, content: message.content }));
-      }
+      const messages = restoreRequestContext(parsed.data);
       const result = await runtime.compact(parsed.data.model_id, messages,
         AbortSignal.any([controller.signal, AbortSignal.timeout(settings.runTimeoutMs)]));
       return { agent_context: serializeContext(result.messages), changed: result.changed, truncated: result.truncated };

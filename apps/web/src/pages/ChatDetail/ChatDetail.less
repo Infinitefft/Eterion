@@ -496,6 +496,39 @@ button.chat-tool-heading {
   }
 }
 
+.chat-context-usage {
+  align-items: flex-start;
+  padding-block: 10px;
+
+  .chat-context-usage-content {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  strong {
+    font-weight: 500;
+  }
+
+  progress {
+    width: 100%;
+    height: 6px;
+    accent-color: #64686f;
+  }
+
+  .chat-context-usage-hint {
+    font-size: 11px;
+  }
+
+  .chat-context-retry {
+    margin-left: 8px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+}
+
 .chat-detail-composer {
   position: relative;
   z-index: 2;

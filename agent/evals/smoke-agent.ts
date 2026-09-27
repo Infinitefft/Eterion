@@ -1,8 +1,8 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 
 import { loadSettings } from '../src/config.js';
-import { createWebAgent } from '../src/agent.js';
-import { buildModelClients } from '../src/models.js';
+import { createWebAgent } from '../src/runtime/create-agent.js';
+import { buildModelClients } from '../src/runtime/models.js';
 import { createWebSearchTool } from '../src/tools/web-search.js';
 import { webFetch } from '../src/tools/web-fetch.js';
 

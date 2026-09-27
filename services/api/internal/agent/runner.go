@@ -128,3 +128,14 @@ type CompactResult struct {
 type ContextCompactor interface {
 	Compact(context.Context, CompactInput) (*CompactResult, error)
 }
+
+type ContextUsage struct {
+	ModelID         string `json:"modelId"`
+	ContextWindow   int64  `json:"contextWindow"`
+	UsedTokens      int64  `json:"usedTokens"`
+	RemainingTokens int64  `json:"remainingTokens"`
+}
+
+type ContextUsageReader interface {
+	ReadContextUsage(context.Context, CompactInput) (*ContextUsage, error)
+}

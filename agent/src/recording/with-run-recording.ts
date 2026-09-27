@@ -11,7 +11,7 @@ export interface RecordingCallbacks extends BaseCallbackHandler {
 }
 
 // 框架回调只在内部 Runtime 之间传递，不进入 HTTP、SSE 或前端协议。
-type RecordableRuntime = Pick<AgentRuntime, 'models' | 'defaultModelId' | 'compact'> & {
+type RecordableRuntime = Pick<AgentRuntime, 'models' | 'defaultModelId' | 'compact' | 'contextUsage'> & {
   stream(input: RunInput, signal?: AbortSignal, callbacks?: RecordingCallbacks): AsyncGenerator<AgentEvent>;
 };
 
@@ -32,6 +32,7 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
   return {
     defaultModelId: runtime.defaultModelId,
     models: runtime.models,
+    ...(runtime.contextUsage ? { contextUsage: runtime.contextUsage.bind(runtime) } : {}),
     ...(runtime.compact ? { compact: runtime.compact.bind(runtime) } : {}),
     async *stream(input, signal) {
       if (!input.user_id?.trim()) {
