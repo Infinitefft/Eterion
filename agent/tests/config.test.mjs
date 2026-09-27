@@ -12,7 +12,7 @@ test('显式环境配置不读取本地 .env，默认值保持不变', () => {
   assert.equal(settings.host, '127.0.0.1');
   assert.equal(settings.port, 8001);
   assert.equal(settings.defaultModelId, 'default');
-  assert.equal(settings.qianfanApiKey, '');
+  assert.equal(settings.bochaApiKey, '');
   assert.equal(settings.modelTimeoutMs, 120_000);
   assert.equal(settings.runTimeoutMs, 600_000);
   assert.equal(settings.heartbeatMs, 15_000);
@@ -44,7 +44,7 @@ test('环境变量会去除空白，空字符串仍使用默认值', () => {
     AGENT_HOST: '   ',
     AGENT_PORT: ' 9000 ',
     DEFAULT_MODEL_ID: '  ',
-    QIANFAN_API_KEY: ' search-test-key ',
+    BOCHA_API_KEY: ' search-test-key ',
   });
 
   assert.equal(settings.models[0].providerModel, 'test-model');
@@ -52,7 +52,7 @@ test('环境变量会去除空白，空字符串仍使用默认值', () => {
   assert.equal(settings.host, '127.0.0.1');
   assert.equal(settings.port, 9000);
   assert.equal(settings.defaultModelId, 'default');
-  assert.equal(settings.qianfanApiKey, 'search-test-key');
+  assert.equal(settings.bochaApiKey, 'search-test-key');
 });
 
 test('缺失 Key、未配置的默认模型和非法端口保持原有错误', () => {

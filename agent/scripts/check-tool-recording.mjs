@@ -26,11 +26,11 @@ mkdirSync(cacheRoot, { recursive: true });
 const directory = mkdtempSync(join(cacheRoot, 'tool-recording-'));
 const settings = loadSettings({
   MODEL_NAME: 'offline-model', MODEL_API_KEY: 'offline-secret-key',
-  QIANFAN_API_KEY: 'offline-search-key', AGENT_RECORDING_ENABLED: 'true',
+  BOCHA_API_KEY: 'offline-search-key', AGENT_RECORDING_ENABLED: 'true',
   AGENT_RECORDING_DIR: directory, AGENT_RUN_TIMEOUT: '2s',
 });
 const originalFetch = globalThis.fetch;
-const searchURL = 'https://qianfan.baidubce.com/v2/ai_search/web_search';
+const searchURL = 'https://api.bochaai.com/v1/web-search';
 const pageURL = 'https://93.184.216.34/';
 let requests = [];
 let respond;
@@ -39,7 +39,7 @@ globalThis.fetch = async (url, options) => {
   requests.push({ url: String(url), body: options.body ? JSON.parse(options.body) : undefined });
   return respond(String(url), options);
 };
-const searchResult = () => Response.json({ references: [{ title: '资料', url: pageURL }] });
+const searchResult = () => Response.json({ code: 200, data: { webPages: { value: [{ name: '资料', url: pageURL }] } } });
 const finalFrame = { content: '最终答复' };
 const toolCall = (id, name, args) => ({ id, name, args, type: 'tool_call' });
 const toolFrame = (...calls) => ({ content: '', tool_calls: calls });
@@ -76,8 +76,8 @@ try {
   assert.deepEqual(saved.map((step) => step.name), ['web_search', 'web_fetch']);
   assert.deepEqual(saved.map((step) => step.status), ['completed', 'completed']);
   assert.deepEqual(saved[0].input.requestedArgs, { query: '  资料  ' });
-  assert.deepEqual(saved[0].metadata.executionArgs, { query: '资料', count: 5 });
-  assert.equal(requests[0].body.resource_type_filter[0].top_k, saved[0].metadata.executionArgs.count);
+  assert.deepEqual(saved[0].metadata.executionArgs, { query: '资料', summary: true, count: 12 });
+  assert.equal(requests[0].body.count, saved[0].metadata.executionArgs.count);
   assert.ok(saved[1].metadata.executionArgs.maxCharacters > 0);
   assert.ok(saved.every((step) => step.metadata.executionStarted && step.metadata.executionStartedAt >= step.started_at));
   assert.ok(saved.every((step) => step.ended_at >= step.metadata.executionStartedAt));
@@ -91,7 +91,7 @@ try {
 
   // 同名并行调用按 ID 分开；混合成功、执行失败、未执行不混算成功率。
   requests = [];
-  respond = async (_url, options) => JSON.parse(options.body).messages[0].content === '失败'
+  respond = async (_url, options) => JSON.parse(options.body).query === '失败'
     ? new Response('offline-secret-key', { status: 503 }) : searchResult();
   await run('mixed', [toolFrame(
     toolCall('same-1', 'web_search', { query: '成功' }),

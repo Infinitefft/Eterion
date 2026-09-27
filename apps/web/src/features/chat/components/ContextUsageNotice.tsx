@@ -30,14 +30,14 @@ export function ContextUsageNotice({ threadId, modelId, busy, revision, onClose 
     retry: false,
   });
   const usage = query.data;
-  const remainingPercent = usage ? Math.round(usage.remainingTokens / usage.contextWindow * 100) : 0;
-  const format = (value: number) => value.toLocaleString('zh-CN');
+  const usedPercent = usage ? usage.usedTokens / usage.contextWindow * 100 : 0;
+  const format = (value: number) => `${(value / 1000).toFixed(1)}k`;
 
   return (
     <div id='chat-context-usage' className='chat-detail-compaction-notice chat-context-usage'>
       <div className='chat-context-usage-content' role='status' aria-live='polite'>
-        {busy ? <span>会话正在更新，完成后将刷新上下文余量…</span>
-          : query.isFetching || query.isPending ? <span>正在读取上下文余量…</span>
+        {busy ? <span>等待更新…</span>
+          : query.isFetching || query.isPending ? <span>读取中…</span>
             : query.isError ? (
               <span>
                 {getApiError(query.error)?.message ?? '上下文余量读取失败'}
@@ -45,10 +45,21 @@ export function ContextUsageNotice({ threadId, modelId, busy, revision, onClose 
               </span>
             ) : usage ? (
               <>
-                <strong>上下文剩余约 {remainingPercent}% · {format(usage.remainingTokens)} Token</strong>
-                <progress aria-label='上下文已用比例（估算）' max={usage.contextWindow} value={Math.min(usage.usedTokens, usage.contextWindow)} />
-                <span>已用约 {format(usage.usedTokens)} / 配置容量 {format(usage.contextWindow)} Token</span>
-                <span className='chat-context-usage-hint'>包含历史、系统提示词和工具定义，不含未发送草稿；剩余空间也需用于模型输出。此为估算，非累计消耗。</span>
+                <span>上下文窗口：约 {format(usage.usedTokens)} / {format(usage.contextWindow)}  · 已用 {usedPercent.toFixed(1)}%</span>
+                <div
+                  className='chat-context-usage-track'
+                  role='progressbar'
+                  aria-label='上下文已用量（估算）'
+                  aria-valuemin={0}
+                  aria-valuemax={usage.contextWindow}
+                  aria-valuenow={Math.min(usage.usedTokens, usage.contextWindow)}
+                  aria-valuetext={`约 ${format(usage.usedTokens)} / ${format(usage.contextWindow)} Token，已用 ${usedPercent.toFixed(1)}%`}
+                >
+                  <div
+                    className='chat-context-usage-fill'
+                    style={{ width: `${Math.min(100, usedPercent)}%` }}
+                  />
+                </div>
               </>
             ) : null}
       </div>

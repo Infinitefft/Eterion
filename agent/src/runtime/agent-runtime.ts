@@ -40,7 +40,7 @@ export function createAgentRuntime(
   clients: Map<string, ChatOpenAI> = buildModelClients(settings),
 ): AgentRuntime {
   const tools = [
-    createWebSearchTool(settings.qianfanApiKey),
+    createWebSearchTool(settings.bochaApiKey),
     webFetch,
   ] as const;
 
@@ -55,7 +55,7 @@ export function createAgentRuntime(
     const config = settings.models.find((entry) => entry.id === modelId);
     const summaryModel = summaryClients.get(modelId);
     if (!config || !summaryModel) throw new Error('Missing memory model configuration');
-    const compaction = createContextCompaction(summaryModel, config.contextWindow, fixedInputTokens);
+    const compaction = createContextCompaction(summaryModel, config.contextWindow, fixedInputTokens, config.autoCompactTokenLimit);
     compactions.set(modelId, compaction);
     agents.set(modelId, createWebAgent({
       model,
@@ -74,6 +74,7 @@ export function createAgentRuntime(
       // 与压缩阈值共用估算口径，包含主提示词与工具定义；不调用模型。
       const usedTokens = fixedInputTokens + estimateTokens(messages.map((message) => message.toDict()));
       return { modelId, contextWindow: config.contextWindow, usedTokens,
+        autoCompactTokenLimit: config.autoCompactTokenLimit,
         remainingTokens: Math.max(0, config.contextWindow - usedTokens) };
     },
     async compact(modelId, messages, signal) {

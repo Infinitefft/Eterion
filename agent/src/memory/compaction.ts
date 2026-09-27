@@ -43,13 +43,18 @@ const createSummaryMiddleware = summarizationMiddleware as unknown as (options: 
 }) => ReturnType<typeof summarizationMiddleware>;
 
 /** 自动与手动入口共用；内置中间件负责切分、工具配对和状态替换。 */
-export function createContextCompaction(model: ChatOpenAI, contextWindow: number, fixedInputTokens: number) {
-  const messageBudget = contextWindow - 4096 - fixedInputTokens - 2048;
+export function createContextCompaction(model: ChatOpenAI, contextWindow: number, fixedInputTokens: number, autoCompactTokenLimit: number) {
+  const messageBudget = contextWindow - 4096 - fixedInputTokens - 4096;
   if (messageBudget < 4096) throw new Error('System prompt and tools leave insufficient context budget');
+  // 配置和面板统计的是总输入；中间件只数历史，因此先扣除固定提示词和 Tools 定义。
+  const messageTrigger = autoCompactTokenLimit - fixedInputTokens;
+  if (messageTrigger < 4096 || messageTrigger > messageBudget) {
+    throw new Error('Auto compaction threshold leaves insufficient message or output budget');
+  }
   const countMessages = (messages: BaseMessage[]) => estimateTokens(messages.map((message) => message.toDict()));
   const builtin = createSummaryMiddleware({
     model,
-    trigger: { tokens: Math.floor(messageBudget * 0.8) },
+    trigger: { tokens: messageTrigger },
     keep: { messages: 10 },
     tokenCounter: countMessages,
     summaryPrompt: SUMMARY_PROMPT,

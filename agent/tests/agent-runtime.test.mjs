@@ -11,7 +11,7 @@ import { createAgentRuntime } from '../dist/runtime/agent-runtime.js';
 const settings = loadSettings({
   MODEL_NAME: 'test-model',
   MODEL_API_KEY: 'test-key',
-  QIANFAN_API_KEY: 'test-search-key',
+  BOCHA_API_KEY: 'test-search-key',
   AGENT_RUN_TIMEOUT: '2s',
 });
 const input = {
@@ -107,9 +107,9 @@ test('Agent 直接回答时按顺序输出正文事件，不产生工具事件',
 test('搜索调用开始和完成共用 ID，Middleware 重放历史不重复产生事件', async (t) => {
   const reference = { title: 'LangChain', url: 'https://docs.langchain.com/' };
   t.mock.method(globalThis, 'fetch', async () => Response.json({
-    references: [{ ...reference, providerDetails: '内部响应' }],
+    code: 200, data: { webPages: { value: [{ name: reference.title, url: reference.url, summary: '搜索摘要', providerDetails: '内部响应' }] } },
   }));
-  const args = { query: 'LangChain', count: 1 };
+  const args = { query: 'LangChain' };
   const model = new OfflineModel([
     { content: '先查一下。', tool_calls: [{ id: 'search-1', name: 'web_search', args }] },
     { content: '找到官方资料。' },
@@ -145,8 +145,8 @@ test('搜索后读取网页，模型能看到正文但 Tool 展示结果不泄�
         headers: { 'content-type': 'text/html' },
       });
     }
-    assert.equal(String(target), 'https://qianfan.baidubce.com/v2/ai_search/web_search');
-    return Response.json({ references: [{ title: '示例网页', url }] });
+    assert.equal(String(target), 'https://api.bochaai.com/v1/web-search');
+    return Response.json({ code: 200, data: { webPages: { value: [{ name: '示例网页', url }] } } });
   });
   const model = new OfflineModel([
     { content: '', tool_calls: [{
@@ -220,7 +220,7 @@ test('工具参数校验失败也产生关联终态，模型可以继续回答',
 });
 
 test('调用工具前的说明不算最终回答，最后空回复必须失败', async (t) => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ references: [] }));
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 200, data: { webPages: { value: [] } } }));
   const model = new OfflineModel([
     { content: '先查一下。', tool_calls: [{
       id: 'before-empty', name: 'web_search', args: { query: 'LangChain' },
@@ -280,7 +280,7 @@ test('Run 超时中止正在执行的搜索，并关闭未完成工具和正文'
 });
 
 test('四次连续工具调用后的第五次模型回答不会提前触发图执行上限', async (t) => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ references: [] }));
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 200, data: { webPages: { value: [] } } }));
   const frames = Array.from({ length: 4 }, (_, index) => ({
     content: '',
     tool_calls: [{
@@ -310,7 +310,7 @@ test('Agent 不可用模型只输出失败事件，不继续启动工作流', as
 });
 
 test('五个并行工具中超限的一项仍有唯一失败终态，模型可以继续回答', async (t) => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ references: [] }));
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 200, data: { webPages: { value: [] } } }));
   const calls = Array.from({ length: 5 }, (_, index) => ({
     id: `parallel-${index}`, name: 'web_search', args: { query: `资料 ${index}` },
   }));
@@ -339,7 +339,7 @@ test('五个并行工具中超限的一项仍有唯一失败终态，模型可�
 });
 
 test('第五次连续工具被全部阻止时，没有最终回答就应结束为失败', async (t) => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ references: [] }));
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 200, data: { webPages: { value: [] } } }));
   const frames = Array.from({ length: 5 }, (_, index) => ({
     content: index === 0 ? '先查一下。' : '',
     tool_calls: [{

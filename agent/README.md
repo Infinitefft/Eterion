@@ -33,7 +33,7 @@ src/
 │   ├── store.ts            监控 SQLite 数据读写
 │   └── tool-input.ts       工具输入的监控记录整理
 └── tools/
-    ├── web-search.ts        查询千帆搜索，返回相关网页标题与 URL
+    ├── web-search.ts        查询博查搜索，返回网页标题、URL 与摘要
     ├── web-fetch.ts         读取公开网页的 HTML 或纯文本
     └── presentation.ts      将工具输出整理为前端展示数据
 evals/
@@ -60,7 +60,8 @@ pnpm install
 ```
 
 首次配置时根据 `.env.example` 创建 `agent/.env`；已有 `.env` 时不要覆盖。
-模型 Key 和搜索用的 `QIANFAN_API_KEY` 都填写在 `.env`，不放入源码、测试或 README。
+模型 Key 和搜索用的 `BOCHA_API_KEY` 都填写在 `.env`，不放入源码、测试或 README。
+搜索固定发送 `summary: true`；模型可通过 `count` 动态选择网页数量（1–50，默认 12），可选填 `freshness`（`YYYY-MM-DD` 或 `YYYY-MM-DD..YYYY-MM-DD`），未指定时不发送日期过滤。
 `.env` 应保持 Git 忽略状态；提交前可用 `git check-ignore .env` 检查。
 
 已知模型只有配置了对应 `*_MODEL` 才会启用，并需要对应厂商的 API Key；
@@ -68,12 +69,22 @@ pnpm install
 `MODEL_NAME`、`MODEL_API_KEY` 和可选的 `MODEL_BASE_URL` 配置通用模型。
 配置读取位置固定为 `agent/.env`，不依赖启动命令所在目录。
 
+私人基础提示词放在 `agent/prompts/system.local.md`，由 `.env` 中的
+`SYSTEM_PROMPT_FILE=prompts/system.local.md` 指定。首次使用时复制
+`prompts/system.example.md` 为 `prompts/system.local.md`，再编辑内容；私人文件已被 Git 忽略。
+文件配置优先于原来的 `SYSTEM_PROMPT`，指定文件后若缺失、无法读取或为空，启动会明确报错。
+未设置文件路径时仍兼容 `SYSTEM_PROMPT` 和代码默认值。读取后继续追加 `create-agent.ts` 中的工具规则。
+
+`pnpm build` 不复制私人提示词。部署时单独上传文件或挂载到服务器，并设置 `SYSTEM_PROMPT_FILE`；
+相对路径始终以 `agent/` 为基准，也支持绝对路径。以后使用 Docker 时应在 `.dockerignore` 中排除此文件。
+修改提示词后需重启 Agent。此配置避免随仓库公开；提示词仍会发送给模型，启用本地运行记录时也可能被记录。
+
 ```powershell
 pnpm dev
 ```
 
 该命令启动带 Tool Calling 的 Agent 服务，默认监听 `http://127.0.0.1:8001`。
-启动需要模型配置和 `QIANFAN_API_KEY`；启用模型仍需逐一验证真实流式 Tool Calling 兼容性。
+启动需要模型配置和 `BOCHA_API_KEY`；启用模型仍需逐一验证真实流式 Tool Calling 兼容性。
 编译结果的运行命令是 `pnpm build` 后执行 `pnpm start`。
 
 `pnpm typecheck` 检查完整源码，`pnpm test` 构建后运行离线回归测试。
@@ -152,10 +163,19 @@ Go 继续负责业务消息持久化、资源归属、Run 展示状态和 IM 事
 它增加可空的 `messages.agent_context JSONB`，旧数据无需回填。迁移文件已提供，本次开发未连接数据库执行迁移。
 
 - 每轮成功结束后保存完整消息数组，包括摘要、未压缩历史、工具调用与结果、最终回答。
-- 自动压缩在每次主模型调用前执行；默认采用 `MODEL_CONTEXT_WINDOW=32768` 的项目预算。
-  该值不是厂商最大窗口，可用各模型的 `*_CONTEXT_WINDOW` 覆盖，必须不超过实际模型容量。
-- 主模型输出上限 4096 tokens；从窗口中扣除该预留、主提示词、工具定义和 2048 tokens 余量，
-  消息达到剩余预算的 80% 时触发。摘要使用同一模型配置的独立无工具客户端，输出上限 2048 tokens。
+- 自动压缩在每次主模型调用前执行。窗口预算与压缩阈值分别配置，通用默认值为
+  `MODEL_CONTEXT_WINDOW=32768` 和 `MODEL_AUTO_COMPACT_TOKEN_LIMIT=20000`。
+  模型专属的 `*_CONTEXT_WINDOW`、`*_AUTO_COMPACT_TOKEN_LIMIT` 优先于通用值；
+  窗口是应用预算，不是厂商最大窗口，必须不超过实际模型容量。
+- DeepSeek V4 Pro 在 `.env.example` 中采用 `258000` 窗口和 `180000` 总输入压缩阈值。
+  总输入包含历史、系统提示词和工具定义；中间件仅统计历史，因此使用“总输入阈值减固定输入”触发，
+  不再乘以 80%。其他模型暂用通用预算，确认各自容量后再覆盖。
+- 258k 与 180k 间的 78k 是初始增长缓冲：主模型输出 4096、一次较大网页正文约 60000、
+  摘要提示词及包装约 1000、摘要输出 4096、其余约 8808。网页按当前估算器的中文字符口径计算；
+  这不是 tokenizer 的实测结论，也不能保证多份大工具结果或超长用户输入不会超过预算。
+- 主模型与摘要模型输出上限均为 4096 tokens。摘要使用同一模型配置的独立无工具客户端，
+  保留约 1500 汉字以内的目标。配置至少预留 8192 tokens 给主输出和基础安全余量；
+  主提示词或工具定义过大、导致历史阈值不足 4096 时，启动报错而不是忽略配置。
 - 默认保留最近 10 条消息；近期内容过大时缩小目标窗口，工具配对边界由内置实现调整。
   手动压缩短会话时目标保留约一半消息（最多 10 条、至少 2 条），没有可压缩内容或没有缩小则返回无需压缩。
 - token 数为偏保守的字符估算，不是模型 tokenizer 的精确计数；System Prompt 不进入摘要。
@@ -257,7 +277,7 @@ pnpm eval:agent
 pnpm eval:agent "只搜索 LangChain 的官方资料，给我几个链接，不读取网页正文"
 ```
 
-这不是离线测试：会使用默认模型和千帆搜索 Key，访问外网并可能产生费用。
+这不是离线测试：会使用默认模型和博查搜索 Key，访问外网并可能产生费用。
 它在 `invoke()` 结束后打印 Tool 调用、结果状态和模型回复，不会实时输出 SSE 事件。
 没有最终有效回答、工具失败或达到调用上限时，不能只凭进程退出判断任务成功。
 模型的 Tool Calling 能力必须按实际参数、连续调用、失败与流式场景验证；

@@ -1,4 +1,5 @@
 import { config as loadDotenv } from 'dotenv';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
@@ -9,7 +10,7 @@ export interface Settings {
   port: number;
   defaultModelId: string;
   models: ModelConfig[];
-  qianfanApiKey: string;
+  bochaApiKey: string;
   systemPrompt: string;
   modelTimeoutMs: number;
   runTimeoutMs: number;
@@ -30,6 +31,8 @@ export interface ModelConfig {
   providerModel: string;
   // 项目的保守上下文预算，不代表厂商声明的最大窗口。
   contextWindow: number;
+  // 总输入阈值，包含主提示词和工具定义，不包含尚未生成的输出。
+  autoCompactTokenLimit: number;
 }
 
 const MODEL_DEFINITIONS = [
@@ -84,6 +87,20 @@ export function loadSettings(environ?: NodeJS.ProcessEnv): Settings {
     throw new Error(`DEFAULT_MODEL_ID "${defaultModelId}" is not configured`);
   }
 
+  // 相对路径始终基于 agent/；源码和编译后的服务使用同一份外部提示词。
+  const promptFile = value(environ, 'SYSTEM_PROMPT_FILE');
+  let systemPrompt = value(environ, 'SYSTEM_PROMPT', DEFAULT_SYSTEM_PROMPT);
+  if (promptFile) {
+    try {
+      systemPrompt = readFileSync(resolve(
+        fileURLToPath(new URL('../', import.meta.url)), promptFile,
+      ), 'utf8').trim();
+    } catch {
+      throw new Error('SYSTEM_PROMPT_FILE could not be read');
+    }
+    if (!systemPrompt) throw new Error('SYSTEM_PROMPT_FILE must not be empty');
+  }
+
   return {
     host: value(environ, 'AGENT_HOST', '127.0.0.1'),
     apiBaseUrl: value(environ, 'GO_API_BASE_URL', 'http://127.0.0.1:8080'),
@@ -91,8 +108,8 @@ export function loadSettings(environ?: NodeJS.ProcessEnv): Settings {
     defaultModelId,
     models,
     // 是否必须配置由 Agent Runtime 决定；Settings 只负责集中读取环境变量。
-    qianfanApiKey: value(environ, 'QIANFAN_API_KEY'),
-    systemPrompt: value(environ, 'SYSTEM_PROMPT', DEFAULT_SYSTEM_PROMPT),
+    bochaApiKey: value(environ, 'BOCHA_API_KEY'),
+    systemPrompt,
     modelTimeoutMs: parseDurationMs(
       value(environ, 'MODEL_TIMEOUT', '2m'),
       'MODEL_TIMEOUT',
@@ -159,7 +176,7 @@ function loadModelCatalog(environ: NodeJS.ProcessEnv): ModelConfig[] {
         definition.baseUrl,
       ),
       providerModel,
-      contextWindow: parseContextWindow(value(environ, `${definition.modelPrefix}_CONTEXT_WINDOW`, value(environ, 'MODEL_CONTEXT_WINDOW', '32768'))),
+      ...readContextBudget(environ, definition.modelPrefix),
     });
   }
 
@@ -184,7 +201,7 @@ function loadModelCatalog(environ: NodeJS.ProcessEnv): ModelConfig[] {
       apiKey,
       baseUrl: value(environ, 'MODEL_BASE_URL'),
       providerModel,
-      contextWindow: parseContextWindow(value(environ, 'MODEL_CONTEXT_WINDOW', '32768')),
+      ...readContextBudget(environ),
     },
   ];
 }
@@ -207,6 +224,19 @@ function parseContextWindow(raw: string): number {
     throw new Error('MODEL_CONTEXT_WINDOW must be an integer of at least 16384');
   }
   return size;
+}
+
+function readContextBudget(environ: NodeJS.ProcessEnv, prefix = 'MODEL') {
+  const contextWindow = parseContextWindow(value(environ, `${prefix}_CONTEXT_WINDOW`,
+    value(environ, 'MODEL_CONTEXT_WINDOW', '32768')));
+  const autoCompactTokenLimit = Number(value(environ, `${prefix}_AUTO_COMPACT_TOKEN_LIMIT`,
+    value(environ, 'MODEL_AUTO_COMPACT_TOKEN_LIMIT', '20000')));
+  // 至少留出主模型输出和基础安全余量；工具结果的增长缓冲由各模型阈值决定。
+  if (!Number.isSafeInteger(autoCompactTokenLimit) || autoCompactTokenLimit < 4096
+    || autoCompactTokenLimit > contextWindow - 8192) {
+    throw new Error(`${prefix}_AUTO_COMPACT_TOKEN_LIMIT must be an integer between 4096 and CONTEXT_WINDOW - 8192`);
+  }
+  return { contextWindow, autoCompactTokenLimit };
 }
 
 function parseRecordingEnabled(raw: string): boolean {

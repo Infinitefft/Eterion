@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   }
 
   const tools = [
-    createWebSearchTool(settings.qianfanApiKey),
+    createWebSearchTool(settings.bochaApiKey),
     webFetch,
   ] as const;
 

@@ -62,6 +62,7 @@ export interface AgentRuntime {
 export interface ContextUsage {
   modelId: string;
   contextWindow: number;
+  autoCompactTokenLimit: number;
   usedTokens: number;
   remainingTokens: number;
 }

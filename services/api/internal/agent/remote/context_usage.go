@@ -39,6 +39,7 @@ func (r *Runner) ReadContextUsage(ctx context.Context, input agent.CompactInput)
 	var result agent.ContextUsage
 	if json.Unmarshal(raw, &result) != nil || result.ModelID != input.ModelID ||
 		result.ContextWindow <= 0 || result.UsedTokens < 0 ||
+		result.AutoCompactTokenLimit <= 0 || result.AutoCompactTokenLimit >= result.ContextWindow ||
 		result.RemainingTokens != max(0, result.ContextWindow-result.UsedTokens) {
 		return nil, errors.New("invalid context usage response")
 	}

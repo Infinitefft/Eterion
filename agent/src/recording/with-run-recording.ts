@@ -46,7 +46,7 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
         // 延迟加载让关闭记录时不依赖 SQLite，也不会产生目录或数据库副作用。
         const { openRecordStore: openStore } = await import('./store.js');
         store = openStore(settings.recordingPath, [
-          settings.qianfanApiKey, ...settings.models.map((model) => model.apiKey),
+          settings.bochaApiKey, ...settings.models.map((model) => model.apiKey),
         ]);
         store.startRun({
           runId: input.run_id, userId: input.user_id, threadId: input.thread_id,

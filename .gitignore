@@ -17,6 +17,7 @@
 /.run-records/
 
 # Environment variables and local secrets
+/agent/prompts/system.local.md
 .env
 .env.*
 !.env.example

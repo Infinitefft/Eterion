@@ -130,10 +130,11 @@ type ContextCompactor interface {
 }
 
 type ContextUsage struct {
-	ModelID         string `json:"modelId"`
-	ContextWindow   int64  `json:"contextWindow"`
-	UsedTokens      int64  `json:"usedTokens"`
-	RemainingTokens int64  `json:"remainingTokens"`
+	AutoCompactTokenLimit int64  `json:"autoCompactTokenLimit"`
+	ModelID               string `json:"modelId"`
+	ContextWindow         int64  `json:"contextWindow"`
+	UsedTokens            int64  `json:"usedTokens"`
+	RemainingTokens       int64  `json:"remainingTokens"`
 }
 
 type ContextUsageReader interface {

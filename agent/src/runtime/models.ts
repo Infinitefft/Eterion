@@ -12,7 +12,8 @@ export function buildModelClients(settings: Settings, summary = false): Map<stri
         apiKey: model.apiKey,
         timeout: settings.modelTimeoutMs,
         maxRetries: summary ? 0 : 2,
-        maxTokens: summary ? 2048 : 4096,
+        // 摘要和正式回答均保留 4096 Token 输出上限，避免较长中文摘要过早截断。
+        maxTokens: 4096,
 
         // 部分 OpenAI-compatible 服务不支持 stream_options。
         streamUsage: false,

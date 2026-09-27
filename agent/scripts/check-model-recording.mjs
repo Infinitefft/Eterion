@@ -20,7 +20,7 @@ mkdirSync(cacheRoot, { recursive: true });
 const directory = mkdtempSync(join(cacheRoot, 'model-recording-'));
 const settings = loadSettings({
   MODEL_NAME: 'offline-model', MODEL_API_KEY: 'fake-model-secret',
-  QIANFAN_API_KEY: 'fake-search-secret', SYSTEM_PROMPT: '离线验证提示词',
+  BOCHA_API_KEY: 'fake-search-secret', SYSTEM_PROMPT: '离线验证提示词',
   AGENT_RECORDING_ENABLED: 'true', AGENT_RECORDING_DIR: directory,
   AGENT_RUN_TIMEOUT: '2s',
 });

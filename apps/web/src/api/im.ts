@@ -136,6 +136,7 @@ export async function compactThreadContext(threadId: ThreadId, modelId: ModelId 
 export interface ContextUsage {
   modelId: ModelId;
   contextWindow: number;
+  autoCompactTokenLimit: number;
   usedTokens: number;
   remainingTokens: number;
 }
