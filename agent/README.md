@@ -59,7 +59,7 @@ Prompt 直接放在组装处，不再为一段字符串单独建模块。
 pnpm install
 ```
 
-首次配置时根据 `.env.example` 创建 `agent/.env`；已有 `.env` 时不要覆盖。
+首次配置时创建本地 `agent/.env` 并填写所需配置；已有 `.env` 时不要覆盖。
 模型 Key 和搜索用的 `BOCHA_API_KEY` 都填写在 `.env`，不放入源码、测试或 README。
 搜索固定发送 `summary: true`；模型可通过 `count` 动态选择网页数量（1–50，默认 12），可选填 `freshness`（`YYYY-MM-DD` 或 `YYYY-MM-DD..YYYY-MM-DD`），未指定时不发送日期过滤。
 `.env` 应保持 Git 忽略状态；提交前可用 `git check-ignore .env` 检查。
@@ -70,8 +70,8 @@ pnpm install
 配置读取位置固定为 `agent/.env`，不依赖启动命令所在目录。
 
 私人基础提示词放在 `agent/prompts/system.local.md`，由 `.env` 中的
-`SYSTEM_PROMPT_FILE=prompts/system.local.md` 指定。首次使用时复制
-`prompts/system.example.md` 为 `prompts/system.local.md`，再编辑内容；私人文件已被 Git 忽略。
+`SYSTEM_PROMPT_FILE=prompts/system.local.md` 指定。首次使用时自行创建
+`prompts/system.local.md` 并填写提示词；私人文件已被 Git 忽略。
 文件配置优先于原来的 `SYSTEM_PROMPT`，指定文件后若缺失、无法读取或为空，启动会明确报错。
 未设置文件路径时仍兼容 `SYSTEM_PROMPT` 和代码默认值。读取后继续追加 `create-agent.ts` 中的工具规则。
 
@@ -167,7 +167,7 @@ Go 继续负责业务消息持久化、资源归属、Run 展示状态和 IM 事
   `MODEL_CONTEXT_WINDOW=32768` 和 `MODEL_AUTO_COMPACT_TOKEN_LIMIT=20000`。
   模型专属的 `*_CONTEXT_WINDOW`、`*_AUTO_COMPACT_TOKEN_LIMIT` 优先于通用值；
   窗口是应用预算，不是厂商最大窗口，必须不超过实际模型容量。
-- DeepSeek V4 Pro 在 `.env.example` 中采用 `258000` 窗口和 `180000` 总输入压缩阈值。
+- DeepSeek V4 Pro 可通过模型专属环境变量配置 `258000` 窗口和 `180000` 总输入压缩阈值。
   总输入包含历史、系统提示词和工具定义；中间件仅统计历史，因此使用“总输入阈值减固定输入”触发，
   不再乘以 80%。其他模型暂用通用预算，确认各自容量后再覆盖。
 - 258k 与 180k 间的 78k 是初始增长缓冲：主模型输出 4096、一次较大网页正文约 60000、
