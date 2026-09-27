@@ -1,0 +1,202 @@
+.knowledge-create-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #17191745;
+}
+
+.knowledge-create-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 101;
+  width: min(460px, calc(100% - 32px));
+  max-height: calc(100dvh - 40px);
+  padding: 28px;
+  overflow-y: auto;
+  transform: translate(-50%, -50%);
+  border: 1px solid #e7e8e3;
+  border-radius: 12px;
+  color: #292d29;
+  background: #fdfdfb;
+  box-shadow: 0 24px 80px #15191526;
+
+  button:focus-visible {
+    outline: 2px solid #677a5c;
+    outline-offset: 3px;
+  }
+}
+
+.knowledge-create-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.knowledge-create-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid #e3e7dc;
+  border-radius: 9px;
+  color: #6f7e61;
+  background: #f2f5ec;
+}
+
+.knowledge-create-close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin: -6px -6px 0 0;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  color: #858b80;
+  background: transparent;
+  cursor: pointer;
+
+  &:hover {
+    color: #292d29;
+    background: #eff0eb;
+  }
+}
+
+.knowledge-create-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+
+.knowledge-create-description {
+  margin: 9px 0 28px;
+  color: #858880;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.knowledge-create-form,
+.knowledge-create-field {
+  display: grid;
+  gap: 22px;
+}
+
+.knowledge-create-field {
+  gap: 9px;
+
+  input {
+    width: 100%;
+    border: 1px solid #dedfd8;
+    border-radius: 6px;
+    color: #292d29;
+    background: #fff;
+    font-size: 13px;
+    line-height: 1.7;
+
+    &::placeholder {
+      color: #a1a59a;
+    }
+    &:focus {
+      outline: none;
+      border-color: #839175;
+      box-shadow: 0 0 0 3px #83917512;
+    }
+  }
+
+  input {
+    height: 42px;
+    padding: 9px 12px;
+  }
+}
+
+.knowledge-create-label {
+  font-size: 12px;
+  font-weight: 500;
+
+  > span {
+    margin-left: 6px;
+    color: #999d91;
+    font-size: 11px;
+    font-weight: 400;
+  }
+}
+
+.knowledge-create-input-wrap {
+  position: relative;
+  display: block;
+
+  &.has-limit-hint input {
+    padding-right: 90px;
+  }
+}
+
+.knowledge-create-limit-hint {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  white-space: nowrap;
+  color: #aa563f;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.knowledge-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 22px;
+  border-top: 1px solid #e9eae4;
+
+  button {
+    min-height: 37px;
+    padding: 0 16px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+}
+
+.knowledge-create-cancel {
+  border: 1px solid #dedfd8;
+  color: #62685c;
+  background: transparent;
+  cursor: pointer;
+
+  &:hover {
+    background: #f0f1ec;
+  }
+}
+
+.knowledge-create-submit {
+  cursor: pointer;
+  border: 1px solid #171717;
+  color: #fff;
+  background: #171717;
+
+  &:disabled {
+    opacity: 1;
+    cursor: not-allowed;
+  }
+}
+
+.knowledge-create-error {
+  margin: 0;
+  color: #aa563f;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.knowledge-create-dialog button:disabled,
+.knowledge-create-dialog input:disabled {
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .knowledge-create-dialog {
+    padding: 24px;
+  }
+}

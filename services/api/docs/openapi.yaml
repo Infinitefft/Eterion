@@ -17,6 +17,8 @@ tags:
     description: 注册、登录、JWT 鉴权、固定有效期 Refresh Token 续期和退出登录
   - name: Chat
     description: 对话、模型目录和实时消息接口
+  - name: Knowledge
+    description: 个人知识库管理
 
 paths:
   /healthz:
@@ -314,6 +316,77 @@ paths:
           $ref: "#/components/responses/AccessUnauthorized"
         "403":
           $ref: "#/components/responses/AccountForbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/knowledge-bases:
+    post:
+      tags: [Knowledge]
+      operationId: createKnowledgeBase
+      summary: 创建当前用户的知识库
+      description: 标题与描述去除首尾空白；描述省略或为 null 时保存为空字符串。同名知识库允许重复创建，所属用户取自认证身份。
+      security:
+        - accessBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                description:
+                  type: string
+                  nullable: true
+                  maxLength: 2000
+                  default: ''
+            example:
+              title: 前端工程
+              description: 工程实践与技术资料
+      responses:
+        "201":
+          description: 知识库已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  request_id:
+                    type: string
+                  data:
+                    type: object
+                    required: [id, title, description, created_at, updated_at]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      title:
+                        type: string
+                      description:
+                        type: string
+                      created_at:
+                        type: string
+                        format: date-time
+                      updated_at:
+                        type: string
+                        format: date-time
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/AccessUnauthorized"
+        "403":
+          $ref: "#/components/responses/AccountForbidden"
+        "413":
+          description: 请求体超过 32 KiB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
 

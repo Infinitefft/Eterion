@@ -15,6 +15,7 @@ import (
 	"github.com/Infinitefft/Eterion/services/api/internal/middleware"
 	"github.com/Infinitefft/Eterion/services/api/internal/modules/auth"
 	"github.com/Infinitefft/Eterion/services/api/internal/modules/chat"
+	"github.com/Infinitefft/Eterion/services/api/internal/modules/knowledge"
 	"github.com/Infinitefft/Eterion/services/api/internal/shared/response"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -146,6 +147,8 @@ func New(
 	api := engine.Group("/api")
 	chat.RegisterHistoryRoute(engine, runManager, chatRepository)
 	authHandler.RegisterRoutes(api)
+	knowledgeHandler := knowledge.NewHandler(knowledge.NewService(knowledge.NewRepository(db)), logger)
+	knowledgeHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
 	chatHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
 	chatHandler.RegisterCompactionRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)
 	chatHandler.RegisterContextUsageRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)
