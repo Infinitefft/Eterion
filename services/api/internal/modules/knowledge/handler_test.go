@@ -19,8 +19,15 @@ import (
 )
 
 type testRepository struct {
-	created *KnowledgeBase
-	err     error
+	created    *KnowledgeBase
+	bases      []KnowledgeBase
+	listedUser uuid.UUID
+	err        error
+}
+
+func (r *testRepository) ListByUser(_ context.Context, userID uuid.UUID) ([]KnowledgeBase, error) {
+	r.listedUser = userID
+	return r.bases, r.err
 }
 
 func (r *testRepository) Create(_ context.Context, base *KnowledgeBase) error {
@@ -70,6 +77,60 @@ func TestCreateKnowledgeBase(t *testing.T) {
 	token, _, err := tokens.CreateAccessToken(userID, sessionID, time.Now())
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name                string
+		bases               []KnowledgeBase
+		anonymous, failRead bool
+		status              int
+	}{
+		{name: "list bases", bases: []KnowledgeBase{{ID: uuid.New(), UserID: userID, Title: "资料", CreatedAt: time.Now(), UpdatedAt: time.Now()}}, status: 200},
+		{name: "empty list", status: 200},
+		{name: "list requires login", anonymous: true, status: 401},
+		{name: "read failure", failRead: true, status: 500},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &testRepository{bases: test.bases}
+			if test.failRead {
+				repo.err = errors.New("private database failure")
+			}
+			engine := gin.New()
+			NewHandler(NewService(repo), logger).RegisterRoutes(engine.Group("/api"), authHandler.RequireAccessToken())
+			request := httptest.NewRequest(http.MethodGet, "/api/knowledge-bases?user_id="+uuid.NewString(), nil)
+			if !test.anonymous {
+				request.Header.Set("Authorization", "Bearer "+token)
+			}
+			writer := httptest.NewRecorder()
+			engine.ServeHTTP(writer, request)
+			if writer.Code != test.status {
+				t.Fatalf("status = %d, body = %s", writer.Code, writer.Body.String())
+			}
+			if test.anonymous {
+				if repo.listedUser != uuid.Nil {
+					t.Fatal("anonymous request reached repository")
+				}
+			} else if repo.listedUser != userID {
+				t.Fatal("query did not use authenticated owner")
+			}
+			if strings.Contains(writer.Body.String(), "private database failure") {
+				t.Fatal("database error leaked")
+			}
+			if test.status == 200 {
+				var result struct {
+					Data []KnowledgeBaseResponse `json:"data"`
+				}
+				if err := json.Unmarshal(writer.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if result.Data == nil || len(result.Data) != len(test.bases) {
+					t.Fatalf("unexpected list: %s", writer.Body.String())
+				}
+				if len(test.bases) > 0 && (result.Data[0].ID != test.bases[0].ID.String() || result.Data[0].Title != test.bases[0].Title) {
+					t.Fatal("incorrect list fields")
+				}
+			}
+		})
 	}
 
 	for _, test := range []struct {

@@ -22,6 +22,23 @@ func NewHandler(service *Service, logger *slog.Logger) *Handler {
 
 func (h *Handler) RegisterRoutes(api *gin.RouterGroup, requireAccessToken gin.HandlerFunc) {
 	api.POST("/knowledge-bases", requireAccessToken, h.Create)
+	api.GET("/knowledge-bases", requireAccessToken, h.List)
+}
+
+func (h *Handler) List(c *gin.Context) {
+	identity, ok := auth.IdentityFromContext(c)
+	if !ok {
+		h.logger.Error("knowledge request missing authenticated identity")
+		response.Error(c, apperrors.Internal())
+		return
+	}
+	result, err := h.service.List(c.Request.Context(), identity.UserID)
+	if err != nil {
+		h.logger.Error("list knowledge bases failed", "error", err)
+		response.Error(c, apperrors.Internal())
+		return
+	}
+	response.JSON(c, http.StatusOK, result)
 }
 
 func (h *Handler) Create(c *gin.Context) {

@@ -7,6 +7,9 @@
   color: var(--repository-ink);
   background: #fdfdfb;
   scrollbar-gutter: stable;
+  &:has(.repository-file-details) {
+    scrollbar-gutter: auto;
+  }
   button:focus-visible,
   a:focus-visible,
   input:focus-visible {
@@ -40,12 +43,9 @@
     line-height: 1.8;
   }
 }
-.repository-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--repository-muted);
-  font-size: 11px;
+.repository-header-action {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 .repository-button {
   display: inline-flex;
@@ -130,11 +130,6 @@
   gap: 8px;
   color: #738465;
 }
-.repository-library-number {
-  color: #969c8e;
-  font-family: Consolas, monospace;
-  font-size: 11px;
-}
 .repository-library-description {
   flex: 1;
   color: #7c8276;
@@ -167,17 +162,18 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 32px;
-  color: #959a8e;
-  font-size: 12px;
+  margin-bottom: 12px;
+  color: #171717;
+  font-size: 13px;
+  font-weight: 500;
   a {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    color: #606958;
+    color: inherit;
   }
   a:hover {
-    color: #303c2e;
+    color: inherit;
   }
 }
 .repository-file-toolbar {
@@ -301,13 +297,33 @@
   }
 }
 .repository-file-details {
+  color: #171717;
   position: sticky;
   top: 0;
   height: var(--app-viewport-height, 100dvh);
   overflow-y: auto;
   padding: 28px 24px;
   border-left: 1px solid var(--repository-line);
-  background: #fafbf7;
+  background: #f8fafd;
+}
+.repository-back-to-top {
+  position: fixed;
+  right: 16px;
+  bottom: 24px;
+  z-index: 46;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #dce4ed;
+  border-radius: 50%;
+  color: #42566d;
+  background: #fff;
+  box-shadow: 0 3px 12px #253d5818;
+  cursor: pointer;
+  &:hover {
+    background: #edf3fa;
+  }
 }
 .repository-details-header {
   display: flex;
@@ -376,20 +392,24 @@
     gap: 8px;
   }
   dt {
-    color: #8a9181;
+    color: #171717;
   }
   dd {
     margin: 0;
-    color: #555f4c;
+    color: #171717;
     overflow-wrap: anywhere;
   }
 }
 .repository-file-preview {
+  margin-left: -7px;
+  margin-right: 7px;
+  padding-inline: 6px;
+  color: #171717;
   border-top: 1px solid var(--repository-line);
   padding-top: 24px;
   p {
     margin: 20px 0 0;
-    color: #707965;
+    color: inherit;
     font-size: 12px;
     line-height: 2;
     white-space: pre-wrap;

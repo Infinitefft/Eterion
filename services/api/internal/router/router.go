@@ -147,8 +147,15 @@ func New(
 	api := engine.Group("/api")
 	chat.RegisterHistoryRoute(engine, runManager, chatRepository)
 	authHandler.RegisterRoutes(api)
-	knowledgeHandler := knowledge.NewHandler(knowledge.NewService(knowledge.NewRepository(db)), logger)
+	knowledgeRepository := knowledge.NewRepository(db)
+	knowledgeHandler := knowledge.NewHandler(knowledge.NewService(knowledgeRepository), logger)
 	knowledgeHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
+	var fileStore knowledge.FileStore
+	if cfg.OSS.Enabled() {
+		fileStore = knowledge.NewOSSStore(cfg.OSS)
+	}
+	knowledge.NewFileHandler(knowledge.NewFileService(knowledgeRepository, fileStore), logger).
+		RegisterRoutes(api, authHandler.RequireAccessToken())
 	chatHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
 	chatHandler.RegisterCompactionRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)
 	chatHandler.RegisterContextUsageRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)

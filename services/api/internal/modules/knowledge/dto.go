@@ -8,6 +8,7 @@ type CreateRequest struct {
 }
 
 type KnowledgeBaseResponse struct {
+	FileCount   int64     `json:"file_count"`
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`

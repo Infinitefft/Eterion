@@ -15,6 +15,7 @@ import (
 const minimumJWTSecretLength = 32
 
 type Config struct {
+	OSS                 OSSConfig
 	AppEnv              string
 	HTTPAddr            string
 	DatabaseURL         string
@@ -41,6 +42,13 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
+		OSS: OSSConfig{
+			Bucket:          strings.TrimSpace(os.Getenv("OSS_BUCKET")),
+			Region:          strings.TrimSpace(os.Getenv("OSS_REGION")),
+			Endpoint:        strings.TrimSpace(os.Getenv("OSS_ENDPOINT")),
+			AccessKeyID:     strings.TrimSpace(os.Getenv("OSS_ACCESS_KEY_ID")),
+			AccessKeySecret: strings.TrimSpace(os.Getenv("OSS_ACCESS_KEY_SECRET")),
+		},
 		AppEnv:            envOrDefault("APP_ENV", "development"),
 		HTTPAddr:          envOrDefault("HTTP_ADDR", ":8080"),
 		DatabaseURL:       strings.TrimSpace(os.Getenv("DATABASE_URL")),
@@ -88,6 +96,9 @@ func Load() (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if err := c.OSS.Validate(); err != nil {
+		return err
+	}
 	if c.DatabaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}

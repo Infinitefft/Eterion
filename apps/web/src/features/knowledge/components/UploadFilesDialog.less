@@ -1,0 +1,235 @@
+.knowledge-upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #17191745;
+}
+
+.knowledge-upload-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 101;
+  width: min(520px, calc(100% - 32px));
+  max-height: calc(100dvh - 40px);
+  padding: 28px;
+  overflow-y: auto;
+  transform: translate(-50%, -50%);
+  border: 1px solid #e7e8e3;
+  border-radius: 12px;
+  color: #292d29;
+  background: #fdfdfb;
+  box-shadow: 0 24px 80px #15191526;
+
+  button {
+    font: inherit;
+    cursor: pointer;
+  }
+  button:focus-visible {
+    outline: 2px solid #677a5c;
+    outline-offset: 3px;
+  }
+}
+
+.knowledge-upload-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  h2 {
+    margin: 0;
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: -0.4px;
+  }
+  p {
+    margin: 9px 0 0;
+    color: #858880;
+    font-size: 12px;
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+  }
+}
+
+.knowledge-upload-icon-button {
+  display: grid;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  color: #858b80;
+  background: transparent;
+  &:hover {
+    color: #292d29;
+    background: #eff0eb;
+  }
+}
+
+.knowledge-upload-dropzone {
+  display: flex;
+  width: 100%;
+  min-height: 230px;
+  padding: 28px 16px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px dashed #c9cfc2;
+  border-radius: 8px;
+  color: #8b9085;
+  background: #f7f8f3;
+  transition:
+    border-color 150ms,
+    background 150ms;
+  strong {
+    color: #42483b;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  > span {
+    font-size: 11px;
+  }
+  &:hover,
+  &.is-dragging {
+    border-color: #78896a;
+    background: #eff3e8;
+  }
+}
+
+.knowledge-upload-mark {
+  color: #778769;
+  margin-bottom: 4px;
+}
+.knowledge-upload-choose {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 7px 12px;
+  border: 1px solid #d9dfd0;
+  border-radius: 5px;
+  color: #525f47;
+  background: #fdfdfb;
+}
+
+.knowledge-upload-selection {
+  margin-top: 20px;
+  ul {
+    display: grid;
+    gap: 6px;
+    max-height: 190px;
+    overflow-y: auto;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid #e8eae3;
+    border-radius: 6px;
+    color: #86917a;
+    background: #fff;
+  }
+}
+.knowledge-upload-selection-heading {
+  display: flex;
+  justify-content: space-between;
+  color: #7d8375;
+  font-size: 11px;
+  button {
+    padding: 0;
+    border: 0;
+    color: #747d69;
+    background: none;
+  }
+}
+.knowledge-upload-file-info {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #42483b;
+    font-size: 12px;
+  }
+  small {
+    color: #93998d;
+    font-size: 10px;
+  }
+}
+.knowledge-upload-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e9eae4;
+  button {
+    min-height: 37px;
+    padding: 0 16px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+}
+.knowledge-upload-cancel {
+  border: 1px solid #dedfd8;
+  color: #62685c;
+  background: transparent;
+}
+.knowledge-upload-submit {
+  border: 1px solid #171717;
+  color: #fff;
+  background: #171717;
+  &:disabled {
+    cursor: not-allowed;
+  }
+}
+@media (max-width: 480px) {
+  .knowledge-upload-dialog {
+    padding: 22px;
+  }
+}
+.knowledge-upload-toast-viewport {
+  position: fixed;
+  left: 50%;
+  top: 24px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 200;
+  width: min(380px, calc(100vw - 32px));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.knowledge-upload-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border: 1px solid #40443f;
+  border-radius: 8px;
+  background: #292d29;
+  color: #fff;
+  box-shadow: 0 8px 30px #15191530;
+  font-size: 13px;
+  button {
+    margin-left: auto;
+    border: 0;
+    color: inherit;
+    background: none;
+    cursor: pointer;
+  }
+}
+.knowledge-upload-dialog button:disabled {
+  cursor: not-allowed;
+}

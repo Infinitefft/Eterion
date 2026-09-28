@@ -7,6 +7,7 @@ import (
 )
 
 type KnowledgeBase struct {
+	FileCount   int64     `gorm:"->;-:migration"`
 	ID          uuid.UUID `gorm:"type:uuid;primaryKey"`
 	UserID      uuid.UUID `gorm:"type:uuid"`
 	Title       string

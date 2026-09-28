@@ -1,20 +1,28 @@
-import { ArrowLeft, ArrowUpRight, FileText, Folder, Search, Upload, X } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, ArrowUp, ArrowUpRight, FileText, Folder, Search, X } from 'lucide-react';
+import { Toast } from 'radix-ui';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 
-import type { KnowledgeBase } from '@/api/knowledge';
+import type { KnowledgeBase, KnowledgeFile } from '@/api/knowledge';
+import { listKnowledgeBases, listKnowledgeFiles } from '@/api/knowledge';
 import { routePaths } from '@/app/routePaths';
 import { CreateKnowledgeBaseDialog } from '@/features/knowledge/components/CreateKnowledgeBaseDialog';
+import { FileActions } from '@/features/knowledge/components/FileActions';
+import { FilePreview } from '@/features/knowledge/components/FilePreview';
+import { LibraryActions } from '@/features/knowledge/components/LibraryActions';
+import { UploadFilesDialog } from '@/features/knowledge/components/UploadFilesDialog';
 import { useAuthStore } from '@/store/auth-store';
 
 import './Repository.less';
 
 type LibraryFile = {
+  id: string;
   name: string;
   extension: string;
   size: string;
   date: string;
-  content: string;
 };
 
 type Library = {
@@ -22,7 +30,7 @@ type Library = {
   name: string;
   description: string;
   updated: string;
-  files: LibraryFile[];
+  fileCount: number;
 };
 
 export function Repository() {
@@ -31,29 +39,58 @@ export function Repository() {
 }
 
 function RepositoryWorkspace() {
-  const [libraries, setLibraries] = useState<Library[]>([]);
+  const user = useAuthStore((state) => state.user);
+  const sessionVersion = useAuthStore((state) => state.sessionVersion);
+  const bootstrapStatus = useAuthStore((state) => state.bootstrapStatus);
+  const queryClient = useQueryClient();
+  const queryKey = ['knowledge-bases', sessionVersion];
+  const query = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => listKnowledgeBases(signal),
+    enabled: Boolean(user),
+    gcTime: 0,
+    retry: false,
+  });
+  const libraries: Library[] = (query.data ?? []).map((base) => ({
+    id: base.id,
+    name: base.title,
+    description: base.description,
+    updated: new Date(base.updated_at).toLocaleDateString('zh-CN'),
+    fileCount: base.file_count,
+  }));
   const [searchParams] = useSearchParams();
   const library = libraries.find((item) => item.id === searchParams.get('library'));
 
-  function handleCreated(base: KnowledgeBase) {
-    setLibraries((current) => [
-      {
-        id: base.id,
-        name: base.title,
-        description: base.description,
-        updated: new Date(base.updated_at).toLocaleDateString('zh-CN'),
-        files: [],
-      },
-      ...current,
-    ]);
+  function handleCreated() {
+    void queryClient.invalidateQueries({ queryKey });
+  }
+
+  let statusMessage = '';
+  if (bootstrapStatus === 'pending' || (user && query.isPending)) {
+    statusMessage = '正在加载知识库…';
+  } else if (!user) {
+    statusMessage = '请先通过左侧账户入口登录，以查看你的知识库。';
+  } else if (query.isError) {
+    statusMessage = '知识库加载失败，请重试。';
   }
 
   return (
     <section className='repository-page' aria-labelledby='repository-title'>
-      {library ? (
+      {library && !statusMessage ? (
         <LibraryDetail key={library.id} library={library} />
       ) : (
-        <LibraryOverview libraries={libraries} onCreated={handleCreated} />
+        <LibraryOverview
+          libraries={libraries}
+          onCreated={handleCreated}
+          statusMessage={statusMessage}
+          onRetry={
+            query.isError
+              ? () => {
+                  void query.refetch();
+                }
+              : undefined
+          }
+        />
       )}
     </section>
   );
@@ -62,29 +99,52 @@ function RepositoryWorkspace() {
 function LibraryOverview({
   libraries,
   onCreated,
+  statusMessage,
+  onRetry,
 }: {
   libraries: Library[];
   onCreated: (base: KnowledgeBase) => void;
+  statusMessage: string;
+  onRetry?: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const sessionVersion = useAuthStore((state) => state.sessionVersion);
+  const [deletedId, setDeletedId] = useState<string | null>(null);
+  function handleDeleted(id: string) {
+    setDeletedId(id);
+    const queryKey = ['knowledge-bases', sessionVersion];
+    void queryClient.cancelQueries({ queryKey }).then(() => {
+      queryClient.setQueryData<KnowledgeBase[]>(queryKey, (current = []) =>
+        current.filter((base) => base.id !== id),
+      );
+      void queryClient.invalidateQueries({ queryKey });
+    });
+    queryClient.removeQueries({ queryKey: ['knowledge-files', sessionVersion, id] });
+    queryClient.removeQueries({ queryKey: ['knowledge-file-content', sessionVersion, id] });
+  }
   return (
     <div className='repository-content'>
       <header className='repository-header'>
         <div>
-          <div className='repository-eyebrow'>
-            <span>个人空间</span>
-          </div>
           <h1 id='repository-title'>知识库</h1>
           <p>把资料整理好，让每一次查找都有迹可循。</p>
         </div>
         <CreateKnowledgeBaseDialog onCreated={onCreated} />
       </header>
       <div className='repository-section-label'>
-        <h2>
-          我的知识库 <span>{libraries.length} 个</span>
-        </h2>
+        <h2>我的知识库 {!statusMessage && <span>{libraries.length} 个</span>}</h2>
         <span>按主题整理，各自收纳</span>
       </div>
-      {libraries.length === 0 ? (
+      {statusMessage ? (
+        <div className='repository-empty' role='status'>
+          <p>{statusMessage}</p>
+          {onRetry && (
+            <button className='repository-button' type='button' onClick={onRetry}>
+              重试
+            </button>
+          )}
+        </div>
+      ) : libraries.length === 0 ? (
         <div className='repository-empty' role='status'>
           <Folder size={30} strokeWidth={1.2} aria-hidden='true' />
           <h2>还没有知识库</h2>
@@ -92,39 +152,80 @@ function LibraryOverview({
         </div>
       ) : (
         <div className='repository-libraries'>
-          {libraries.map((library, index) => (
-            <Link
-              className='repository-library'
-              key={library.id}
-              to={`${routePaths.repository}?library=${library.id}`}
-            >
-              <span className='repository-library-top'>
-                <Folder size={23} strokeWidth={1.35} aria-hidden='true' />
-                <span className='repository-library-number'>0{index + 1}</span>
-              </span>
-              <strong>{library.name}</strong>
-              <span className='repository-library-description'>{library.description}</span>
-              <span className='repository-library-bottom'>
-                <span>
-                  {library.files.length} 个文件 <span className='repository-dot'>·</span>{' '}
-                  {library.updated}
+          {libraries.map((library) => (
+            <div className='repository-library-item' key={library.id}>
+              <Link
+                className='repository-library'
+                to={`${routePaths.repository}?library=${library.id}`}
+              >
+                <span className='repository-library-top'>
+                  <Folder size={23} strokeWidth={1.35} aria-hidden='true' />
                 </span>
-                <ArrowUpRight size={16} aria-hidden='true' />
-              </span>
-            </Link>
+                <strong>{library.name}</strong>
+                <span className='repository-library-description'>{library.description}</span>
+                <span className='repository-library-bottom'>
+                  <span>
+                    {library.fileCount} 个文件 <span className='repository-dot'>·</span>{' '}
+                    {library.updated}
+                  </span>
+                  <ArrowUpRight size={16} aria-hidden='true' />
+                </span>
+              </Link>
+              <LibraryActions
+                baseId={library.id}
+                baseName={library.name}
+                onDeleted={handleDeleted}
+              />
+            </div>
           ))}
         </div>
       )}
+      <DeletionToast deletedId={deletedId} setDeletedId={setDeletedId} />
     </div>
   );
 }
 
 function LibraryDetail({ library }: { library: Library }) {
+  const sessionVersion = useAuthStore((state) => state.sessionVersion);
+  const queryClient = useQueryClient();
+  const queryKey = ['knowledge-files', sessionVersion, library.id];
+  const query = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => listKnowledgeFiles(library.id, signal),
+    retry: false,
+    gcTime: 0,
+  });
+  const files: LibraryFile[] = (query.data ?? []).map((file) => {
+    const dot = file.original_name.lastIndexOf('.');
+    return {
+      id: file.id,
+      name: file.original_name.slice(0, dot),
+      extension: file.original_name.slice(dot + 1),
+      size:
+        file.size_bytes < 1024 * 1024
+          ? `${Math.ceil(file.size_bytes / 1024)} KB`
+          : `${(file.size_bytes / 1024 / 1024).toFixed(1)} MB`,
+      date: new Date(file.created_at).toLocaleDateString('zh-CN'),
+    };
+  });
+  function handleUploaded(file: KnowledgeFile) {
+    void queryClient.cancelQueries({ queryKey }).then(() => {
+      queryClient.setQueryData<KnowledgeFile[]>(queryKey, (current = []) => [
+        file,
+        ...current.filter((item) => item.id !== file.id),
+      ]);
+      void queryClient.invalidateQueries({ queryKey });
+    });
+    void queryClient.invalidateQueries({ queryKey: ['knowledge-bases', sessionVersion] });
+  }
   const [search, setSearch] = useState('');
+  const [deletedFileId, setDeletedFileId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<LibraryFile | null>(null);
+  const [scrolledFileId, setScrolledFileId] = useState<string | null>(null);
+  const detailsRef = useRef<HTMLElement | null>(null);
   const fileButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const visibleFiles = library.files.filter((file) =>
+  const visibleFiles = files.filter((file) =>
     `${file.name}.${file.extension}`.toLowerCase().includes(search.trim().toLowerCase()),
   );
 
@@ -137,6 +238,22 @@ function LibraryDetail({ library }: { library: Library }) {
   function closeDetails() {
     setSelectedFile(null);
     fileButtonRef.current?.focus();
+  }
+
+  function handleDeleted(fileId: string) {
+    setDeletedFileId(fileId);
+    if (selectedFile?.id === fileId) setSelectedFile(null);
+    void queryClient.cancelQueries({ queryKey }).then(() => {
+      queryClient.setQueryData<KnowledgeFile[]>(queryKey, (current = []) =>
+        current.filter((file) => file.id !== fileId),
+      );
+      void queryClient.invalidateQueries({ queryKey });
+    });
+    queryClient.removeQueries({
+      queryKey: ['knowledge-file-content', sessionVersion, library.id, fileId],
+    });
+    void queryClient.invalidateQueries({ queryKey: ['knowledge-bases', sessionVersion] });
+    document.querySelector<HTMLInputElement>('.repository-search input')?.focus();
   }
 
   return (
@@ -162,15 +279,13 @@ function LibraryDetail({ library }: { library: Library }) {
             <h1 id='repository-title'>{library.name}</h1>
             <p>{library.description}</p>
           </div>
-          <button
-            className='repository-button repository-button-primary'
-            type='button'
-            disabled
-            title='文件上传将在后续接入'
-          >
-            <Upload size={15} aria-hidden='true' />
-            添加文件
-          </button>
+          <div className='repository-header-action'>
+            <UploadFilesDialog
+              libraryName={library.name}
+              libraryId={library.id}
+              onUploaded={handleUploaded}
+            />
+          </div>
         </header>
         <div className='repository-file-toolbar'>
           <label className='repository-search'>
@@ -183,31 +298,56 @@ function LibraryDetail({ library }: { library: Library }) {
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
-          <span className='repository-file-count'>共 {visibleFiles.length} 个文件</span>
+          <span className='repository-file-count'>
+            {query.isPending ? '加载中…' : `共 ${visibleFiles.length} 个文件`}
+          </span>
         </div>
-        {visibleFiles.length > 0 ? (
-          <div className='repository-file-grid' aria-label='知识库文件'>
-            {visibleFiles.map((file) => (
+        {query.isPending || query.isError ? (
+          <div className='repository-empty' role='status'>
+            <p>{query.isPending ? '正在加载文件…' : '文件加载失败，请重试。'}</p>
+            {query.isError && (
               <button
-                className={`repository-file-card${selectedFile === file ? ' is-selected' : ''}`}
+                className='repository-button'
                 type='button'
-                key={file.name}
-                title={`${file.name}.${file.extension}`}
-                aria-pressed={selectedFile === file}
-                aria-controls={selectedFile ? 'repository-file-details' : undefined}
-                onClick={(event) => {
-                  fileButtonRef.current = event.currentTarget;
-                  setSelectedFile(file);
+                onClick={() => {
+                  void query.refetch();
                 }}
               >
-                <span className={`repository-file-cover is-${file.extension}`} aria-hidden='true'>
-                  <FileText size={32} strokeWidth={1.25} />
-                </span>
-                <span className='repository-file-label'>
-                  <span className='repository-file-basename'>{file.name}</span>
-                  <span className='repository-file-extension'>.{file.extension}</span>
-                </span>
+                重试
               </button>
+            )}
+          </div>
+        ) : visibleFiles.length > 0 ? (
+          <div className='repository-file-grid' aria-label='知识库文件'>
+            {visibleFiles.map((file) => (
+              <div className='repository-file-item' key={file.id}>
+                <button
+                  className={`repository-file-card${selectedFile?.id === file.id ? ' is-selected' : ''}`}
+                  type='button'
+                  title={`${file.name}.${file.extension}`}
+                  aria-pressed={selectedFile?.id === file.id}
+                  aria-controls={selectedFile ? 'repository-file-details' : undefined}
+                  onClick={(event) => {
+                    fileButtonRef.current = event.currentTarget;
+                    setScrolledFileId(null);
+                    setSelectedFile(file);
+                  }}
+                >
+                  <span className={`repository-file-cover is-${file.extension}`} aria-hidden='true'>
+                    <FileText size={32} strokeWidth={1.25} />
+                  </span>
+                  <span className='repository-file-label'>
+                    <span className='repository-file-basename'>{file.name}</span>
+                    <span className='repository-file-extension'>.{file.extension}</span>
+                  </span>
+                </button>
+                <FileActions
+                  baseId={library.id}
+                  fileId={file.id}
+                  fileName={`${file.name}.${file.extension}`}
+                  onDeleted={handleDeleted}
+                />
+              </div>
             ))}
           </div>
         ) : (
@@ -222,9 +362,14 @@ function LibraryDetail({ library }: { library: Library }) {
       </div>
       {selectedFile && (
         <aside
+          key={selectedFile.id}
+          ref={detailsRef}
           className='repository-file-details'
           id='repository-file-details'
           aria-labelledby='repository-details-title'
+          onScroll={(event) => {
+            setScrolledFileId(event.currentTarget.scrollTop > 160 ? selectedFile.id : null);
+          }}
         >
           <header className='repository-details-header'>
             <h2 id='repository-details-title'>文件详情</h2>
@@ -268,10 +413,61 @@ function LibraryDetail({ library }: { library: Library }) {
             <div className='repository-preview-heading'>
               <h3 id='repository-preview-title'>内容预览</h3>
             </div>
-            <p>{selectedFile.content}</p>
+            <FilePreview key={selectedFile.id} baseId={library.id} fileId={selectedFile.id} />
           </section>
+          {scrolledFileId === selectedFile.id && (
+            <button
+              className='repository-back-to-top'
+              type='button'
+              aria-label='回到文件预览顶部'
+              title='回到顶部'
+              onClick={() => {
+                detailsRef.current?.scrollTo({
+                  top: 0,
+                  behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                    ? 'instant'
+                    : 'smooth',
+                });
+              }}
+            >
+              <ArrowUp size={18} aria-hidden='true' />
+            </button>
+          )}
         </aside>
       )}
+      <DeletionToast deletedId={deletedFileId} setDeletedId={setDeletedFileId} />
     </div>
+  );
+}
+
+function DeletionToast({
+  deletedId,
+  setDeletedId,
+}: {
+  deletedId: string | null;
+  setDeletedId: (id: string | null) => void;
+}) {
+  return (
+    <Toast.Provider duration={3000}>
+      {createPortal(
+        <>
+          <Toast.Root
+            key={deletedId}
+            className='knowledge-upload-toast'
+            open={deletedId !== null}
+            onOpenChange={(open) => {
+              if (!open) setDeletedId(null);
+            }}
+          >
+            <Toast.Description>删除成功</Toast.Description>
+            <Toast.Close aria-label='关闭提示'>
+              <X size={16} />
+            </Toast.Close>
+          </Toast.Root>
+          <Toast.Viewport className='knowledge-upload-toast-viewport' />
+        </>,
+        document.body,
+      )}
+    </Toast.Provider>
   );
 }

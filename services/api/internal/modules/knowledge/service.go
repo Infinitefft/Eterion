@@ -18,6 +18,22 @@ func NewService(repository Repository) *Service {
 	return &Service{repository: repository}
 }
 
+func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]KnowledgeBaseResponse, error) {
+	bases, err := s.repository.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]KnowledgeBaseResponse, 0, len(bases))
+	for _, base := range bases {
+		result = append(result, KnowledgeBaseResponse{
+			FileCount: base.FileCount,
+			ID:        base.ID.String(), Title: base.Title, Description: base.Description,
+			CreatedAt: base.CreatedAt, UpdatedAt: base.UpdatedAt,
+		})
+	}
+	return result, nil
+}
+
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, request CreateRequest) (*KnowledgeBaseResponse, error) {
 	title := strings.TrimSpace(request.Title)
 	description := strings.TrimSpace(request.Description)
