@@ -113,7 +113,7 @@ func (h *FileHandler) Upload(c *gin.Context) {
 	// 只延长上传路由期限，避免 20 MiB 上传被普通请求的短超时中断。
 	controller := http.NewResponseController(c.Writer)
 	_ = controller.SetReadDeadline(time.Now().Add(2 * time.Minute))
-	_ = controller.SetWriteDeadline(time.Now().Add(3 * time.Minute))
+	_ = controller.SetWriteDeadline(time.Now().Add(13 * time.Minute))
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxFileBytes+64*1024)
 	reader, err := c.Request.MultipartReader()
 	if err != nil {

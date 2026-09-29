@@ -16,6 +16,7 @@ export function createRagStore(databaseUrl: string) {
     max: 5,
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 30_000,
+    statement_timeout: 30_000,
   });
   // 空闲连接断开时 pg 会发出 error 事件；避免未处理事件终止 Agent。
   pool.on('error', (error) => console.error(databaseError(error).message));
@@ -31,20 +32,24 @@ export function createRagStore(databaseUrl: string) {
       if (!result.rowCount) throw new Error('RAG source file does not exist');
     },
 
-    async replaceFileChunks(fileId: string, chunks: EmbeddedChunk[]): Promise<void> {
+    async replaceFileChunks(fileId: string, chunks: EmbeddedChunk[], signal?: AbortSignal): Promise<void> {
+      signal?.throwIfAborted();
       if (chunks.some((chunk) => chunk.fileId !== fileId)) {
         throw new Error('RAG chunk fileId does not match the source file');
       }
       const client = await pool.connect().catch((error: unknown) => { throw databaseError(error); });
       let discardConnection = false;
       try {
+        signal?.throwIfAborted();
         await client.query('BEGIN');
         // 同一文件的替换串行执行，并再次检查 Embedding 期间文件是否已被删除。
         const file = await client.query('SELECT id FROM knowledge_files WHERE id = $1 FOR UPDATE', [fileId]);
         if (!file.rowCount) throw new Error('RAG source file does not exist');
+        signal?.throwIfAborted();
         await client.query('DELETE FROM rag_chunks WHERE file_id = $1', [fileId]);
 
         for (let start = 0; start < chunks.length; start += INSERT_BATCH_SIZE) {
+          signal?.throwIfAborted();
           const values: unknown[] = [];
           const rows = chunks.slice(start, start + INSERT_BATCH_SIZE).map((chunk) => {
             const offset = values.length;
@@ -58,6 +63,7 @@ export function createRagStore(databaseUrl: string) {
             (id, file_id, section_id, content, heading_path, chunk_index, start_offset, end_offset, embedding)
             VALUES ${rows.join(', ')}`, values);
         }
+        signal?.throwIfAborted();
         await client.query('COMMIT');
       } catch (error) {
         try {

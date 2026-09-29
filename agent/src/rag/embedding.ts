@@ -26,7 +26,9 @@ function diagnostics(body: unknown): string {
 export async function embedChunks(
   chunks: RagChunk[],
   config: Pick<RagConfig, 'apiKey' | 'baseUrl' | 'model' | 'dimensions'>,
+  parentSignal?: AbortSignal,
 ): Promise<EmbeddedChunk[]> {
+  parentSignal?.throwIfAborted();
   const texts = chunks.map((chunk) => {
     const text = buildEmbeddingText(chunk);
     if (!chunk.content.trim() || countBudgetTokens(text) > EMBEDDING_TEXT_BUDGET) {
@@ -36,10 +38,12 @@ export async function embedChunks(
   });
   const result: EmbeddedChunk[] = [];
   for (let start = 0; start < chunks.length; start += BATCH_SIZE) {
+    parentSignal?.throwIfAborted();
     const batch = chunks.slice(start, start + BATCH_SIZE);
     let response: Response;
     let body: unknown;
-    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const signal = parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout;
     try {
       response = await fetch(`${config.baseUrl.replace(/\/$/, '')}/services/embeddings/text-embedding/text-embedding`, {
         method: 'POST',

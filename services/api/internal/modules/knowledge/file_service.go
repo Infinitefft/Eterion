@@ -24,10 +24,15 @@ var fileMimeTypes = map[string]string{
 type FileService struct {
 	repository FileRepository
 	store      FileStore
+	indexer    FileIndexer
 }
 
-func NewFileService(repository FileRepository, store FileStore) *FileService {
-	return &FileService{repository: repository, store: store}
+type FileIndexer interface {
+	IngestFile(context.Context, uuid.UUID, string, string) error
+}
+
+func NewFileService(repository FileRepository, store FileStore, indexer FileIndexer) *FileService {
+	return &FileService{repository: repository, store: store, indexer: indexer}
 }
 func (s *FileService) checkOwner(ctx context.Context, userID, baseID uuid.UUID) error {
 	owned, err := s.repository.OwnsBase(ctx, baseID, userID)
@@ -70,7 +75,15 @@ func (s *FileService) Upload(ctx context.Context, userID, baseID uuid.UUID, name
 	}
 	now := time.Now().UTC()
 	// 数据库错误不盲目删除 OSS 对象：连接中断时提交结果可能不确定。
-	return s.repository.SaveFile(ctx, &KnowledgeFile{ID: fileID, KnowledgeBaseID: baseID, OriginalName: name, ObjectKey: key, MimeType: mimeType, SizeBytes: int64(len(data)), CreatedAt: now, UpdatedAt: now})
+	file, err := s.repository.SaveFile(ctx, &KnowledgeFile{ID: fileID, KnowledgeBaseID: baseID, OriginalName: name, ObjectKey: key, MimeType: mimeType, SizeBytes: int64(len(data)), CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		return nil, err
+	}
+	// OSS 和业务记录已保存，索引失败不补偿删除，也不再次上传。
+	if s.indexer == nil || s.indexer.IngestFile(ctx, file.ID, strings.TrimPrefix(strings.ToLower(path.Ext(name)), "."), string(data)) != nil {
+		return nil, apperrors.New(502, "FILE_INDEXING_FAILED", "文件已保存，但索引未完成，请刷新文件列表确认结果", "REFRESH_LIST")
+	}
+	return file, nil
 }
 func (s *FileService) List(ctx context.Context, userID, baseID uuid.UUID) ([]KnowledgeFile, error) {
 	if err := s.checkOwner(ctx, userID, baseID); err != nil {

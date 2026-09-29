@@ -9,6 +9,15 @@ async function main(): Promise<void> {
   const app = createApp(settings, runtime);
 
   await app.listen({ host: settings.host, port: settings.port });
+  // 通过 Fastify 的 onClose 释放 RAG 连接池，避免强制退出跳过清理。
+  const shutdown = () => {
+    void app.close().catch(() => {
+      console.error('Agent service shutdown failed');
+      process.exitCode = 1;
+    });
+  };
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 }
 
 main().catch((error: unknown) => {

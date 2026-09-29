@@ -69,7 +69,7 @@ export async function uploadKnowledgeFile(baseId: string, file: File, signal?: A
     form,
     {
       signal,
-      timeout: 190_000,
+      timeout: 790_000,
     },
   );
   return response.data.data;

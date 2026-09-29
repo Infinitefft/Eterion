@@ -154,7 +154,7 @@ func New(
 	if cfg.OSS.Enabled() {
 		fileStore = knowledge.NewOSSStore(cfg.OSS)
 	}
-	knowledge.NewFileHandler(knowledge.NewFileService(knowledgeRepository, fileStore), logger).
+	knowledge.NewFileHandler(knowledge.NewFileService(knowledgeRepository, fileStore, runner), logger).
 		RegisterRoutes(api, authHandler.RequireAccessToken())
 	chatHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
 	chatHandler.RegisterCompactionRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)

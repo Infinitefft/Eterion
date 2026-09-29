@@ -26,13 +26,18 @@ export function createRagIngestor(config: RagConfig | undefined) {
   }
   const store = createRagStore(parsed.data.databaseUrl);
   return {
-    async ingestFile(input: PrepareChunksInput): Promise<IngestionResult> {
+    async ingestFile(input: PrepareChunksInput, parentSignal?: AbortSignal): Promise<IngestionResult> {
+      const timeout = AbortSignal.timeout(10 * 60_000);
+      const signal = parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout;
+      signal.throwIfAborted();
       if (!z.uuid().safeParse(input.fileId).success) throw new Error('RAG fileId must be a UUID');
       await store.assertFileExists(input.fileId);
-      const chunks = await prepareChunks(input);
+      signal.throwIfAborted();
+      const chunks = await prepareChunks(input, signal);
       // 所有外部请求完成后再开启写入事务，模型失败不会改变已有索引。
-      const embedded = await embedChunks(chunks, parsed.data);
-      await store.replaceFileChunks(input.fileId, embedded);
+      const embedded = await embedChunks(chunks, parsed.data, signal);
+      signal.throwIfAborted();
+      await store.replaceFileChunks(input.fileId, embedded, signal);
       return { fileId: input.fileId, chunkCount: embedded.length };
     },
     close: store.close,

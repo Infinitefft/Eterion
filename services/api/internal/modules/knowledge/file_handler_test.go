@@ -43,7 +43,7 @@ func TestFileHTTPFlow(t *testing.T) {
 	repo := &fileTestRepository{owner: userID, base: baseID, saved: make(map[string]*KnowledgeFile)}
 	store := &fileTestStore{}
 	engine := gin.New()
-	NewFileHandler(NewFileService(repo, store), logger).RegisterRoutes(engine.Group("/api"), authHandler.RequireAccessToken())
+	NewFileHandler(NewFileService(repo, store, fileTestIndexer{}), logger).RegisterRoutes(engine.Group("/api"), authHandler.RequireAccessToken())
 	baseURL := "/api/knowledge-bases/" + baseID.String() + "/files"
 	call := func(method, url, token string, names []string, size int) *httptest.ResponseRecorder {
 		var body bytes.Buffer

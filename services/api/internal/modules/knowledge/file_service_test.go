@@ -11,6 +11,10 @@ import (
 	"testing"
 )
 
+type fileTestIndexer struct{}
+
+func (fileTestIndexer) IngestFile(context.Context, uuid.UUID, string, string) error { return nil }
+
 type fileTestRepository struct {
 	owner, base uuid.UUID
 	saved       map[string]*KnowledgeFile
@@ -37,7 +41,7 @@ func TestDeleteBase(t *testing.T) {
 	file := &KnowledgeFile{ID: uuid.New(), KnowledgeBaseID: baseID, ObjectKey: "file"}
 	repo.saved[file.ObjectKey] = file
 	store := &fileTestStore{}
-	service := NewFileService(repo, store)
+	service := NewFileService(repo, store, fileTestIndexer{})
 	assertFileError(t, service.DeleteBase(ctx, uuid.New(), baseID), "KNOWLEDGE_BASE_NOT_FOUND")
 	if store.calls != 0 {
 		t.Fatal("unauthorized OSS deletion")
@@ -55,7 +59,7 @@ func TestDeleteBase(t *testing.T) {
 		t.Fatal("base and files must be removed")
 	}
 	repo.base = uuid.New()
-	if err := NewFileService(repo, nil).DeleteBase(ctx, repo.owner, repo.base); err != nil {
+	if err := NewFileService(repo, nil, fileTestIndexer{}).DeleteBase(ctx, repo.owner, repo.base); err != nil {
 		t.Fatal("empty base needs no OSS", err)
 	}
 }
@@ -108,7 +112,7 @@ func TestDeleteFile(t *testing.T) {
 	file := &KnowledgeFile{ID: uuid.New(), KnowledgeBaseID: repo.base, ObjectKey: "stored-key"}
 	repo.saved[file.ObjectKey] = file
 	store := &fileTestStore{}
-	service := NewFileService(repo, store)
+	service := NewFileService(repo, store, fileTestIndexer{})
 	assertFileError(t, service.Delete(ctx, uuid.New(), repo.base, file.ID), "KNOWLEDGE_BASE_NOT_FOUND")
 	if store.calls != 0 {
 		t.Fatal("unauthorized deletion")
@@ -167,7 +171,7 @@ func TestFileContent(t *testing.T) {
 	file := &KnowledgeFile{ID: uuid.New(), KnowledgeBaseID: repo.base, OriginalName: "note.md", ObjectKey: "stored-key", SizeBytes: 10}
 	repo.saved[file.ObjectKey] = file
 	store := &fileTestStore{data: []byte("\uFEFF# 标题")}
-	service := NewFileService(repo, store)
+	service := NewFileService(repo, store, fileTestIndexer{})
 	_, err := service.Content(ctx, uuid.New(), repo.base, file.ID)
 	assertFileError(t, err, "KNOWLEDGE_BASE_NOT_FOUND")
 	_, err = service.Content(ctx, repo.owner, repo.base, uuid.New())
@@ -216,7 +220,7 @@ func TestFileUploadLifecycle(t *testing.T) {
 	ctx := context.Background()
 	repo := &fileTestRepository{owner: uuid.New(), base: uuid.New(), saved: make(map[string]*KnowledgeFile)}
 	store := &fileTestStore{}
-	service := NewFileService(repo, store)
+	service := NewFileService(repo, store, fileTestIndexer{})
 	_, err := service.Upload(ctx, uuid.New(), repo.base, "a.txt", []byte("hello"))
 	assertFileError(t, err, "KNOWLEDGE_BASE_NOT_FOUND")
 	if store.calls != 0 {

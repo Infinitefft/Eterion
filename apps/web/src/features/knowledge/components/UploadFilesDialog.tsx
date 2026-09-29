@@ -13,10 +13,12 @@ export function UploadFilesDialog({
   libraryName,
   libraryId,
   onUploaded,
+  onRefresh,
 }: {
   libraryName: string;
   libraryId: string;
   onUploaded: (file: KnowledgeFile) => void;
+  onRefresh: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -40,18 +42,24 @@ export function UploadFilesDialog({
     const controller = new AbortController();
     requestRef.current = controller;
     setUploading(true);
+    let currentFile: File | undefined;
     try {
       for (const file of files) {
+        currentFile = file;
         const saved = await uploadKnowledgeFile(libraryId, file, controller.signal);
         if (controller.signal.aborted) return;
         onUploaded(saved);
         setFiles((current) => current.filter((item) => item !== file));
       }
       setOpen(false);
-      notify('文件上传成功');
+      notify('文件已上传并完成索引');
     } catch (error) {
       if (controller.signal.aborted) return;
       const apiError = getApiError(error);
+      if (apiError?.code === 'FILE_INDEXING_FAILED') {
+        setFiles((current) => current.filter((file) => file !== currentFile));
+        onRefresh();
+      }
       notify(
         apiError?.fields?.file ??
           apiError?.message ??
@@ -231,7 +239,7 @@ export function UploadFilesDialog({
                   void handleUpload();
                 }}
               >
-                {uploading ? '正在上传…' : '开始上传'}
+                {uploading ? '正在上传并建立索引…' : '开始上传'}
               </button>
             </footer>
           </Dialog.Content>

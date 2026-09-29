@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { setImmediate } from 'node:timers/promises';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import {
   buildEmbeddingText,
@@ -67,7 +68,8 @@ export async function chunkMarkdownSection(
   throw new Error(`Section ${section.id} cannot fit heading and body within the embedding text budget`);
 }
 
-export async function prepareChunks({ fileId, format, text }: PrepareChunksInput): Promise<RagChunk[]> {
+export async function prepareChunks({ fileId, format, text }: PrepareChunksInput, signal?: AbortSignal): Promise<RagChunk[]> {
+  signal?.throwIfAborted();
   if (!fileId.trim()) throw new Error('fileId is required');
   if (format !== 'md' && format !== 'txt') throw new Error('Unsupported RAG file format');
   const sections: MarkdownSection[] = format === 'md'
@@ -77,7 +79,12 @@ export async function prepareChunks({ fileId, format, text }: PrepareChunksInput
   const chunks: RagChunk[] = [];
   // 顺序处理，保持文档顺序，也避免同时对大量 Section 进行 token 计算。
   for (const section of sections) {
+    // 让断连与总超时信号有机会在连续的本地切分之间被处理。
+    await setImmediate();
+    signal?.throwIfAborted();
     chunks.push(...await chunkMarkdownSection(fileId, section));
   }
+  await setImmediate();
+  signal?.throwIfAborted();
   return chunks;
 }

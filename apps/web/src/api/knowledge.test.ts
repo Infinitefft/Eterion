@@ -24,7 +24,7 @@ it('replays the same multipart file after refreshing an expired login token', as
   apiClient.defaults.adapter = async (config) => {
     calls++;
     expect(config.url).toBe('/knowledge-bases/base/files');
-    expect(config.timeout).toBe(190_000);
+    expect(config.timeout).toBe(790_000);
     const form = config.data as FormData;
     expect(form).toBeInstanceOf(FormData);
     expect(await (form.get('file') as File).text()).toBe('hello');

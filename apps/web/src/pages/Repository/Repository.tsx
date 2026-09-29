@@ -284,6 +284,10 @@ function LibraryDetail({ library }: { library: Library }) {
               libraryName={library.name}
               libraryId={library.id}
               onUploaded={handleUploaded}
+              onRefresh={() => {
+                void queryClient.invalidateQueries({ queryKey });
+                void queryClient.invalidateQueries({ queryKey: ['knowledge-bases', sessionVersion] });
+              }}
             />
           </div>
         </header>

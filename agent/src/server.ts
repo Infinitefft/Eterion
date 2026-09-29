@@ -7,6 +7,7 @@ import { isContextLimitError } from './memory/compaction.js';
 import type { Settings } from './config.js';
 import { runFailed, runRequestSchema, type AgentEvent, type AgentRuntime, type RunInput } from './protocol.js';
 import { buildRunInput } from './memory/load-context.js';
+import { registerRagRoutes } from './rag/http.js';
 
 const contextRequestSchema = z.object({
   model_id: z.string().min(1),
@@ -32,6 +33,7 @@ function restoreRequestContext(input: z.infer<typeof contextRequestSchema>) {
 /** 创建 HTTP 服务，负责请求校验、领域事件传输和连接生命周期。 */
 export function createApp(settings: Settings, runtime: AgentRuntime): FastifyInstance {
   const app = Fastify({ logger: true });
+  registerRagRoutes(app, settings.rag);
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 
