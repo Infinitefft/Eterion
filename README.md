@@ -21,7 +21,7 @@ Eterion 是一个以 Web 对话体验为核心的 AI Agent 工作台，目标是
 | Node.js | Web 与 Agent 声明最低 22.12.0，统一开发环境建议使用 22.19.0+ |
 | pnpm | 项目指定 10.20.0 |
 | Go | `go.mod` 声明 1.26.0，工具链为 1.26.5 |
-| PostgreSQL | 需准备可访问的数据库；项目未锁定数据库服务器版本 |
+| Docker / PostgreSQL | Docker Compose；`pgvector/pgvector:0.8.6-pg18-trixie`，业务与 RAG 共用 PostgreSQL 18 |
 | goose | 本地使用 3.27.2，数据库迁移 CLI 需加入 PATH |
 
 ## 各模块依赖版本
@@ -129,6 +129,7 @@ Web、Go API 和 Agent 分别使用各自目录下的本地配置文件：
 - Web：`apps/web/.env`
 - Go API：`services/api/.env`
 - Agent：`agent/.env`
+- Docker 数据库：根目录 `.env.docker`
 - Agent 私人提示词：`agent/prompts/system.local.md`
 
 启动前准备好数据库连接、模型服务和搜索服务所需配置。这些本地文件不提交 Git，部署时单独提供。
@@ -137,16 +138,28 @@ Web、Go API 和 Agent 分别使用各自目录下的本地配置文件：
 
 先启动 PostgreSQL 并完成迁移，再依次启动 Agent、Go API 和 Web。以下各服务应在独立终端运行。
 
-### 1. 数据库迁移
+### 1. Docker 数据库与迁移
 
-在 `services/api/` 下执行，将连接参数替换为本地数据库配置：
+在根目录创建 `.env.docker`（不提交 Git），填写 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`。值使用单引号包裹，避免密码中的 `$` 被 Compose 插值；数据库名使用 `eterion`。然后在根目录执行：
+
+```powershell
+docker compose --env-file .env.docker up -d --wait
+```
+
+数据库监听 `127.0.0.1:5433`，保持原本机数据库的 `Asia/Shanghai` 时区。将 `services/api/.env` 的 `DATABASE_URL` 设置为该地址，用户名、密码和数据库名与 `.env.docker` 一致；URL 中的特殊字符需编码。已有进程环境中的 `DATABASE_URL` 会优先于 `.env`，修改后需重启 Go API。
+
+首次启动会创建数据库，数据保存在 `eterion_postgres_data` 卷中，挂载到容器 `/var/lib/postgresql`。环境变量仅在空数据卷初始化时生效。日常停止使用 `docker compose --env-file .env.docker stop`；不要使用 `down -v`，它会删除数据库卷。
+
+在 `services/api/` 下执行 Goose，将连接参数替换为本地配置，避免把真实凭据提交到仓库：
 
 ```powershell
 Set-Location services/api
 goose -dir migrations postgres "<数据库连接字符串>" up
 ```
 
-数据库必须提前创建。API 启动不会自动执行迁移。
+API 启动不会自动执行迁移。第 10 版迁移启用 `vector` 扩展并创建 `rag_chunks`；回滚该版只删除 Chunk 表，保留扩展。Agent 的数据库客户端将在接入 RAG 时添加。
+
+从旧数据库迁移时先暂停项目写入，使用 `pg_dump -Fc -f <备份文件>` 备份，再以 `pg_restore --no-owner --no-acl --exit-on-error --single-transaction -d <目标数据库> <备份文件>` 恢复到空库；连接凭据通过本地环境变量提供。不要把二进制备份经过 PowerShell 文本管道。核对业务表和 Goose 历史后，再切换连接并执行新迁移。备份放在 Git 忽略的 `storage/db-backups/`，保留旧库。RAG 表结构及本机迁移结果见 [RAG 入库设计](agent/src/rag/INGESTION.md)。
 
 ### 2. Agent
 
