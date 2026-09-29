@@ -6,9 +6,9 @@
 
 当前目标是跑通上传后立即索引、Agent 检索、前端文件来源展示与原文高亮的整体成功路径。Markdown 按标题切 Section 后在各 Section 内递归切分并添加 overlap，TXT 使用全文递归切分。本版暂不保护代码块、列表、表格等结构，先建立基础效果基线，后续再优化；不实现 Parent-Child Retrieval，也不建设重试或恢复机制。
 
-数据库已确定采用 Docker 中的 PostgreSQL + pgvector，业务表与 RAG 表放在同一个数据库。Embedding 已选定阿里百炼 `text-embedding-v4` API，第一版采用 1024 维。切分阶段采用 `cl100k_base` 代理计数，完整输入预算为 512，最大目标 overlap 为 64；该计数不是模型真实 token 数，也不是其严格上界。上传触发索引、真实 Embedding 和写库仍待接入。
+数据库已确定采用 Docker 中的 PostgreSQL + pgvector，业务表与 RAG 表放在同一个数据库。Embedding 已选定阿里百炼 `text-embedding-v4` API，第一版采用 1024 维。切分阶段采用 `cl100k_base` 代理计数，完整输入预算为 512，最大目标 overlap 为 64；该计数不是模型真实 token 数，也不是其严格上界。第二阶段已实现内部 Embedding 和事务写库代码；上传触发尚未接线，完整入库链路仍待联调。
 
-代码职责应能清楚对应 `parseMarkdownSections()`、`chunkMarkdownSection()`、TXT 递归切分和 `buildEmbeddingText()`；接入实际模型时再实现 `embedChunks()`，不创建占位实现，也不要求一个函数一个文件。
+代码职责对应 `parseMarkdownSections()`、`chunkMarkdownSection()`、TXT 递归切分和 `buildEmbeddingText()`；第二阶段已实现 `embedChunks()` 与事务入库，见下文交付记录。上传触发和 OSS 读取仍未接线。
 
 ## 数据库存储与迁移决策
 
@@ -180,9 +180,9 @@ interface RagChunk {
 ### 模型接入决策
 
 - 使用阿里百炼托管的 `text-embedding-v4`，不部署开源 Embedding 模型。文档和查询统一请求 1024 维 dense 向量，不混用不同模型或维度生成的向量。
-- 接入时根据所用地域核对官方接口、批量限制、查询与文档参数及超长输入行为。优先评估 OpenAI 兼容接口，具体以满足所需参数的真实 API 为准，不默认现有聊天客户端能直接用于 Embedding。
+- 使用北京 DashScope 原生同步接口，通过 Node `fetch` 调用，不复用聊天客户端或增加模型 SDK。Base URL 为已配置的 HTTPS `/api/v1` 地址；追加 `/services/embeddings/text-embedding/text-embedding`。请求采用 `input.texts`，以及 `parameters.dimension: 1024`、`text_type: 'document'`、`output_type: 'dense'`。
 - 第一版使用 `js-tiktoken@1.0.21` 的 `cl100k_base` 作为代理计数器，文件中的特殊 token 字面量按普通文本编码。尚未确认与 `text-embedding-v4` 完全一致的本地 tokenizer，不能宣称本地预算保证模型硬上限；后续调用时由服务端做最终限制，超限如实报错，不静默截断。
-- 官方参考：[通用文本向量同步接口](https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api/)。模型已选定不代表已接入或完成真实调用验证。
+- 官方参考：[通用文本向量同步接口](https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api/)。每批最多 10 条，每条模型真实上限为 8192 tokens。配置曾通过单条探针验证并返回 1024 维向量；该探针不代表完整入库链路已联调。
 
 ### 输入与持久化
 
@@ -239,7 +239,49 @@ for (const chunk of chunks) {
 }
 ```
 
-代码块、列表等结构可能被切开，首尾空白会被裁剪；没有可靠 offset 的 Chunk 暂不能精确高亮。本地代理预算不等于模型真实 token 数；真实 Embedding、写库、上传触发及前端高亮尚未接通。
+代码块、列表等结构可能被切开，首尾空白会被裁剪；没有可靠 offset 的 Chunk 暂不能精确高亮。本地代理预算不等于模型真实 token 数。第一阶段仅验证本地文本处理；第二阶段实现情况如下。
+
+### 第二阶段：Embedding 与事务入库（2026-09-29）
+
+已增加内部调用链，尚未接入 HTTP、OSS、上传触发、检索工具和前端：
+
+```text
+ingestFile({ fileId, format, text })
+  → 校验 UUID、查询 knowledge_files 确认存在
+  → prepareChunks()
+  → buildEmbeddingText() + 512 代理预算校验
+  → embedChunks()，每批最多 10 条、顺序执行
+  → 全部成功后开启事务
+  → 锁定文件记录 → 删除旧 Chunk → 每批最多 100 行参数化插入
+  → COMMIT → { fileId, chunkCount }
+```
+
+- `embedding.ts` 负责模型请求、响应校验和索引对齐。单次请求（含响应读取）超时 30 秒，不重试；响应需覆盖批次完整且不重复的 `text_index`，每个向量必须包含 1024 个有限数值。正文和标题路径独立保存，只有模型输入使用组合文本。
+- `store.ts` 使用 `pg@8.23.0`（开发类型 `@types/pg@8.23.1`），连接池最多 5 个连接，获取连接超时 5 秒、空闲超时 30 秒。同一事务始终使用同一 client，失败回滚，回滚失败则丢弃连接。SQL 错误只保留 SQLSTATE，不输出可能包含正文的 detail。
+- `ingestion.ts` 提供 `createRagIngestor(settings.rag)`，返回 `ingestFile()` 和 `close()`。配置由统一的 `loadSettings()` 读取，创建组件时校验模型、维度、接口和连接串；未创建组件时不影响普通聊天，也不创建数据库连接。
+- Agent 本地 `.env` 增加 `DATABASE_URL`，指向与 Go 相同的 Docker 数据库。运行时不读取 Go 配置；凭据不进入 Git 或文档。现有 Goose 表结构无需修改。
+- 重复调用采用按文件整体替换。事务内锁定 `knowledge_files` 行，再次确认文件未被删除，并串行化该文件的替换；任意批次失败均回滚。并发调用以最后提交的完整版本为准，本版没有文档版本仲裁。
+- 空文档或只有标题的文档不请求模型，事务清除该文件旧 Chunk 后返回 `chunkCount: 0`。不新增状态表，因此零 Chunk 不能单独用于区分“空文档已处理”和“尚未处理”。
+- 此入口属于内部能力，调用方需提供可信文件 ID 和原文；用户归属鉴权在后续 Go 接线阶段完成，不将它直接暴露成公共接口。
+
+调用方式（示例不会被服务启动入口自动执行）：
+
+```typescript
+import { loadSettings } from '../config.js';
+import { createRagIngestor } from './ingestion.js';
+
+const ingestor = createRagIngestor(loadSettings().rag);
+try {
+  const result = await ingestor.ingestFile({ fileId, format: 'md', text });
+  // result: { fileId, chunkCount }
+} finally {
+  await ingestor.close();
+}
+```
+
+服务接线时应复用组件，在服务关闭时调用 `close()`，不要为每个文件创建连接池。数据库事务仅包围替换写入，所有模型请求均在事务前完成。没有增加重试、补偿、历史文件补建或重新索引界面。
+
+本轮 `pnpm typecheck` 和 `pnpm build` 已通过；未启动业务服务、运行联调脚本、调用真实模型或写入业务数据库。完整 Embedding 到数据库的链路仍待联调；后续验收应覆盖 MD/TXT、超过 10 个 Chunk 的批次对齐、重复入库、模型失败不写库、写库失败回滚、空正文、文件不存在、异常响应和维度、来源偏移量回切原文。
 
 ### 后续 Review 与验收清单
 

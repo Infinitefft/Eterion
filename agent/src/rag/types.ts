@@ -24,3 +24,20 @@ export interface PrepareChunksInput {
   format: 'md' | 'txt';
   text: string;
 }
+
+export interface EmbeddedChunk extends RagChunk {
+  embedding: number[];
+}
+
+export interface IngestionResult {
+  fileId: string;
+  chunkCount: number;
+}
+
+export interface RagConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  dimensions: number;
+  databaseUrl: string;
+}

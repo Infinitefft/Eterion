@@ -2,6 +2,7 @@ import { config as loadDotenv } from 'dotenv';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import type { RagConfig } from './rag/types.js';
 
 const DEFAULT_SYSTEM_PROMPT = '你是 Eterion 的 AI 助手。请准确、清晰地回答用户问题。';
 
@@ -18,6 +19,7 @@ export interface Settings {
   recordingEnabled: boolean;
   recordingPath: string;
   apiBaseUrl: string;
+  rag?: RagConfig;
 }
 
 export interface ModelConfig {
@@ -102,6 +104,14 @@ export function loadSettings(environ?: NodeJS.ProcessEnv): Settings {
   }
 
   return {
+    // 这里只读取配置，创建入库组件时才校验和连接，避免影响普通聊天。
+    rag: {
+      apiKey: value(environ, 'EMBEDDING_API_KEY'),
+      baseUrl: value(environ, 'EMBEDDING_BASE_URL'),
+      model: value(environ, 'EMBEDDING_MODEL', 'text-embedding-v4'),
+      dimensions: Number(value(environ, 'EMBEDDING_DIMENSIONS', '1024')),
+      databaseUrl: value(environ, 'DATABASE_URL'),
+    },
     host: value(environ, 'AGENT_HOST', '127.0.0.1'),
     apiBaseUrl: value(environ, 'GO_API_BASE_URL', 'http://127.0.0.1:8080'),
     port: parsePort(value(environ, 'AGENT_PORT', '8001')),
