@@ -10,6 +10,7 @@ import { buildModelClients, extractContentDelta } from './models.js';
 import { serializeContext } from '../memory/messages.js';
 import { createWebSearchTool } from '../tools/web-search.js';
 import { webFetch } from '../tools/web-fetch.js';
+import { createKnowledgeSearchTool } from '../rag/tool.js';
 import { projectToolResult } from '../tools/presentation.js';
 import { withRunRecording, type RecordingCallbacks } from '../recording/with-run-recording.js';
 import {
@@ -32,6 +33,7 @@ const STREAM_MODES: Array<'messages' | 'updates'> = [
 const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   web_search: '搜索网页',
   web_fetch: '读取网页',
+  knowledge_search: '检索知识库',
 };
 
 /** 初始化可复用的 Agent，返回符合 HTTP 层契约的 Runtime 对象。 */
@@ -39,9 +41,11 @@ export function createAgentRuntime(
   settings: Settings,
   clients: Map<string, ChatOpenAI> = buildModelClients(settings),
 ): AgentRuntime {
+  const knowledgeSearch = createKnowledgeSearchTool(settings.rag);
   const tools = [
     createWebSearchTool(settings.bochaApiKey),
     webFetch,
+    knowledgeSearch.tool,
   ] as const;
 
   const agents = new Map<string, WebAgent>();
@@ -66,6 +70,7 @@ export function createAgentRuntime(
   }
 
   return withRunRecording(settings, {
+    close: knowledgeSearch.close,
     defaultModelId: settings.defaultModelId,
     models: settings.models.map(toPublicModel),
     contextUsage(modelId, messages) {
@@ -159,6 +164,7 @@ export function createAgentRuntime(
             // messages 接收文本片段，updates 接收完整步骤结果。
             streamMode: STREAM_MODES,
             context: {
+              ...(input.user_id === undefined ? {} : { userId: input.user_id }),
               onContextTruncated() { contextTruncated = true; },
               captureMessages(messages: BaseMessage[]) {
                 // 先完成 JSON 编码转换，去掉可选的 undefined 字段，并在成功终态前发现编码错误。

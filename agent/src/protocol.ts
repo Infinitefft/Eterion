@@ -46,6 +46,7 @@ export interface PublicModel {
 
 /** HTTP 只依赖这份契约；普通对象就能满足它，不需要类或继承。 */
 export interface AgentRuntime {
+  close?(): Promise<void>;
   readonly defaultModelId: string;
   readonly models: PublicModel[];
   contextUsage?(modelId: string, messages: BaseMessage[]): ContextUsage;

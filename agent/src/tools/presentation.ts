@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { projectKnowledgeSearchResult } from '../rag/presentation.js';
 
 import type { JsonValue } from '../protocol.js';
 
@@ -51,6 +52,8 @@ export function projectToolResult(
       }
     }
   }
+
+  if (toolName === 'knowledge_search') return projectKnowledgeSearchResult(output);
 
   if (toolName === 'web_search') {
     const parsed = webSearchResultSchema.safeParse(output);

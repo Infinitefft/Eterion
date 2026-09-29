@@ -41,3 +41,24 @@ export interface RagConfig {
   dimensions: number;
   databaseUrl: string;
 }
+
+export interface SearchInput {
+  // 必须来自可信服务端身份，不能取自模型生成的工具参数。
+  userId: string;
+  query: string;
+}
+
+export interface SearchHit {
+  chunkId: string;
+  fileId: string;
+  knowledgeBaseId: string;
+  fileName: string;
+  sectionId: string;
+  chunkIndex: number;
+  content: string;
+  headingPath: string[];
+  startOffset?: number;
+  endOffset?: number;
+  // 余弦距离越小越接近，不是置信度。
+  cosineDistance: number;
+}

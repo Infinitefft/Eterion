@@ -34,6 +34,7 @@ function restoreRequestContext(input: z.infer<typeof contextRequestSchema>) {
 export function createApp(settings: Settings, runtime: AgentRuntime): FastifyInstance {
   const app = Fastify({ logger: true });
   registerRagRoutes(app, settings.rag);
+  app.addHook('onClose', async () => { await runtime.close?.(); });
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 

@@ -4,11 +4,13 @@ import type { EmbeddedChunk, RagChunk, RagConfig } from './types.js';
 
 const BATCH_SIZE = 10;
 const REQUEST_TIMEOUT_MS = 30_000;
+const QUERY_TOKEN_BUDGET = 2048;
 const responseSchema = z.object({
   output: z.object({
     embeddings: z.array(z.object({
       text_index: z.number().int().nonnegative(),
-      embedding: z.array(z.number().finite()).length(1024),
+      embedding: z.array(z.number().finite()).length(1024)
+        .refine((vector) => vector.some((value) => value !== 0)),
     })),
   }),
 });
@@ -36,10 +38,40 @@ export async function embedChunks(
     }
     return text;
   });
-  const result: EmbeddedChunk[] = [];
-  for (let start = 0; start < chunks.length; start += BATCH_SIZE) {
+  const vectors = await embedTexts(texts, 'document', config, parentSignal);
+  return chunks.map((chunk, index) => {
+    const embedding = vectors[index];
+    if (!embedding) throw new Error('Missing embedding vector');
+    return { ...chunk, embedding };
+  });
+}
+
+export async function embedQuery(
+  query: string,
+  config: Pick<RagConfig, 'apiKey' | 'baseUrl' | 'model' | 'dimensions'>,
+  signal?: AbortSignal,
+): Promise<number[]> {
+  signal?.throwIfAborted();
+  const text = query.trim();
+  if (!text || countBudgetTokens(text) > QUERY_TOKEN_BUDGET) {
+    throw new Error('RAG query must be nonempty and within the 2048 proxy token budget');
+  }
+  const [embedding] = await embedTexts([text], 'query', config, signal);
+  if (!embedding) throw new Error('Missing query embedding');
+  return embedding;
+}
+
+// 文档和查询共享协议校验，只区分厂商要求的文本用途。
+async function embedTexts(
+  texts: string[],
+  textType: 'document' | 'query',
+  config: Pick<RagConfig, 'apiKey' | 'baseUrl' | 'model' | 'dimensions'>,
+  parentSignal?: AbortSignal,
+): Promise<number[][]> {
+  const result: number[][] = [];
+  for (let start = 0; start < texts.length; start += BATCH_SIZE) {
     parentSignal?.throwIfAborted();
-    const batch = chunks.slice(start, start + BATCH_SIZE);
+    const batch = texts.slice(start, start + BATCH_SIZE);
     let response: Response;
     let body: unknown;
     const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
@@ -51,8 +83,8 @@ export async function embedChunks(
         headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: config.model,
-          input: { texts: texts.slice(start, start + BATCH_SIZE) },
-          parameters: { dimension: config.dimensions, text_type: 'document', output_type: 'dense' },
+          input: { texts: batch },
+          parameters: { dimension: config.dimensions, text_type: textType, output_type: 'dense' },
         }),
         signal,
       });
@@ -60,8 +92,10 @@ export async function embedChunks(
       const raw = await response.text();
       try { body = JSON.parse(raw); } catch { body = undefined; }
     } catch {
+      parentSignal?.throwIfAborted();
       throw new Error(signal.aborted ? 'Embedding request timed out' : 'Embedding request failed');
     }
+    parentSignal?.throwIfAborted();
     if (!response.ok) {
       throw new Error(`Embedding HTTP ${response.status}${diagnostics(body)}`);
     }
@@ -77,10 +111,10 @@ export async function embedChunks(
       vectors.set(entry.text_index, entry.embedding);
     }
     // 厂商响应不必按输入顺序排列，使用批次内索引恢复一一对应关系。
-    for (const [index, chunk] of batch.entries()) {
+    for (let index = 0; index < batch.length; index++) {
       const embedding = vectors.get(index);
       if (!embedding) throw new Error('Missing embedding vector');
-      result.push({ ...chunk, embedding });
+      result.push(embedding);
     }
   }
   return result;

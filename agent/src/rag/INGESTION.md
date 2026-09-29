@@ -6,7 +6,7 @@
 
 当前目标是跑通上传后立即索引、Agent 检索、前端文件来源展示与原文高亮的整体成功路径。Markdown 按标题切 Section 后在各 Section 内递归切分并添加 overlap，TXT 使用全文递归切分。本版暂不保护代码块、列表、表格等结构，先建立基础效果基线，后续再优化；不实现 Parent-Child Retrieval，也不建设重试或恢复机制。
 
-数据库采用 Docker 中的 PostgreSQL + pgvector，业务表与 RAG 表放在同一个数据库。Embedding 使用阿里百炼 `text-embedding-v4` API，第一版采用 1024 维。切分阶段采用 `cl100k_base` 代理计数，完整输入预算为 512，最大目标 overlap 为 64；该计数不是模型真实 token 数，也不是其严格上界。第三阶段已接通上传后的同步索引代码，完整入库链路仍待真实联调；检索工具和来源展示尚未接入。
+数据库采用 Docker 中的 PostgreSQL + pgvector，业务表与 RAG 表放在同一个数据库。Embedding 使用阿里百炼 `text-embedding-v4` API，第一版采用 1024 维。切分阶段采用 `cl100k_base` 代理计数，完整输入预算为 512，最大目标 overlap 为 64；该计数不是模型真实 token 数，也不是其严格上界。第三阶段已接通上传后的同步索引代码，已获得单文件上传成功并写入向量的核对结果；知识库工具代码已接入，模型调用效果与前端来源展示仍待验证或实现。
 
 代码职责对应 `parseMarkdownSections()`、`chunkMarkdownSection()`、TXT 递归切分、`buildEmbeddingText()`、`embedChunks()` 与事务入库，见下文交付记录。Go 直接传递上传时已有的原文，不要求 Agent 再次读取 OSS。
 
@@ -64,7 +64,7 @@
 ### 对话检索范围
 
 - 已确定默认全量检索当前登录用户全部知识库中已完成索引的资料。知识库分类仅用于资料组织和来源展示，不要求用户手动选库，也不先让模型分类或选择知识库。
-- 全量指候选范围覆盖用户所有可检索资料，不表示返回所有 Chunk；对候选片段统一按向量相似度排序并取 Top K，具体 K 值和返回文本预算实现时确定。
+- 全量指候选范围覆盖用户所有可检索资料，不表示返回所有 Chunk；第一版统一按余弦距离升序取 Top 5，保留每个命中 Chunk 完整正文，不额外截断或展开父 Section。
 - Go 将可信用户身份传给 Agent；模型只提供 query，不通过工具参数填写 userId 或扩大访问范围。Agent 查询通过 `rag_chunks.file_id → knowledge_files.knowledge_base_id → knowledge_bases.user_id` 关联限定归属，并过滤未完成索引的文件。必须先限定候选范围再取 Top K，不能全平台检索后再过滤权限。
 - 一次查询跨用户自己的知识库统一检索，不逐库分配名额或逐库检索再拼接。返回命中片段的文件和知识库来源，供回答引用及前端溯源。
 - 没有可检索资料时返回明确的空结果，不将范围扩大到其他用户。是否调用检索仍由模型决定，不在每次用户发消息时强制检索。
@@ -299,6 +299,73 @@ try {
 本轮 Agent 与前端的 `pnpm typecheck`、`pnpm build` 和 Go 的 `go build ./...` 均通过。前端构建提示部分产物超过 500 kB，未在本轮做无关拆包。没有启动服务、占用业务端口、执行真实模型调用或数据库写入。现有 Go 测试的构造参数和前端上传超时期望随契约调整，未新增测试体系、未执行测试套件。
 
 后续人工联调验收：MD/TXT 上传成功后生成 Chunk；BOM/CRLF 保留；超过 10 个 Chunk 时批次对齐；索引失败保留 OSS 和文件记录且前端不重复上传；超时/断连停止后续批次并在提交前回滚；删除文件级联清理 Chunk。检索和高亮另行接线。
+
+### 第四阶段：基础向量检索
+
+已实现 Agent 内部检索能力，尚未注册 `knowledge_search`、增加检索 HTTP 接口或接入前端。新代码集中在 RAG 目录，不改数据库表、不增加依赖。
+
+```text
+search({ userId, query }, signal)
+  → 校验可信用户 UUID
+  → query.trim()，校验非空及 2048 代理 token 预算
+  → text-embedding-v4 / 1024 维 / text_type=query
+  → 按业务表关联限定当前用户
+  → 余弦距离升序、Chunk ID 升序，取前 5 条
+  → SearchHit[]
+```
+
+- `search.ts` 提供 `createRagSearcher(settings.rag)`，返回 `search()` 和 `close()`。复用现有 `createRagStore()` 的连接池实现；每个组件拥有自己的池，由调用方复用和关闭，模块导入时不连接数据库。此轮尚未在服务启动入口实例化检索组件。
+- 配置校验移到 `rag/config.ts`，入库和检索共同使用。配置仍由项目统一入口读取，不直接读取环境文件，也不输出包含凭据的校验错误。
+- `embedding.ts` 内部共用请求与响应校验；`embedChunks()` 保持文档批处理、512 代理预算和 `document` 类型，`embedQuery()` 使用 `query` 类型。问题不加标题、不切分、不改写、不加 instruction。2048 是本地代理预算，不是模型真实 token 上限；超出直接报错，不静默截断。
+- 共用校验要求 1024 个有限数值并拒绝零向量，按 `text_index` 恢复顺序。模型请求仍为 30 秒超时、无重试；传入的取消信号可以中止 fetch。
+- `store.searchChunks()` 使用参数化 SQL，关联 `rag_chunks → knowledge_files → knowledge_bases`，在 SQL 的 WHERE 中限定 `knowledge_bases.user_id`，随后按 `<=>` 余弦距离及 Chunk ID 排序并 `LIMIT 5`。不允许先跨用户取 Top K 再过滤。现有入库事务保证片段整体可见，无需增加索引状态字段。
+- 结果包含 `chunkId`、`fileId`、`knowledgeBaseId`、`fileName`、`sectionId`、`chunkIndex`、`content`、`headingPath`、`cosineDistance`；偏移量仅在成对非空时输出，继续采用 UTF-16 原文范围。没有向量、objectKey 或凭据。
+- 不设相似度阈值、不按文件去重、不加近似索引或重排。`cosineDistance` 越小越接近，不是置信度；只要有候选，即使问题不相关也可能返回结果。没有候选返回 `[]`，模型或数据库故障直接报错；无资料时仍会先对 query 做 Embedding。
+- 用户身份由后续可信服务端调用方提供，不能由模型填写。当前方法的 UUID 校验只验证格式，不承担身份认证。不存在或没有资料的用户得到空结果，不扩大查询范围。
+- 查询前后检查取消；进行中的 SQL 沿用 30 秒语句超时，不承诺即时取消，但取消后不交付查询结果。若存量数据导致非有限余弦距离则明确报错，不作为正常候选返回。
+
+调用方式：
+
+```typescript
+import { loadSettings } from '../config.js';
+import { createRagSearcher } from './search.js';
+
+const searcher = createRagSearcher(loadSettings().rag);
+try {
+  const hits = await searcher.search({ userId, query }, signal);
+} finally {
+  await searcher.close();
+}
+```
+
+本轮 `pnpm typecheck` 与 `pnpm build` 均已通过；没有启动服务、运行自动测试或数据库联调、调用真实模型。后续验收清单：正常命中与来源字段；两个用户的资料隔离；无资料；超过 5 个候选时的排序和上限；空查询、超长查询；取消；错误维度、非有限数值、零向量与乱序索引；确认原有上传入库行为保持兼容。检索质量和真实链路仍待验证。
+
+### 第五阶段：knowledge_search 工具接入（2026-09-29）
+
+已将基础检索能力注册到现有 Agent Runtime，代码接线已完成，模型是否按预期选择工具仍待真实联调。本轮没有新增 HTTP 接口、数据库迁移、Go 或前端协议，也没有实现文件卡片、可点击引用和高亮。
+
+```text
+input.user_id → 每次 agent.stream 的 context.userId
+模型 knowledge_search({ query })
+  → 校验 context 用户 UUID（缺少或无效直接失败）
+  → 首次调用初始化 searcher，后续复用
+  → query Embedding + 当前用户范围 Top 5
+  → { query, results: SearchHit[] } → ToolMessage → 模型回答
+  → 来源白名单投影 → tool.completed → 现有通用工具展示
+```
+
+- `rag/tool.ts` 提供 `createKnowledgeSearchTool(config)`，返回 `tool` 和 `close()`。模型参数 schema 严格限定为非空 `query`，多余参数被拒绝；用户 ID、知识库 ID 和 Top K 均不属于模型参数。
+- Tool 从框架本次运行配置的 context 读取身份，在创建检索组件前校验。Runtime 只在每次 stream 调用时传入已有 `input.user_id`，不共享当前用户变量，不把身份写入 Prompt 或 ToolMessage。UUID 校验不是认证，服务访问仍依赖现有 Go→Agent 可信边界。
+- Agent 组装处扩展 context schema，保留 captureMessages 和 onContextTruncated。缺少身份的旧脚本可继续聊天；若模型尝试检索则工具失败，不访问数据库。
+- 检索组件延迟创建且由 Runtime 持有；RAG 配置缺失只在调用工具时失败，不阻止聊天启动。调用沿用 Run 的 signal、查询超时和现有调用次数限制。工具输入记录仅为 `{ query }`。
+- `AgentRuntime.close()` 为可选生命周期方法；运行记录包装层透传它，Fastify onClose 调用它。关闭会释放已创建的检索连接池，未调用工具时没有检索连接池需要关闭。上传组件仍由其原有生命周期管理。
+- 返回完整 `SearchHit[]` 供模型使用，由框架创建 ToolMessage，不手工插入 system prompt。空结果正常完成；错误使用现有工具错误中间件转换成安全提示并产生 tool.failed，不将故障伪装为空结果。
+- 显示名称为“检索知识库”。沿用现有 toolCallId 关联开始与终态；`rag/presentation.ts` 只保留 query、文件和知识库 ID、文件名、Chunk/Section ID、顺序、标题路径及成对有效偏移量，完整正文和向量不进入展示投影。公共转换入口仅分派到 RAG 转换函数。
+- `rag/prompt.ts` 保存工具使用与不可信资料规则：按需检索上传资料，公开信息仍使用网页工具；引用真实文件名/标题路径，资料不足则说明，不执行文档内的指令，不编造链接或检索结果。规则由 Agent 组装追加；工具定义与提示词一起计入现有固定输入预算。只传网页工具的旧组装调用不会追加知识库规则。
+
+验证：Agent `pnpm typecheck` 和 `pnpm build` 已通过；未启动服务、调用真实模型、执行数据库联调或新增测试体系。编译通过不代表已验证并发隔离和模型工具选择效果。
+
+后续人工验收：普通问候不调用检索；上传资料问题调用 knowledge_search 并根据正文回答；两用户并发 Run 不串身份；缺少身份不触发检索；无资料得到空结果；配置/模型/数据库失败产生工具失败；取消阻止后续工作；展示投影包含来源且不含正文；开启和关闭运行记录时都能释放连接池。
 
 ### 后续 Review 与验收清单
 

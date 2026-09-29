@@ -1,7 +1,12 @@
 import { Pool } from 'pg';
-import type { EmbeddedChunk } from './types.js';
+import type { EmbeddedChunk, SearchHit } from './types.js';
 
 const INSERT_BATCH_SIZE = 100;
+
+type SearchRow = Omit<SearchHit, 'startOffset' | 'endOffset'> & {
+  startOffset: number | null;
+  endOffset: number | null;
+};
 
 // PostgreSQL 的 detail 可能包含整行正文；只保留可安全诊断的 SQLSTATE。
 function databaseError(error: unknown): Error {
@@ -22,6 +27,40 @@ export function createRagStore(databaseUrl: string) {
   pool.on('error', (error) => console.error(databaseError(error).message));
 
   return {
+    async searchChunks(userId: string, embedding: number[], signal?: AbortSignal): Promise<SearchHit[]> {
+      signal?.throwIfAborted();
+      let rows: SearchRow[];
+      try {
+        const result = await pool.query<SearchRow>(`
+          SELECT c.id AS "chunkId", c.file_id AS "fileId",
+            f.knowledge_base_id AS "knowledgeBaseId", f.original_name AS "fileName",
+            c.section_id AS "sectionId", c.chunk_index AS "chunkIndex",
+            c.content, c.heading_path AS "headingPath",
+            c.start_offset AS "startOffset", c.end_offset AS "endOffset",
+            c.embedding <=> $2::vector AS "cosineDistance"
+          FROM rag_chunks c
+          JOIN knowledge_files f ON f.id = c.file_id
+          JOIN knowledge_bases b ON b.id = f.knowledge_base_id
+          WHERE b.user_id = $1
+          ORDER BY "cosineDistance" ASC, c.id ASC
+          LIMIT 5`, [userId, JSON.stringify(embedding)]);
+        rows = result.rows;
+      } catch (error) {
+        signal?.throwIfAborted();
+        throw databaseError(error);
+      }
+      // pg 不直接消费 AbortSignal；进行中的 SQL 由语句超时限制，取消后不交付结果。
+      signal?.throwIfAborted();
+      return rows.map(({ startOffset, endOffset, ...hit }) => {
+        if (!Number.isFinite(hit.cosineDistance)) {
+          throw new Error('RAG search returned an invalid cosine distance');
+        }
+        return startOffset !== null && endOffset !== null
+          ? { ...hit, startOffset, endOffset }
+          : hit;
+      });
+    },
+
     async assertFileExists(fileId: string): Promise<void> {
       let result;
       try {
