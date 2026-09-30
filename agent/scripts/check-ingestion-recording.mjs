@@ -7,8 +7,7 @@ import { Pool } from 'pg';
 import Fastify from 'fastify';
 import { openRecordStore } from '../dist/recording/store.js';
 import { beginIngestionRecording } from '../dist/recording/ingestion.js';
-import { createRagIngestor } from '../dist/rag/ingestion.js';
-import { registerRagRoutes } from '../dist/rag/http.js';
+import { createRagIngestor, registerRagRoutes } from '../dist/rag/ingestion/index.js';
 
 // 仅用本地替身执行实际编排；不加载 .env、不建立 PG 连接、不发出网络请求。
 const cache = resolve('.cache');

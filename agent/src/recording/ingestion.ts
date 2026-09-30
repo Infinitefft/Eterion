@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Settings } from '../config.js';
 import type { JsonValue } from '../protocol.js';
 import type { MarkdownSection, PrepareChunksInput, RagChunk } from '../rag/types.js';
-import { buildEmbeddingText, countBudgetTokens } from '../rag/embedding-text.js';
+import { buildEmbeddingText, countBudgetTokens } from '../rag/embedding.js';
 import type { openRecordStore } from './store.js';
 
 const metadataSchema = z.object({ userId: z.uuid(), knowledgeBaseId: z.uuid(), fileName: z.string().min(1) });

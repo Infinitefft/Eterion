@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { projectKnowledgeSearchResult } from '../rag/presentation.js';
+import { projectKnowledgeSearchResult } from '../rag/search/index.js';
 
 import type { JsonValue } from '../protocol.js';
 

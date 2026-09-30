@@ -10,7 +10,7 @@ import { buildModelClients, extractContentDelta } from './models.js';
 import { serializeContext } from '../memory/messages.js';
 import { createWebSearchTool } from '../tools/web-search.js';
 import { webFetch } from '../tools/web-fetch.js';
-import { createKnowledgeSearchTool } from '../rag/tool.js';
+import { createKnowledgeSearchTool } from '../rag/search/index.js';
 import { projectToolResult } from '../tools/presentation.js';
 import { withRunRecording, type RecordingCallbacks } from '../recording/with-run-recording.js';
 import {

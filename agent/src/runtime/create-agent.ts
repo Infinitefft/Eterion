@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { createKnowledgeSearchTool } from '../rag/tool.js';
-import { KNOWLEDGE_SEARCH_RULES } from '../rag/prompt.js';
+import type { createKnowledgeSearchTool } from '../rag/search/index.js';
+import { KNOWLEDGE_SEARCH_RULES } from '../rag/search/index.js';
 import type { ChatOpenAI } from '@langchain/openai';
 import {
   type AnyAgentMiddleware,
