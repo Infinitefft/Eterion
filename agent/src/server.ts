@@ -33,7 +33,8 @@ function restoreRequestContext(input: z.infer<typeof contextRequestSchema>) {
 /** 创建 HTTP 服务，负责请求校验、领域事件传输和连接生命周期。 */
 export function createApp(settings: Settings, runtime: AgentRuntime): FastifyInstance {
   const app = Fastify({ logger: true });
-  registerRagRoutes(app, settings.rag);
+  // 监控采集：复用现有开关与记录目录；记录失败不影响业务执行。
+  registerRagRoutes(app, settings.rag, settings);
   app.addHook('onClose', async () => { await runtime.close?.(); });
 
   app.get('/healthz', async () => ({ status: 'ok' }));

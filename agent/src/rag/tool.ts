@@ -1,6 +1,6 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { recordToolInput } from '../recording/tool-input.js';
+import { recordRagStage, recordToolInput } from '../recording/tool-input.js';
 import { createRagSearcher } from './search.js';
 import type { RagConfig } from './types.js';
 
@@ -20,7 +20,9 @@ export function createKnowledgeSearchTool(config: RagConfig | undefined) {
       runtime?.signal?.throwIfAborted();
       // 同步创建并保存组件，不在 await 之间切换共享实例；未调用时不校验配置或建池。
       searcher ??= createRagSearcher(config);
-      const results = await searcher.search({ userId: identity.data.userId, query }, runtime?.signal);
+      // 监控采集：阶段事件只进入本次工具回调；记录失败不影响业务执行。
+      const results = await searcher.search({ userId: identity.data.userId, query }, runtime?.signal,
+        (event) => recordRagStage(event, runtime));
       return { query, results };
     },
     {

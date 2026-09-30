@@ -9,8 +9,18 @@ import {
 } from './embedding-text.js';
 import { parseMarkdownSections } from './markdown.js';
 import type { MarkdownSection, PrepareChunksInput, RagChunk } from './types.js';
+// 监控采集：可选观察器只保存实际切分结果；记录失败不影响业务执行。
+import type { IngestionRecording } from '../recording/ingestion.js';
 
 const SEPARATORS = ['\r\n\r\n', '\n\n', '\r\n', '\n', '。', '！', '？', '.', '!', '?', ' ', ''];
+
+// 监控采集：直接使用算法常量记录规则，避免展示值与实际实现漂移。
+export const CHUNKING_RULES = {
+  algorithm: 'markdown-sections-or-txt-recursive', budgetTokenizer: 'cl100k_base',
+  embeddingTextBudget: EMBEDDING_TEXT_BUDGET, maxOverlapBudget: MAX_OVERLAP_BUDGET,
+  overlapRatio: 0.125, separators: SEPARATORS, keepSeparator: true,
+  unicodeFallback: 'code-point', offsetUnit: 'UTF-16',
+};
 
 // 只替换库的字符兜底，保留其递归、合并和 overlap 算法。
 class UnicodeRecursiveSplitter extends RecursiveCharacterTextSplitter {
@@ -22,15 +32,17 @@ class UnicodeRecursiveSplitter extends RecursiveCharacterTextSplitter {
 export async function chunkMarkdownSection(
   fileId: string,
   section: MarkdownSection,
+  recording?: IngestionRecording,
 ): Promise<RagChunk[]> {
   if (!section.content.trim()) return [];
 
   const prefix = buildEmbeddingText({ headingPath: section.headingPath, content: '' });
   let bodyBudget = EMBEDDING_TEXT_BUDGET - countBudgetTokens(prefix);
   while (bodyBudget > 0) {
+    const overlap = Math.min(MAX_OVERLAP_BUDGET, Math.floor(bodyBudget * CHUNKING_RULES.overlapRatio));
     const splitter = new UnicodeRecursiveSplitter({
       chunkSize: bodyBudget,
-      chunkOverlap: Math.min(MAX_OVERLAP_BUDGET, Math.floor(bodyBudget * 0.125)),
+      chunkOverlap: overlap,
       keepSeparator: true,
       separators: SEPARATORS,
       lengthFunction: countBudgetTokens,
@@ -47,7 +59,7 @@ export async function chunkMarkdownSection(
       continue;
     }
 
-    return contents.map((content, chunkIndex) => {
+    const chunks = contents.map((content, chunkIndex) => {
       const chunk: RagChunk = {
         id: randomUUID(),
         fileId,
@@ -64,11 +76,14 @@ export async function chunkMarkdownSection(
       }
       return chunk;
     });
+    // 监控采集：每个 Section 完成后保存快照，后续失败仍可复盘；记录失败不影响业务执行。
+    recording?.section(section, chunks, bodyBudget, overlap);
+    return chunks;
   }
   throw new Error(`Section ${section.id} cannot fit heading and body within the embedding text budget`);
 }
 
-export async function prepareChunks({ fileId, format, text }: PrepareChunksInput, signal?: AbortSignal): Promise<RagChunk[]> {
+export async function prepareChunks({ fileId, format, text }: PrepareChunksInput, signal?: AbortSignal, recording?: IngestionRecording): Promise<RagChunk[]> {
   signal?.throwIfAborted();
   if (!fileId.trim()) throw new Error('fileId is required');
   if (format !== 'md' && format !== 'txt') throw new Error('Unsupported RAG file format');
@@ -82,7 +97,8 @@ export async function prepareChunks({ fileId, format, text }: PrepareChunksInput
     // 让断连与总超时信号有机会在连续的本地切分之间被处理。
     await setImmediate();
     signal?.throwIfAborted();
-    chunks.push(...await chunkMarkdownSection(fileId, section));
+    // 监控采集：透传可选观察器；记录失败不影响业务执行。
+    chunks.push(...await chunkMarkdownSection(fileId, section, recording));
   }
   await setImmediate();
   signal?.throwIfAborted();

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { buildEmbeddingText, countBudgetTokens, EMBEDDING_TEXT_BUDGET } from './embedding-text.js';
 import type { EmbeddedChunk, RagChunk, RagConfig } from './types.js';
+// 监控采集：批次观察器不接收密钥或向量；记录失败不影响业务执行。
+import type { IngestionRecording } from '../recording/ingestion.js';
 
 const BATCH_SIZE = 10;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -29,6 +31,7 @@ export async function embedChunks(
   chunks: RagChunk[],
   config: Pick<RagConfig, 'apiKey' | 'baseUrl' | 'model' | 'dimensions'>,
   parentSignal?: AbortSignal,
+  recording?: IngestionRecording,
 ): Promise<EmbeddedChunk[]> {
   parentSignal?.throwIfAborted();
   const texts = chunks.map((chunk) => {
@@ -38,7 +41,8 @@ export async function embedChunks(
     }
     return text;
   });
-  const vectors = await embedTexts(texts, 'document', config, parentSignal);
+  // 监控采集：透传可选批次观察器；记录失败不影响业务执行。
+  const vectors = await embedTexts(texts, 'document', config, parentSignal, recording);
   return chunks.map((chunk, index) => {
     const embedding = vectors[index];
     if (!embedding) throw new Error('Missing embedding vector');
@@ -67,11 +71,14 @@ async function embedTexts(
   textType: 'document' | 'query',
   config: Pick<RagConfig, 'apiKey' | 'baseUrl' | 'model' | 'dimensions'>,
   parentSignal?: AbortSignal,
+  recording?: IngestionRecording,
 ): Promise<number[][]> {
   const result: number[][] = [];
   for (let start = 0; start < texts.length; start += BATCH_SIZE) {
     parentSignal?.throwIfAborted();
     const batch = texts.slice(start, start + BATCH_SIZE);
+    // 监控采集：记录实际批次范围，不保存向量；记录失败不影响业务执行。
+    recording?.batchStarted(start, batch.length);
     let response: Response;
     let body: unknown;
     const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
@@ -116,6 +123,8 @@ async function embedTexts(
       if (!embedding) throw new Error('Missing embedding vector');
       result.push(embedding);
     }
+    // 监控采集：只在整批响应通过校验后确认完成；记录失败不影响业务执行。
+    recording?.batchCompleted(start, batch.length);
   }
   return result;
 }

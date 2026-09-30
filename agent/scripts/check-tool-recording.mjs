@@ -71,7 +71,13 @@ try {
   const events = await run('success', frames);
   assert.equal(events.at(-1).type, 'run.completed');
   const withoutRecording = await run('success', frames, { settings: { recordingEnabled: false } });
-  assert.deepEqual(events, withoutRecording, '记录不能改变现有业务事件');
+  // 两次独立运行会为上下文消息生成不同 ID；比较业务事件内容而不比较随机消息 ID。
+  const comparable = (items) => items.map((event) => event.type !== 'run.completed' ? event : {
+    ...event, payload: { ...event.payload, agentContext: event.payload.agentContext?.map((message) => ({
+      ...message, data: { ...message.data, id: undefined },
+    })) },
+  });
+  assert.deepEqual(comparable(events), comparable(withoutRecording), '记录不能改变现有业务事件');
   const saved = tools('success');
   assert.deepEqual(saved.map((step) => step.name), ['web_search', 'web_fetch']);
   assert.deepEqual(saved.map((step) => step.status), ['completed', 'completed']);
@@ -113,13 +119,13 @@ try {
 
   requests = [];
   respond = async () => searchResult();
-  await run('limit', [toolFrame(...Array.from({ length: 5 }, (_, i) =>
+  await run('limit', [toolFrame(...Array.from({ length: 31 }, (_, i) =>
     toolCall(`limit-${i}`, 'web_search', { query: `查询${i}` }))), finalFrame]);
   const limited = tools('limit');
-  assert.equal(limited.length, 5);
-  assert.equal(limited.filter((step) => step.status === 'completed').length, 4);
+  assert.equal(limited.length, 31);
+  assert.equal(limited.filter((step) => step.status === 'completed').length, 30);
   assert.equal(limited.filter((step) => step.status === 'skipped' && !step.metadata.executionStarted).length, 1);
-  assert.equal(requests.length, 4);
+  assert.equal(requests.length, 30);
 
   requests = [];
   await run('unknown', [toolFrame(toolCall('unknown-1', 'unknown_tool', {})), finalFrame]);

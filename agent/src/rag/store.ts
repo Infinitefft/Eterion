@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import type { EmbeddedChunk, SearchHit } from './types.js';
 
 const INSERT_BATCH_SIZE = 100;
+export const SEARCH_LIMIT = 5;
 
 type SearchRow = Omit<SearchHit, 'startOffset' | 'endOffset'> & {
   startOffset: number | null;
@@ -43,7 +44,7 @@ export function createRagStore(databaseUrl: string) {
           JOIN knowledge_bases b ON b.id = f.knowledge_base_id
           WHERE b.user_id = $1
           ORDER BY "cosineDistance" ASC, c.id ASC
-          LIMIT 5`, [userId, JSON.stringify(embedding)]);
+          LIMIT ${SEARCH_LIMIT}`, [userId, JSON.stringify(embedding)]);
         rows = result.rows;
       } catch (error) {
         signal?.throwIfAborted();

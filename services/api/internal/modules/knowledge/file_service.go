@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"errors"
+	"github.com/Infinitefft/Eterion/services/api/internal/agent"
 	apperrors "github.com/Infinitefft/Eterion/services/api/internal/shared/errors"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -28,7 +29,7 @@ type FileService struct {
 }
 
 type FileIndexer interface {
-	IngestFile(context.Context, uuid.UUID, string, string) error
+	IngestFile(context.Context, uuid.UUID, string, string, ...agent.IngestionMonitoring) error
 }
 
 func NewFileService(repository FileRepository, store FileStore, indexer FileIndexer) *FileService {
@@ -80,7 +81,9 @@ func (s *FileService) Upload(ctx context.Context, userID, baseID uuid.UUID, name
 		return nil, err
 	}
 	// OSS 和业务记录已保存，索引失败不补偿删除，也不再次上传。
-	if s.indexer == nil || s.indexer.IngestFile(ctx, file.ID, strings.TrimPrefix(strings.ToLower(path.Ext(name)), "."), string(data)) != nil {
+	// 监控采集：身份取自已鉴权的上传上下文，仅供独立监控归属；记录失败不影响业务执行。
+	monitoring := agent.IngestionMonitoring{UserID: userID.String(), KnowledgeBaseID: baseID.String(), FileName: file.OriginalName}
+	if s.indexer == nil || s.indexer.IngestFile(ctx, file.ID, strings.TrimPrefix(strings.ToLower(path.Ext(name)), "."), string(data), monitoring) != nil {
 		return nil, apperrors.New(502, "FILE_INDEXING_FAILED", "文件已保存，但索引未完成，请刷新文件列表确认结果", "REFRESH_LIST")
 	}
 	return file, nil

@@ -13,6 +13,13 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// 监控采集：可信上传上下文的白名单元信息；不含密钥或 OSS 配置。
+type IngestionMonitoring struct {
+	UserID          string `json:"userId"`
+	KnowledgeBaseID string `json:"knowledgeBaseId"`
+	FileName        string `json:"fileName"`
+}
+
 // Input identifies one run; the Agent fetches history and builds its own context.
 type Input struct {
 	RunID          string

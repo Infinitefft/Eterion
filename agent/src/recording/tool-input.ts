@@ -14,3 +14,21 @@ export async function recordToolInput(args: JsonValue, config?: RunnableConfig):
     });
   }
 }
+
+export type RagStageEvent = {
+  name: 'query_embedding' | 'vector_search'; status: 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: number; endedAt?: number; model?: string; dimensions?: number; limit?: number;
+  resultCount?: number; error?: { name: string; message: string };
+};
+
+// 监控采集：沿用工具回调 ID 关联阶段；观察事件失败不影响检索。
+export async function recordRagStage(event: RagStageEvent, config?: RunnableConfig): Promise<void> {
+  if (!config?.callbacks) return;
+  try {
+    await dispatchCustomEvent('eterion.rag.stage', event, config);
+  } catch (error) {
+    console.warn('RAG stage recording unavailable', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
+}

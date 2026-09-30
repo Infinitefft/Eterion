@@ -45,6 +45,17 @@ export interface RunEnd {
   endedAt: number;
 }
 
+export interface IngestionStart {
+  ingestionId: string; userId: string; fileId: string; knowledgeBaseId: string;
+  fileName: string; format: string; sourceText: string; startedAt: number;
+}
+
+export interface IngestionChunkSnapshot {
+  chunkId: string; sectionId: string; chunkIndex: number; content: string;
+  headingPath: string[]; startOffset?: number; endOffset?: number;
+  embeddingText: string; budgetTokens: number; metadata: JsonValue;
+}
+
 // 读取 SQLite 时验证实际字段，避免把未知行对象直接断言成业务类型。
 const jsonColumn = z.string().transform((text) => z.json().parse(JSON.parse(text)));
 // SQL NULL 表示未记录，JSON 文本 "null" 表示确实返回了 null，两者不能合并。
@@ -85,7 +96,7 @@ export function openRecordStore(filePath: string, secrets: readonly string[] = [
   try {
     database.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 1000;');
     const version = database.prepare('PRAGMA user_version').get()?.['user_version'];
-    if (version !== 0 && version !== 1) {
+    if (version !== 0 && version !== 1 && version !== 2) {
       throw new Error('Unsupported run-record database version');
     }
     database.exec(`
@@ -120,7 +131,45 @@ export function openRecordStore(filePath: string, secrets: readonly string[] = [
         UNIQUE (run_id, sequence)
       ) STRICT;
       CREATE INDEX IF NOT EXISTS runs_user_time ON runs(user_id, started_at DESC, run_id);
-      PRAGMA user_version = 1;
+      CREATE TABLE IF NOT EXISTS ingestions (
+        ingestion_id TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT NOT NULL CHECK (length(trim(user_id)) > 0),
+        file_id TEXT NOT NULL,
+        knowledge_base_id TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        format TEXT NOT NULL CHECK (format IN ('md', 'txt')),
+        source_text TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'cancelled')),
+        chunk_count INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS ingestion_stages (
+        ingestion_id TEXT NOT NULL REFERENCES ingestions(ingestion_id) ON DELETE CASCADE,
+        stage_id TEXT NOT NULL,
+        parent_stage TEXT,
+        sequence INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'cancelled')),
+        input TEXT, output TEXT, error TEXT,
+        started_at INTEGER NOT NULL, ended_at INTEGER,
+        PRIMARY KEY (ingestion_id, stage_id),
+        UNIQUE (ingestion_id, sequence)
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS ingestion_chunks (
+        ingestion_id TEXT NOT NULL REFERENCES ingestions(ingestion_id) ON DELETE CASCADE,
+        chunk_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        section_id TEXT NOT NULL, chunk_index INTEGER NOT NULL,
+        content TEXT NOT NULL, heading_path TEXT NOT NULL,
+        start_offset INTEGER, end_offset INTEGER,
+        embedding_text TEXT NOT NULL, budget_tokens INTEGER NOT NULL, metadata TEXT NOT NULL,
+        PRIMARY KEY (ingestion_id, chunk_id),
+        UNIQUE (ingestion_id, sequence)
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS ingestions_user_file_time
+        ON ingestions(user_id, file_id, started_at DESC, ingestion_id DESC);
+      PRAGMA user_version = 2;
       COMMIT;
     `);
   } catch (error) {
@@ -150,6 +199,59 @@ export function openRecordStore(filePath: string, secrets: readonly string[] = [
   }
 
   return {
+    startIngestion(value: IngestionStart): void {
+      database.prepare(`INSERT INTO ingestions
+        (ingestion_id,user_id,file_id,knowledge_base_id,file_name,format,source_text,status,started_at)
+        VALUES (?,?,?,?,?,?,?,'running',?)`).run(value.ingestionId, value.userId, value.fileId,
+        value.knowledgeBaseId, redactText(value.fileName), value.format, redactText(value.sourceText), value.startedAt);
+    },
+
+    startIngestionStage(ingestionId: string, stageId: string, input: JsonValue, startedAt: number, parentStage?: string): void {
+      const result = database.prepare(`INSERT INTO ingestion_stages
+        (ingestion_id,stage_id,parent_stage,sequence,status,input,started_at)
+        SELECT ?,?,?,COALESCE((SELECT MAX(sequence) FROM ingestion_stages WHERE ingestion_id=?),0)+1,'running',?,?
+        FROM ingestions WHERE ingestion_id=? AND status='running'`).run(
+        ingestionId, stageId, parentStage ?? null, ingestionId, encode(input), startedAt, ingestionId);
+      if (result.changes !== 1) throw new Error('Ingestion is missing or already ended');
+    },
+
+    finishIngestionStage(ingestionId: string, stageId: string, status: TerminalStatus, endedAt: number, output?: JsonValue, error?: JsonValue): void {
+      const result = database.prepare(`UPDATE ingestion_stages SET status=?,ended_at=?,output=?,error=?
+        WHERE ingestion_id=? AND stage_id=? AND status='running'
+        AND EXISTS (SELECT 1 FROM ingestions WHERE ingestion_id=? AND status='running')`).run(
+        status, endedAt, encode(output), encode(error), ingestionId, stageId, ingestionId);
+      if (result.changes !== 1) throw new Error('Ingestion stage is missing or already ended');
+    },
+
+    appendIngestionChunks(ingestionId: string, chunks: IngestionChunkSnapshot[]): void {
+      database.exec('BEGIN');
+      try {
+        if (!database.prepare("SELECT 1 FROM ingestions WHERE ingestion_id=? AND status='running'").get(ingestionId)) {
+          throw new Error('Ingestion is missing or already ended');
+        }
+        let sequence = Number(database.prepare('SELECT COALESCE(MAX(sequence),0) AS last FROM ingestion_chunks WHERE ingestion_id=?').get(ingestionId)?.['last']);
+        const insert = database.prepare(`INSERT INTO ingestion_chunks
+          (ingestion_id,chunk_id,sequence,section_id,chunk_index,content,heading_path,start_offset,end_offset,embedding_text,budget_tokens,metadata)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+        for (const chunk of chunks) {
+          insert.run(ingestionId, chunk.chunkId, ++sequence, chunk.sectionId, chunk.chunkIndex,
+            redactText(chunk.content), encode(chunk.headingPath), chunk.startOffset ?? null, chunk.endOffset ?? null,
+            redactText(chunk.embeddingText), chunk.budgetTokens, encode(chunk.metadata));
+        }
+        database.prepare('UPDATE ingestions SET chunk_count=? WHERE ingestion_id=?').run(sequence, ingestionId);
+        database.exec('COMMIT');
+      } catch (error) {
+        database.exec('ROLLBACK');
+        throw error;
+      }
+    },
+
+    finishIngestion(ingestionId: string, status: TerminalStatus, endedAt: number, error?: JsonValue): void {
+      const result = database.prepare(`UPDATE ingestions SET status=?,ended_at=?,error=?
+        WHERE ingestion_id=? AND status='running'`).run(status, endedAt, encode(error), ingestionId);
+      if (result.changes !== 1) throw new Error('Ingestion is missing or already ended');
+    },
+
     startRun(run: RunStart): void {
       database.prepare(`
         INSERT INTO runs (run_id, user_id, thread_id, model_id, question, status, input, started_at)

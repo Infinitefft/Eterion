@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"errors"
+	"github.com/Infinitefft/Eterion/services/api/internal/agent"
 	apperrors "github.com/Infinitefft/Eterion/services/api/internal/shared/errors"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -13,7 +14,9 @@ import (
 
 type fileTestIndexer struct{}
 
-func (fileTestIndexer) IngestFile(context.Context, uuid.UUID, string, string) error { return nil }
+func (fileTestIndexer) IngestFile(context.Context, uuid.UUID, string, string, ...agent.IngestionMonitoring) error {
+	return nil
+}
 
 type fileTestRepository struct {
 	owner, base uuid.UUID

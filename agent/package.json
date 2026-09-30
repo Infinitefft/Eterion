@@ -17,8 +17,10 @@
     "test": "pnpm build && node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:record-store": "tsx scripts/check-record-store.ts",
+    "check:ingestion-recording": "pnpm build && node scripts/check-ingestion-recording.mjs",
     "check:model-recording": "pnpm build && node scripts/check-model-recording.mjs",
-    "check:tool-recording": "pnpm build && node scripts/check-tool-recording.mjs"
+    "check:tool-recording": "pnpm build && node scripts/check-tool-recording.mjs",
+    "check:rag-search-recording": "pnpm build && node scripts/check-rag-search-recording.mjs"
   },
   "engines": {
     "node": ">=22.12.0",

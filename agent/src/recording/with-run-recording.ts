@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Settings } from '../config.js';
 import type { AgentEvent, AgentRuntime, JsonValue, RunInput } from '../protocol.js';
 import type { openRecordStore } from './store.js';
+import type { RagStageEvent } from './tool-input.js';
 
 export interface RecordingCallbacks extends BaseCallbackHandler {
   recordToolMessage?: (message: ToolMessage) => void;
@@ -48,6 +49,7 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
         const { openRecordStore: openStore } = await import('./store.js');
         store = openStore(settings.recordingPath, [
           settings.bochaApiKey, ...settings.models.map((model) => model.apiKey),
+          settings.rag?.apiKey ?? '', settings.rag?.databaseUrl ?? '',
         ]);
         store.startRun({
           runId: input.run_id, userId: input.user_id, threadId: input.thread_id,
@@ -84,7 +86,8 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
         stepId: string;
         ended: boolean;
         metadata: { toolCallId: string; modelStepId: string; executionStarted: boolean;
-          executionStartedAt?: number; executionArgs?: JsonValue; frameworkRunId?: string };
+          executionStartedAt?: number; executionArgs?: JsonValue; frameworkRunId?: string;
+          ragStages?: RagStageEvent[] };
       }>();
       const toolExecutions = new Map<string, string>();
 
@@ -213,11 +216,21 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
           });
         },
         handleCustomEvent(name, args: unknown, frameworkRunId) {
-          if (name !== 'eterion.tool.input') return;
+          if (name !== 'eterion.tool.input' && name !== 'eterion.rag.stage') return;
           record(() => {
             const request = toolRequests.get(toolExecutions.get(frameworkRunId) ?? '');
             if (!request || request.ended) return;
-            request.metadata.executionArgs = toJson(args);
+            if (name === 'eterion.tool.input') request.metadata.executionArgs = toJson(args);
+            else {
+              if (!args || typeof args !== 'object') return;
+              const event = args as RagStageEvent;
+              if (event.name !== 'query_embedding' && event.name !== 'vector_search') return;
+              const stages = request.metadata.ragStages ?? [];
+              const index = stages.findIndex((stage) => stage.name === event.name);
+              if (index < 0) stages.push(event);
+              else stages[index] = event;
+              request.metadata.ragStages = stages;
+            }
             recordStore.updateStepMetadata(input.run_id, request.stepId, toJson(request.metadata));
           });
         },
