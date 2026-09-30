@@ -37,10 +37,11 @@ export async function getKnowledgeFileContent(
   baseId: string,
   fileId: string,
   signal?: AbortSignal,
+  source = false,
 ) {
   const response = await apiClient.get<ApiResponse<{ content: string; format: 'txt' | 'md' }>>(
     `/knowledge-bases/${baseId}/files/${fileId}/content`,
-    { signal },
+    { signal, params: source ? { source: '1' } : undefined, timeout: source ? 40_000 : undefined },
   );
   return response.data.data;
 }

@@ -141,6 +141,15 @@ func (s *FileService) DeleteBase(ctx context.Context, userID, baseID uuid.UUID) 
 }
 
 func (s *FileService) Content(ctx context.Context, userID, baseID, fileID uuid.UUID) (*FileContent, error) {
+	return s.readContent(ctx, userID, baseID, fileID, false)
+}
+
+// Source 保留原始 BOM 和换行，供 RAG 的 UTF-16 原文偏移量定位使用。
+func (s *FileService) Source(ctx context.Context, userID, baseID, fileID uuid.UUID) (*FileContent, error) {
+	return s.readContent(ctx, userID, baseID, fileID, true)
+}
+
+func (s *FileService) readContent(ctx context.Context, userID, baseID, fileID uuid.UUID, source bool) (*FileContent, error) {
 	if err := s.checkOwner(ctx, userID, baseID); err != nil {
 		return nil, err
 	}
@@ -155,28 +164,40 @@ func (s *FileService) Content(ctx context.Context, userID, baseID, fileID uuid.U
 	if _, ok := fileMimeTypes[ext]; !ok {
 		return nil, apperrors.New(415, "PREVIEW_UNSUPPORTED", "目前仅支持 TXT 和 Markdown 预览", "FIX_INPUT")
 	}
-	if file.SizeBytes > maxPreviewBytes {
+	limit := maxPreviewBytes
+	if source {
+		limit = maxFileBytes
+	}
+	if file.SizeBytes > limit {
 		return nil, apperrors.New(413, "PREVIEW_TOO_LARGE", "文件超过 1 MiB，暂不支持在线预览", "FIX_INPUT")
 	}
 	if s.store == nil {
 		return nil, apperrors.New(503, "FILE_STORAGE_UNAVAILABLE", "文件存储尚未配置", "RETRY_LATER")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	timeout := 8 * time.Second
+	if source {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	body, err := s.store.Get(ctx, file.ObjectKey)
 	if err != nil {
 		return nil, apperrors.New(502, "FILE_STORAGE_ERROR", "读取 OSS 文件失败，请稍后重试", "RETRY_LATER")
 	}
 	defer body.Close()
-	data, err := io.ReadAll(io.LimitReader(body, maxPreviewBytes+1))
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
 	if err != nil {
 		return nil, apperrors.New(502, "FILE_STORAGE_ERROR", "文件内容读取失败，请稍后重试", "RETRY_LATER")
 	}
-	if int64(len(data)) > maxPreviewBytes {
+	if int64(len(data)) > limit {
 		return nil, apperrors.New(413, "PREVIEW_TOO_LARGE", "文件超过 1 MiB，暂不支持在线预览", "FIX_INPUT")
 	}
 	if !utf8.Valid(data) || strings.IndexByte(string(data), 0) >= 0 {
 		return nil, apperrors.New(415, "PREVIEW_ENCODING_UNSUPPORTED", "目前仅支持 UTF-8 编码的文本预览", "FIX_INPUT")
 	}
-	return &FileContent{Content: strings.TrimPrefix(string(data), "\uFEFF"), Format: strings.TrimPrefix(ext, ".")}, nil
+	content := string(data)
+	if !source {
+		content = strings.TrimPrefix(content, "\uFEFF")
+	}
+	return &FileContent{Content: content, Format: strings.TrimPrefix(ext, ".")}, nil
 }

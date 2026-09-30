@@ -1,9 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 
 import { routePaths } from '@/app/routePaths';
 import { ChatConversation } from '@/features/chat/components/ChatConversation';
 import { Composer } from '@/features/chat/components/Composer';
+import { KnowledgeSourcePanel } from '@/features/chat/components/agent/KnowledgeSourcePanel';
+import type { KnowledgeSource } from '@/features/chat/components/agent/KnowledgeSources';
 import { synchronizeThread } from '@/service/im';
 import type { ThreadId } from '@/service/im/types';
 import { useAuthStore } from '@/store/auth-store';
@@ -25,6 +27,8 @@ export function ChatDetail() {
   const { threadId } = useParams<{ threadId: ThreadId }>();
   const userId = useAuthStore((state) => state.user?.id ?? null);
   const sessionVersion = useAuthStore((state) => state.sessionVersion);
+  const [selectedSource, setSelectedSource] = useState<{ threadId: ThreadId; source: KnowledgeSource } | null>(null);
+  const sourceTriggerRef = useRef<HTMLElement | null>(null);
   const isThreadListInitialized = useIMStore((state) =>
     state.threadListLoadState.status === 'ready' || state.threadListLoadState.status === 'error',
   );
@@ -76,12 +80,24 @@ export function ChatDetail() {
     }
   }, [threadId, userId, sessionVersion, isThreadListInitialized, snapshotStatus]);
 
+  useEffect(() => {
+    if (!selectedSource || selectedSource.threadId !== threadId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedSource(null);
+        sourceTriggerRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedSource, threadId]);
+
   if (!threadId) {
     return <Navigate to={routePaths.chat} replace />;
   }
 
   return (
-    <section className='chat-detail-page'>
+    <section className={selectedSource?.threadId === threadId ? 'chat-detail-page has-source' : 'chat-detail-page'}>
       {snapshotError ? (
         <div className='chat-detail-alert' role='alert'>
           <span>{snapshotError}</span>
@@ -96,8 +112,18 @@ export function ChatDetail() {
         </div>
       ) : null}
 
-      <ChatConversation threadId={threadId} />
+      <ChatConversation threadId={threadId} onOpenSource={(source) => {
+        sourceTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        setSelectedSource({ threadId, source });
+      }} />
       <Composer threadId={threadId} />
+      {selectedSource?.threadId === threadId && <KnowledgeSourcePanel
+        source={selectedSource.source}
+        onClose={() => {
+          setSelectedSource(null);
+          sourceTriggerRef.current?.focus();
+        }}
+      />}
     </section>
   );
 }

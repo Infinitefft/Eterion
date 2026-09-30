@@ -186,6 +186,10 @@ func TestFileContent(t *testing.T) {
 	if err != nil || result.Content != "# 标题" || result.Format != "md" || store.key != "stored-key" {
 		t.Fatalf("preview: %v %v", result, err)
 	}
+	source, err := service.Source(ctx, repo.owner, repo.base, file.ID)
+	if err != nil || source.Content != "\uFEFF# 标题" || source.Format != "md" {
+		t.Fatalf("source must preserve BOM: %v %v", source, err)
+	}
 	file.OriginalName = "old.pdf"
 	_, err = service.Content(ctx, repo.owner, repo.base, file.ID)
 	assertFileError(t, err, "PREVIEW_UNSUPPORTED")
@@ -197,6 +201,10 @@ func TestFileContent(t *testing.T) {
 	store.data = []byte(strings.Repeat("a", int(maxPreviewBytes)+1))
 	_, err = service.Content(ctx, repo.owner, repo.base, file.ID)
 	assertFileError(t, err, "PREVIEW_TOO_LARGE")
+	source, err = service.Source(ctx, repo.owner, repo.base, file.ID)
+	if err != nil || len(source.Content) != len(store.data) {
+		t.Fatalf("source must allow files larger than preview limit: %v", err)
+	}
 	store.data = []byte{0xff}
 	_, err = service.Content(ctx, repo.owner, repo.base, file.ID)
 	assertFileError(t, err, "PREVIEW_ENCODING_UNSUPPORTED")

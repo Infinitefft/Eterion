@@ -17,12 +17,14 @@ import { useIMStore } from '@/store/im-store';
 
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolCallItem } from './ToolCallItem';
+import type { KnowledgeSource } from './KnowledgeSources';
 
 interface AgentRunTraceProps {
   threadId: ThreadId;
   runId: RunId;
   hideThinkingIndicator?: boolean;
   content?: string;
+  onOpenSource?: (source: KnowledgeSource) => void;
 }
 
 const ACTIVE_RUN_STATUSES = new Set<RunStatus>(['pending', 'running', 'waiting_user']);
@@ -273,14 +275,17 @@ function HITLResponseForm({ block }: { block: HITLInteractionState }) {
   );
 }
 
-function AgentBlockList({ blocks }: { blocks: AgentBlockState[] }) {
+function AgentBlockList({ blocks, onOpenSource }: {
+  blocks: AgentBlockState[];
+  onOpenSource?: (source: KnowledgeSource) => void;
+}) {
   if (blocks.length === 0) return null;
 
   return (
     <ul className='chat-run-steps'>
       {blocks.map((block) =>
         block.kind === 'tool' ? (
-          <ToolCallItem key={`${block.kind}:${block.id}`} block={block} />
+          <ToolCallItem key={`${block.kind}:${block.id}`} block={block} onOpenSource={onOpenSource} />
         ) : block.kind === 'hitl' && block.status === 'requested' ? (
           <HITLResponseForm key={`${block.kind}:${block.id}`} block={block} />
         ) : (
@@ -306,11 +311,14 @@ function RunStatusIcon({ run }: { run: RunState }) {
   }
 }
 
-function CompletedRunTrace({ blocks }: { blocks: AgentBlockState[] }) {
+function CompletedRunTrace({ blocks, onOpenSource }: {
+  blocks: AgentBlockState[];
+  onOpenSource?: (source: KnowledgeSource) => void;
+}) {
   if (blocks.length === 0) return null;
 
   if (blocks.some((block) => block.kind === 'tool')) {
-    return <div className='chat-run-trace chat-run-trace-completed'><AgentBlockList blocks={blocks} /></div>;
+    return <div className='chat-run-trace chat-run-trace-completed'><AgentBlockList blocks={blocks} onOpenSource={onOpenSource} /></div>;
   }
 
   return (
@@ -319,7 +327,7 @@ function CompletedRunTrace({ blocks }: { blocks: AgentBlockState[] }) {
         <span>Agent 过程</span>
         <small>{blocks.length} 个过程</small>
       </summary>
-      <AgentBlockList blocks={blocks} />
+      <AgentBlockList blocks={blocks} onOpenSource={onOpenSource} />
     </details>
   );
 }
@@ -329,11 +337,13 @@ function RunTraceContent({
   blocks,
   hideThinkingIndicator,
   showHeading = true,
+  onOpenSource,
 }: {
   run: RunState;
   blocks: AgentBlockState[];
   hideThinkingIndicator: boolean;
   showHeading?: boolean;
+  onOpenSource?: (source: KnowledgeSource) => void;
 }) {
   const isActive = ACTIVE_RUN_STATUSES.has(run.status);
   const statusLabel = getRunStatusLabel(run);
@@ -343,7 +353,7 @@ function RunTraceContent({
   }
 
   if (run.status === 'completed') {
-    return <CompletedRunTrace blocks={blocks} />;
+    return <CompletedRunTrace blocks={blocks} onOpenSource={onOpenSource} />;
   }
 
   return (
@@ -360,7 +370,7 @@ function RunTraceContent({
           )}
         </div>
       ) : null}
-      <AgentBlockList blocks={blocks} />
+      <AgentBlockList blocks={blocks} onOpenSource={onOpenSource} />
     </div>
   );
 }
@@ -371,6 +381,7 @@ export function AgentRunTrace({
   runId,
   hideThinkingIndicator = false,
   content,
+  onOpenSource,
 }: AgentRunTraceProps) {
   const detail = useIMStore((state) => state.detailsByThread[threadId]);
   const run = detail?.runs.find((current) => current.id === runId);
@@ -384,7 +395,7 @@ export function AgentRunTrace({
   if (content === undefined || blocks.length === 0) {
     return (
       <>
-        <RunTraceContent run={run} blocks={blocks} hideThinkingIndicator={hideThinkingIndicator} />
+        <RunTraceContent run={run} blocks={blocks} hideThinkingIndicator={hideThinkingIndicator} onOpenSource={onOpenSource} />
         {content ? <p className='chat-message-text'>{content}</p> : null}
       </>
     );
@@ -401,6 +412,7 @@ export function AgentRunTrace({
       blocks={part.blocks}
       hideThinkingIndicator={hideThinkingIndicator}
       showHeading={part === firstBlockPart}
+      onOpenSource={onOpenSource}
     />
   ));
 }

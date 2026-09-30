@@ -5,6 +5,7 @@ import type { AgentBlockState, MessageState, RunId, RunState, ThreadId } from '@
 import { useIMStore } from '@/store/im-store';
 
 import { AgentRunTrace } from './agent/AgentRunTrace';
+import type { KnowledgeSource } from './agent/KnowledgeSources';
 import { ThinkingIndicator } from './agent/ThinkingIndicator';
 
 const EMPTY_MESSAGES: MessageState[] = [];
@@ -13,6 +14,7 @@ const EMPTY_BLOCKS: AgentBlockState[] = [];
 
 interface ChatMessageListProps {
   threadId: ThreadId;
+  onOpenSource: (source: KnowledgeSource) => void;
 }
 
 interface MessageProps {
@@ -70,7 +72,9 @@ function getAssistantStatus(message: MessageState): string | null {
 }
 
 /** Assistant 正文及其关联 Run 的公开过程。 */
-function AssistantMessage({ message }: MessageProps) {
+function AssistantMessage({ message, onOpenSource }: MessageProps & {
+  onOpenSource: (source: KnowledgeSource) => void;
+}) {
   const statusText = getAssistantStatus(message);
   const isStreaming = message.status === 'streaming';
   const isWaitingForContent = isStreaming && !message.content;
@@ -98,6 +102,7 @@ function AssistantMessage({ message }: MessageProps) {
             runId={message.runId}
             hideThinkingIndicator={isStreaming}
             content={message.content}
+            onOpenSource={onOpenSource}
           />
         ) : null}
 
@@ -125,7 +130,11 @@ function AssistantMessage({ message }: MessageProps) {
 }
 
 /** 正式 AI 消息出现前的过程区域，也保留没有正文的历史运行结果。 */
-function PendingAssistantMessage({ threadId, runId }: { threadId: ThreadId; runId: RunId | null }) {
+function PendingAssistantMessage({ threadId, runId, onOpenSource }: {
+  threadId: ThreadId;
+  runId: RunId | null;
+  onOpenSource: (source: KnowledgeSource) => void;
+}) {
   return (
     <article className='chat-message-row chat-message-row-assistant' aria-live='polite'>
       <div className='chat-assistant-avatar' aria-hidden='true'>
@@ -137,7 +146,7 @@ function PendingAssistantMessage({ threadId, runId }: { threadId: ThreadId; runI
             <ThinkingIndicator />
           </p>
         ) : (
-          <AgentRunTrace threadId={threadId} runId={runId} />
+          <AgentRunTrace threadId={threadId} runId={runId} onOpenSource={onOpenSource} />
         )}
       </div>
     </article>
@@ -145,7 +154,7 @@ function PendingAssistantMessage({ threadId, runId }: { threadId: ThreadId; runI
 }
 
 /** 当前 Thread 的消息列表；Thinking、Tool 和 HITL 由各消息关联的 Run 展示。 */
-export function ChatMessageList({ threadId }: ChatMessageListProps) {
+export function ChatMessageList({ threadId, onOpenSource }: ChatMessageListProps) {
   const messages = useIMStore(
     (state) => state.detailsByThread[threadId]?.messages ?? EMPTY_MESSAGES,
   );
@@ -171,11 +180,11 @@ export function ChatMessageList({ threadId }: ChatMessageListProps) {
           <Fragment key={message.id}>
             <UserMessage message={message} />
             {runId !== undefined ? (
-              <PendingAssistantMessage threadId={threadId} runId={runId} />
+              <PendingAssistantMessage threadId={threadId} runId={runId} onOpenSource={onOpenSource} />
             ) : null}
           </Fragment>
         ) : (
-          <AssistantMessage key={message.id} message={message} />
+          <AssistantMessage key={message.id} message={message} onOpenSource={onOpenSource} />
         );
       })}
     </div>

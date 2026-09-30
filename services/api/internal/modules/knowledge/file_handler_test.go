@@ -112,6 +112,10 @@ func TestFileHTTPFlow(t *testing.T) {
 	if result.Code != 200 || content.Data.Content != "xxxxx" || content.Data.Format != "txt" || result.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("content: %s", result.Body.String())
 	}
+	result = call(http.MethodGet, contentURL+"?source=1", accessToken, nil, 0)
+	if result.Code != 200 || result.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("source: %s", result.Body.String())
+	}
 	deleteURL := baseURL + "/" + list.Data[0].ID.String()
 	if result := call(http.MethodDelete, deleteURL, "", nil, 0); result.Code != 401 {
 		t.Fatal("delete must require auth")

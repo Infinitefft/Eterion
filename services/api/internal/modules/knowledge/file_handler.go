@@ -71,7 +71,12 @@ func (h *FileHandler) Content(c *gin.Context) {
 		response.Error(c, apperrors.Validation(map[string]string{"file_id": "文件 ID 必须是 UUID"}))
 		return
 	}
-	result, err := h.service.Content(c.Request.Context(), userID, baseID, fileID)
+	var result *FileContent
+	if c.Query("source") == "1" {
+		result, err = h.service.Source(c.Request.Context(), userID, baseID, fileID)
+	} else {
+		result, err = h.service.Content(c.Request.Context(), userID, baseID, fileID)
+	}
 	if err != nil {
 		h.writeError(c, err)
 		return

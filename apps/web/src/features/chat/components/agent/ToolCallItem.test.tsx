@@ -61,4 +61,25 @@ describe('ToolCallItem', () => {
     expect(html).toContain('网页搜索已完成');
     expect(html).not.toContain('<a ');
   });
+
+  it('shows a source button without navigating away or exposing document content', () => {
+    const html = renderToStaticMarkup(<ToolCallItem onOpenSource={() => {}} block={{
+      kind: 'tool', id: 'tool-rag', threadId: 'thread-1', runId: 'run-1',
+      name: 'knowledge_search', displayName: '检索知识库', status: 'completed',
+      args: { query: '缓存' }, summary: '检索到 1 个资料片段', error: null,
+      result: { results: [{
+        chunkId: '11111111-1111-4111-8111-111111111111',
+        fileId: '22222222-2222-4222-8222-222222222222',
+        knowledgeBaseId: '33333333-3333-4333-8333-333333333333',
+        fileName: '笔记.md', headingPath: ['Redis', '缓存'],
+        startOffset: 19, endOffset: 42, content: 'private-source-text',
+      }] },
+    }} />);
+    expect(html).toContain('检索到 1 个资料片段');
+    expect(html).toContain('笔记.md');
+    expect(html).toContain('Redis / 缓存');
+    expect(html).toContain('<button type="button"');
+    expect(html).not.toContain('/repository?');
+    expect(html).not.toContain('private-source-text');
+  });
 });

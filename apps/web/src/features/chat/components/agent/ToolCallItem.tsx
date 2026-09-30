@@ -1,5 +1,7 @@
-import { Check, ChevronDown, CircleAlert, Globe, LoaderCircle, Wrench } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, Globe, LoaderCircle, Search, Wrench } from 'lucide-react';
 import { useState } from 'react';
+
+import { getKnowledgeSources, KnowledgeSources, type KnowledgeSource } from './KnowledgeSources';
 
 import type { JsonValue, ToolCallBlockState } from '@/service/im/types';
 
@@ -45,10 +47,15 @@ function getWebsites(block: ToolCallBlockState): Website[] {
   return websites;
 }
 
-export function ToolCallItem({ block }: { block: ToolCallBlockState }) {
+export function ToolCallItem({ block, onOpenSource }: {
+  block: ToolCallBlockState;
+  onOpenSource?: (source: KnowledgeSource) => void;
+}) {
   const [expanded, setExpanded] = useState(true);
   const isWebTool = block.name === 'web_search' || block.name === 'web_fetch';
   const websites = isWebTool ? getWebsites(block) : [];
+  const sources = block.name === 'knowledge_search' && block.status === 'completed'
+    ? getKnowledgeSources(block.result) : [];
   const isRunning = block.status === 'running';
   const isFailed = block.status === 'failed';
   let label = block.displayName || block.name;
@@ -58,18 +65,23 @@ export function ToolCallItem({ block }: { block: ToolCallBlockState }) {
       : websites.length > 0 ? `已搜索 ${websites.length} 个网站` : '网页搜索已完成';
   } else if (block.name === 'web_fetch') {
     label = isRunning ? '正在读取网页' : isFailed ? '网页读取失败' : '已读取网页';
+  } else if (block.name === 'knowledge_search') {
+    label = isRunning ? '正在检索知识库' : isFailed ? '知识库检索失败'
+      : sources.length > 0 ? `检索到 ${sources.length} 个资料片段` : '未检索到资料片段';
   } else {
     label += isRunning ? ' · 调用中' : isFailed ? ' · 调用失败' : ' · 已完成';
   }
 
   const heading = (
     <>
-      {isWebTool ? <Globe size={15} aria-hidden='true' /> : <Wrench size={15} aria-hidden='true' />}
+      {isWebTool ? <Globe size={15} aria-hidden='true' />
+        : block.name === 'knowledge_search' ? <Search size={15} aria-hidden='true' />
+          : <Wrench size={15} aria-hidden='true' />}
       <span>{label}</span>
       {isRunning ? <LoaderCircle className='chat-run-spinner' size={14} aria-hidden='true' />
         : isFailed ? <CircleAlert size={14} aria-hidden='true' />
           : <Check size={14} aria-hidden='true' />}
-      {websites.length > 0 ? (
+      {websites.length > 0 || sources.length > 0 ? (
         <ChevronDown className={expanded ? 'chat-tool-chevron is-expanded' : 'chat-tool-chevron'} size={14} aria-hidden='true' />
       ) : null}
     </>
@@ -77,7 +89,7 @@ export function ToolCallItem({ block }: { block: ToolCallBlockState }) {
 
   return (
     <li className='chat-tool-call' data-status={block.status}>
-      {websites.length > 0 ? (
+      {websites.length > 0 || sources.length > 0 ? (
         <button className='chat-tool-heading' type='button' aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
           {heading}
         </button>
@@ -94,6 +106,7 @@ export function ToolCallItem({ block }: { block: ToolCallBlockState }) {
           ))}
         </ul>
       ) : null}
+      {expanded && sources.length > 0 ? <KnowledgeSources sources={sources} onOpenSource={onOpenSource} /> : null}
       {isFailed && block.error?.message ? <p className='chat-tool-error'>{block.error.message}</p> : null}
     </li>
   );

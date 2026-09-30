@@ -5,9 +5,11 @@ import type { ThreadId } from '@/service/im/types';
 import { useIMStore } from '@/store/im-store';
 
 import { ChatMessageList } from './ChatMessageList';
+import type { KnowledgeSource } from './agent/KnowledgeSources';
 
 interface ChatConversationProps {
   threadId: ThreadId;
+  onOpenSource: (source: KnowledgeSource) => void;
 }
 
 const BOTTOM_THRESHOLD_PX = 96;
@@ -16,7 +18,7 @@ const BOTTOM_THRESHOLD_PX = 96;
  * 对话滚动视口。
  * 用户停留在底部时自动跟随流式内容；主动向上阅读历史后不强制抢回滚动位置。
  */
-export function ChatConversation({ threadId }: ChatConversationProps) {
+export function ChatConversation({ threadId, onOpenSource }: ChatConversationProps) {
   const viewportRef = useRef<HTMLElement>(null);
   const followsBottomRef = useRef(true);
   const frameRef = useRef<number | null>(null);
@@ -100,7 +102,7 @@ export function ChatConversation({ threadId }: ChatConversationProps) {
         aria-label='对话内容'
         onScroll={handleScroll}
       >
-        <ChatMessageList threadId={threadId} />
+        <ChatMessageList threadId={threadId} onOpenSource={onOpenSource} />
       </section>
 
       {showScrollButton ? (
