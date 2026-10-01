@@ -189,6 +189,9 @@ func (r *CommandRouter) acceptAndStart(
 	_ = r.publisher.Accepted(connection, command, *record)
 	r.runs.PublishPending(*record, sequences)
 	r.runs.Start(record.Run)
+	if command.Type == CommandThreadStart {
+		r.runs.GenerateTitle(*record)
+	}
 }
 
 func (r *CommandRouter) handleCancel(ctx context.Context, connection *Connection, command ClientCommand) {

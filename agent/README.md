@@ -186,6 +186,12 @@ Go 继续负责业务消息持久化、资源归属、Run 展示状态和 IM 事
 
 Review 顺序：`tools/ask-user.ts` → `runtime/create-agent.ts` → `runtime/agent-runtime.ts` 中的 `prepareResume`、`stream` → `server.ts`。
 
+### 新对话标题
+
+新会话首条消息先沿用正文前 30 字作为临时标题。Go 在确认 `thread.start` 后并行调用内部 `POST /title`，使用该轮选择的模型根据首条消息生成简短标题，通常 6–16 个汉字，最多 32 字符；不使用 Tools、不写入模型对话上下文、不进入回答流。成功后保存标题并复用 `thread.updated` 更新侧边栏，刷新后也保留。模型超时或失败时保留临时标题，不重试、不影响回答；重复提交不再触发生成，用户已改成其他标题或删除会话时丢弃结果。
+
+标题请求最长 30 秒，首条消息最多取 4000 字符。该能力需要重启 Go 服务加载代码；Agent 若使用编译产物启动，也需要重新构建并重启。当前仅通过类型和编译检查，尚未验证真实模型生成效果。
+
 ### 固定会话开始时间
 
 需要本轮准确时间时，模型可调用静默工具 `get_turn_time`。Go 内部历史接口通过 `input_message_created_at` 返回本轮输入消息的数据库创建时间，Agent 只通过运行 context 传给工具，不在每轮消息前添加变化的时间。工具返回 UTC、本地时间（`Asia/Shanghai`）和毫秒时间戳；不触发 interrupt，也不发送前端工具展示事件，但保留 ToolMessage 和内部记录。HITL 恢复沿用原轮次时间。该时间是服务端收到并创建消息的时间，不是浏览器点击发送或工具执行的时刻。独立脚本如需使用该工具，应在 `/runs` 输入中提供 `input_message_created_at`；缺失时工具报错，不伪造时间。

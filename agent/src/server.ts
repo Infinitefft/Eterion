@@ -51,6 +51,28 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
     models: runtime.models,
   }));
 
+  // 仅供 Go 调用；标题生成独立于回答流，失败由 Go 保留临时标题。
+  app.post('/title', { bodyLimit: 128 << 10 }, async (request, reply) => {
+    const parsed = z.object({ model_id: z.string().min(1), content: z.string().trim().min(1).max(64000) }).strict().safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_TITLE_INPUT' } });
+    if (!runtime.generateTitle) return reply.code(409).send({ error: { code: 'TITLE_UNAVAILABLE' } });
+    if (!runtime.models.some((model) => model.id === parsed.data.model_id)) {
+      return reply.code(400).send({ error: { code: 'MODEL_NOT_AVAILABLE' } });
+    }
+    const controller = new AbortController();
+    const onClose = () => { if (!reply.raw.writableEnded) controller.abort(); };
+    reply.raw.once('close', onClose);
+    try {
+      const title = await runtime.generateTitle(parsed.data.model_id, parsed.data.content,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]));
+      return { title };
+    } catch {
+      return reply.code(502).send({ error: { code: 'TITLE_GENERATION_FAILED' } });
+    } finally {
+      reply.raw.off('close', onClose);
+    }
+  });
+
   // 与 /runs 一样，仅供 Go 在可信服务网络内调用；浏览器通过 Go 鉴权入口访问。
   app.post('/context/usage', { bodyLimit: 4 << 20 }, async (request, reply) => {
     const parsed = contextRequestSchema.safeParse(request.body);

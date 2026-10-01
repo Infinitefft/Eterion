@@ -145,6 +145,15 @@ type CompactInput struct {
 	History          []ContextHistoryMessage `json:"history"`
 }
 
+type TitleInput struct {
+	ModelID string `json:"model_id"`
+	Content string `json:"content"`
+}
+
+type TitleGenerator interface {
+	GenerateTitle(context.Context, TitleInput) (string, error)
+}
+
 type CompactResult struct {
 	AgentContext json.RawMessage `json:"agent_context"`
 	Changed      bool            `json:"changed"`

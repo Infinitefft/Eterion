@@ -203,7 +203,17 @@ func (r *GormRepository) UpdateChatTitle(
 	title string,
 	now time.Time,
 ) (*Chat, error) {
+	return r.updateChatTitle(ctx, userID, chatID, title, now, nil)
+}
+
+// 生成期间用户可能已重命名；在同一行锁内比较，不能先读标题再无条件覆盖。
+func (r *GormRepository) UpdateGeneratedTitle(ctx context.Context, userID, chatID uuid.UUID, expectedTitle, title string, now time.Time) (*Chat, error) {
+	return r.updateChatTitle(ctx, userID, chatID, title, now, &expectedTitle)
+}
+
+func (r *GormRepository) updateChatTitle(ctx context.Context, userID, chatID uuid.UUID, title string, now time.Time, expectedTitle *string) (*Chat, error) {
 	var chat Chat
+	updated := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		err := tx.
 			Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -215,21 +225,30 @@ func (r *GormRepository) UpdateChatTitle(
 		if err != nil {
 			return fmt.Errorf("lock chat for title update: %w", err)
 		}
+		if expectedTitle != nil && chat.Title != *expectedTitle {
+			return nil
+		}
 
+		// GORM 的 Updates 也会回写 chat，先固定序号，避免写库后再次自增造成事件缺口。
+		nextSeq := chat.LastSeq + 1
 		if err := tx.Model(&chat).Updates(map[string]any{
 			"title":      title,
-			"last_seq":   chat.LastSeq + 1,
+			"last_seq":   nextSeq,
 			"updated_at": now,
 		}).Error; err != nil {
 			return fmt.Errorf("update chat title: %w", err)
 		}
 		chat.Title = title
-		chat.LastSeq++
+		chat.LastSeq = nextSeq
 		chat.UpdatedAt = now
+		updated = true
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !updated {
+		return nil, nil
 	}
 	return &chat, nil
 }
@@ -340,8 +359,9 @@ func (r *GormRepository) StartChat(
 			return err
 		}
 		if duplicate != nil {
+			// 默认标题会被异步生成或用户重命名替换，不能作为原始提交身份的一部分。
 			if !sameSubmitIntent(duplicate, chatID, messageID, modelID, content, format) ||
-				duplicate.Chat.Title != title {
+				(title != firstRunes(content, 30) && duplicate.Chat.Title != title) {
 				return ErrRepositoryIdempotencyConflict
 			}
 			duplicate.Duplicate = true
@@ -398,7 +418,7 @@ func (r *GormRepository) StartChat(
 			}
 			if duplicate != nil &&
 				sameSubmitIntent(duplicate, chatID, messageID, modelID, content, format) &&
-				duplicate.Chat.Title == title {
+				(title == firstRunes(content, 30) || duplicate.Chat.Title == title) {
 				duplicate.Duplicate = true
 				return duplicate, nil
 			}
