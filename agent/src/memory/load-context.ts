@@ -5,6 +5,7 @@ import { attachSessionStart, restoreContext } from './messages.js';
 
 const historyPageSchema = z.object({
   session_started_at: z.number().int().nonnegative().optional(),
+  input_message_created_at: z.number().int().nonnegative().max(8.64e15).optional(),
   messages: z.array(z.object({
     id: z.string().uuid(),
     role: z.enum(['user', 'assistant', 'system']),
@@ -34,6 +35,7 @@ export async function buildRunInput(
   let lastMessageId: string | undefined;
   const cursors = new Set<string>();
   let needsSessionStart = true;
+  let inputMessageCreatedAt: number | undefined;
   do {
     const url = new URL(`/internal/agent/runs/${request.run_id}/messages`, apiBaseUrl);
     if (cursor) url.searchParams.set('after', cursor);
@@ -46,6 +48,7 @@ export async function buildRunInput(
     });
     if (!response.ok) throw new Error('Conversation history request failed');
     const page = historyPageSchema.parse(await response.json());
+    if (!cursor) inputMessageCreatedAt = page.input_message_created_at;
     if (!cursor && page.agent_context != null) {
       contextMessages.push(...restoreContext(page.agent_context));
       // 已保存的上下文保持原样，包括压缩后的摘要，不能给增量消息再次加时间。
@@ -76,5 +79,6 @@ export async function buildRunInput(
   return { ...runInputSchema.parse({
     run_id: request.run_id, user_id: request.user_id,
     thread_id: request.thread_id, model_id: request.model_id, messages,
+    ...(inputMessageCreatedAt === undefined ? {} : { input_message_created_at: inputMessageCreatedAt }),
   }), contextMessages };
 }

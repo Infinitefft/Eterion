@@ -16,6 +16,7 @@ export const runInputSchema = z
     thread_id: z.string().min(1),
     model_id: z.string().min(1),
     messages: z.array(messageInputSchema).min(1),
+    input_message_created_at: z.number().int().nonnegative().max(8.64e15).optional(),
   })
   .refine((input) => input.messages.at(-1)?.role === 'user', {
     message: 'the last message must be a user message',

@@ -3,6 +3,7 @@ import type { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
 import { Command } from '@langchain/langgraph';
 import { askUser, validateAnswers } from '../tools/ask-user.js';
+import { getTurnTime } from '../tools/get-turn-time.js';
 
 import { createWebAgent, buildSystemPrompt, type WebAgent } from './create-agent.js';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
@@ -50,6 +51,7 @@ export function createAgentRuntime(
     webFetch,
     knowledgeSearch.tool,
     askUser,
+    getTurnTime,
   ] as const;
 
   const agents = new Map<string, WebAgent>();
@@ -220,6 +222,7 @@ export function createAgentRuntime(
               thread_id: input.run_id,
             },
             context: {
+              ...(input.input_message_created_at === undefined ? {} : { inputMessageCreatedAt: input.input_message_created_at }),
               ...(input.user_id === undefined ? {} : { userId: input.user_id }),
               onContextTruncated() { contextTruncated = true; },
               captureMessages(messages: BaseMessage[]) {
@@ -298,6 +301,9 @@ export function createAgentRuntime(
                   if (!call.id) {
                     throw new Error('Tool call is missing its id');
                   }
+
+                  // 静默工具仍由框架执行、保存 ToolMessage 和采集记录，只跳过前端展示事件。
+                  if (call.name === getTurnTime.name) continue;
 
                   activeTools.set(call.id, call.name);
 

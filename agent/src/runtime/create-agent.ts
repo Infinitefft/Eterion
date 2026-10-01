@@ -16,6 +16,7 @@ import { MemorySaver } from '@langchain/langgraph';
 import type { createWebSearchTool } from '../tools/web-search.js';
 import type { webFetch } from '../tools/web-fetch.js';
 import type { askUser } from '../tools/ask-user.js';
+import type { getTurnTime } from '../tools/get-turn-time.js';
 import { captureContextMiddleware, captureContextSchema } from '../memory/capture.js';
 import type { createContextCompaction } from '../memory/compaction.js';
 
@@ -50,13 +51,16 @@ type WebFetchTool = typeof webFetch;
 type KnowledgeSearchTool = ReturnType<typeof createKnowledgeSearchTool>['tool'];
 
 // 保留捕获回调，身份留在每次调用的运行上下文中，不进入模型消息。
-const agentContextSchema = captureContextSchema.extend({ userId: z.string().optional() });
+const agentContextSchema = captureContextSchema.extend({
+  userId: z.string().optional(),
+  inputMessageCreatedAt: z.number().optional(),
+});
 
 export interface CreateWebAgentOptions {
   model: ChatOpenAI;
   // 调用方只传基础 Prompt，工具规则由组装处统一追加。
   prompt: string;
-  tools: readonly (WebSearchTool | WebFetchTool | KnowledgeSearchTool | typeof askUser)[];
+  tools: readonly (WebSearchTool | WebFetchTool | KnowledgeSearchTool | typeof askUser | typeof getTurnTime)[];
   compaction?: ReturnType<typeof createContextCompaction>['middleware'];
 }
 
@@ -76,7 +80,8 @@ export interface CreateWebAgentOptions {
 export function createWebAgent(options: CreateWebAgentOptions): WebAgent {
   const tools = [...options.tools];
   const systemPrompt = buildSystemPrompt(options.prompt,
-    tools.some((tool) => tool.name === 'knowledge_search'), tools.some((tool) => tool.name === 'ask_user'));
+    tools.some((tool) => tool.name === 'knowledge_search'), tools.some((tool) => tool.name === 'ask_user'),
+    tools.some((tool) => tool.name === 'get_turn_time'));
   const toolCallLimit = createToolCallLimit({
     runLimit: MAX_TOOL_CALLS,
     exitBehavior: 'continue',
@@ -104,10 +109,10 @@ export function createWebAgent(options: CreateWebAgentOptions): WebAgent {
 }
 
 // 自动执行与手动压缩使用同一份主提示词计算预算。
-export function buildSystemPrompt(prompt: string, includeKnowledgeSearch = true, includeAskUser = true): string {
+export function buildSystemPrompt(prompt: string, includeKnowledgeSearch = true, includeAskUser = true, includeTurnTime = true): string {
   return `${prompt}
 
-  根据任务需要使用工具：
+  根据任务需要使用工具：${includeTurnTime ? '\n  - 会话开始时间是固定历史背景。需要本轮准确日期或时间时调用 get_turn_time，不沿用旧回合的时间结果；无需向用户说明调用过程。' : ''}
   - 普通问候和不依赖最新信息的常识问题直接回答，不要调用工具。
   - 用户需要最新公开信息或相关网页链接时，使用 web_search。
   - web_search 返回网页标题、URL 和摘要；摘要不足时再使用 web_fetch 读取正文。仅当用户要求按日期搜索时填写 freshness。
