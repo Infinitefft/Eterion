@@ -157,6 +157,47 @@ Node 恢复已保存的框架消息，再从新增历史中选择非空、已完
 Go 继续负责业务消息持久化、资源归属、Run 展示状态和 IM 事件，Node 不直连 Go 的业务数据库。
 升级时需同时重启 Node Agent 与 Go API；若 Go 端口不同，应同步设置 `GO_API_BASE_URL`。
 
+## HITL：询问用户、暂停与恢复
+
+`ask_user` 使用 LangGraph `interrupt()`，继续沿用 `createAgent()`，没有自定义状态图。
+问题 Schema、工具定义和答案校验集中在 `src/tools/ask-user.ts`。
+
+一次业务 Run 可以跨多段 HTTP/SSE：
+
+```text
+模型调用 ask_user → interrupt → MemorySaver 保存检查点
+  → Node run.paused → Go 保存问题和 waiting_user → WebSocket 表单
+用户回答 → interaction.respond → Go 校验、接收回答
+  → POST /runs/resume → Command({ resume }) → 工具返回答案
+  → 框架创建 ToolMessage → 模型继续 → 原消息完成
+```
+
+- LangGraph `configurable.thread_id` 使用业务 `run_id`，不是会话 ID；跨轮历史仍由原有 `agent_context` 管理。
+- `POST /runs/resume` 接收 `run_id`、`user_id`、`thread_id`、`interaction_id`、`answers`。恢复不重新加载历史。
+- `run.paused` 是当前 SSE 段的结束，不是业务 Run 终态；`run.resumed` 后不再发送 `content.started`，保留正文和工具 ID。
+- 检查点中若有多个待回答中断，当前逐个展示和恢复，不建设并行审批界面。
+- Go 保留原 Run 的 goroutine，等待回答 channel 或取消信号；暂停期间没有 Node SSE 或模型请求。Node 累计各执行段的超时预算，等待用户不计入。
+- 回答先校验归属、问题 ID、选项与必填项；已接收的同答案重试不会再次恢复。ACK 仅表示接收，UI 状态以交互事件和 `run.status` 为准。
+- 取消沿用 `run.cancel`，结束消息和工具，禁用问题表单，并通过内部 `POST /runs/discard` 清理检查点。
+- 本地 SQLite 运行记录暂停时不结束 Run、不把 interrupt 记为失败，恢复续写同一条记录；其 `running` 表示尚未结束（包含等待用户）。
+
+第一版只保证同一组 Node/Go 进程存活期间的恢复。刷新浏览器可通过已有快照恢复问题；Node 或 Go 重启后不支持断点续跑，提交旧回答会结束失效任务，也可以直接取消。
+检查点不是业务数据库持久化，也没有引入队列、分布式恢复或新业务表。
+
+Review 顺序：`tools/ask-user.ts` → `runtime/create-agent.ts` → `runtime/agent-runtime.ts` 中的 `prepareResume`、`stream` → `server.ts`。
+
+### 固定会话开始时间
+
+Go 内部历史、压缩和用量接口通过 `session_started_at` 传递会话创建时间（Unix 毫秒），不新增数据库字段。Agent 从原始历史构建上下文时，只给首条用户模型消息添加按 `Asia/Shanghai` 格式化的时间字符串；业务消息正文和前端展示不变。后续直接恢复上下文，不刷新时间或重复注入，HITL 恢复也沿用检查点。
+
+时间同时保存在消息元数据中；自动或手动压缩移除原消息时，由代码将原时间附加到摘要，避免依赖模型复述。普通续聊不会因时间变化改写历史前缀，但上下文压缩仍会改变前缀，不保证模型服务的缓存命中。已有旧上下文快照不补写时间；直接提供 `messages` 的独立脚本仍由调用方管理上下文。
+
+本次仅执行 Agent 类型检查和 Go 编译检查，尚未进行真实模型端到端验证。
+Go 对应 `run_manager.go`、`interaction.go`、`repository.go`；前端复用 `AgentRunTrace.tsx` 表单。
+
+本次验证为 Agent/前端类型检查及 Go 编译；未运行自动化测试或真实模型端到端联调。
+待联调：正常回答与继续生成、可选题空回答、必填/选项错误、重复提交、暂停时刷新、暂停时取消、进程重启后的旧回答、多次连续提问。
+
 ## 会话上下文与压缩
 
 启动新后端前，按仓库已有 goose 流程应用 `services/api/migrations/00007_add_agent_context.sql`。

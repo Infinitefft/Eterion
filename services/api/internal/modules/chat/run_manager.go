@@ -20,6 +20,19 @@ type activeRun struct {
 	cancel       context.CancelCauseFunc
 	run          Run
 	historyToken string
+	responses    chan agent.ResumeInput
+	interaction  *pendingInteraction
+}
+
+type pendingInteraction struct {
+	id        string
+	questions []HITLQuestion
+	answer    json.RawMessage
+}
+
+type InteractionRepository interface {
+	PauseInteraction(context.Context, uuid.UUID, string, []HITLQuestion, time.Time) ([2]int64, error)
+	ResolveInteraction(context.Context, uuid.UUID, string, []HITLAnswer, time.Time) ([2]int64, error)
 }
 
 type RunRepository interface {
@@ -85,14 +98,15 @@ func (m *RunManager) Start(run Run) bool {
 	}
 	runContext, cancel := context.WithCancelCause(m.appContext)
 	historyToken := uuid.NewString()
-	m.active[run.ID] = activeRun{cancel: cancel, run: run, historyToken: historyToken}
+	responses := make(chan agent.ResumeInput, 1)
+	m.active[run.ID] = activeRun{cancel: cancel, run: run, historyToken: historyToken, responses: responses}
 	m.runs.Add(1)
 	m.mu.Unlock()
 
 	go func() {
 		defer m.runs.Done()
 		defer m.remove(run.ID)
-		m.execute(runContext, run, historyToken)
+		m.execute(runContext, run, historyToken, responses)
 	}()
 	return true
 }
@@ -119,6 +133,7 @@ func (m *RunManager) Cancel(ctx context.Context, run *Run) (bool, error) {
 		}
 		return false, err
 	}
+	m.discardCheckpoint(run.ID)
 	return false, nil
 }
 
@@ -128,7 +143,8 @@ func (m *RunManager) Close() error {
 	return m.runner.Close()
 }
 
-func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken string) {
+func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken string, responses <-chan agent.ResumeInput) {
+	defer m.discardCheckpoint(initialRun.ID)
 	execution, err := m.repository.LoadRunExecution(ctx, initialRun.ID)
 	if err != nil {
 		m.finishWithError(ctx, &initialRun, nil, err)
@@ -156,9 +172,60 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 		thinkingContent string
 	)
 	tools := make(map[string]toolBlockData)
+	var resume *agent.ResumeInput
+	paused := false
 
-	err = m.runner.Run(ctx, input, func(event agent.Event) error {
+	handle := func(event agent.Event) error {
 		switch event.Type {
+		case agent.EventRunPaused:
+			if !runStarted || !contentStarted || contentTerminal || run.Status != RunStatusRunning {
+				return errors.New("agent paused outside an active run")
+			}
+			repository, ok := m.repository.(InteractionRepository)
+			if !ok {
+				return errors.New("interaction persistence unavailable")
+			}
+			var questions []HITLQuestion
+			if err := json.Unmarshal(event.Questions, &questions); err != nil || len(questions) == 0 {
+				return errors.New("invalid interaction questions")
+			}
+			now := m.now()
+			sequences, err := repository.PauseInteraction(ctx, run.ID, event.InteractionID, questions, now)
+			if err != nil {
+				return err
+			}
+			run.Status, run.UpdatedAt = RunStatusWaitingUser, now
+			m.mu.Lock()
+			current := m.active[run.ID]
+			current.interaction = &pendingInteraction{id: event.InteractionID, questions: questions}
+			m.active[run.ID] = current
+			m.mu.Unlock()
+			m.publisher.InteractionRequested(*run, event.InteractionID, sequences[0], questions)
+			m.publisher.RunStatus(*run, sequences[1])
+			paused = true
+			return nil
+
+		case agent.EventRunResumed:
+			if resume == nil || run.Status != RunStatusWaitingUser || event.ModelID != run.ModelID {
+				return errors.New("unexpected run.resumed event")
+			}
+			repository, ok := m.repository.(InteractionRepository)
+			if !ok {
+				return errors.New("interaction persistence unavailable")
+			}
+			var answers []HITLAnswer
+			if err := json.Unmarshal(resume.Answers, &answers); err != nil {
+				return err
+			}
+			now := m.now()
+			sequences, err := repository.ResolveInteraction(ctx, run.ID, resume.InteractionID, answers, now)
+			if err != nil {
+				return err
+			}
+			run.Status, run.UpdatedAt = RunStatusRunning, now
+			m.publisher.InteractionResolved(*run, resume.InteractionID, sequences[0], answers)
+			m.publisher.RunStatus(*run, sequences[1])
+			return nil
 		case agent.EventRunStarted:
 			if runStarted || event.ModelID != run.ModelID {
 				return errors.New("agent returned an invalid run.started event")
@@ -340,13 +407,47 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 		default:
 			return errors.New("unsupported internal agent event")
 		}
-	})
-	if err != nil {
-		m.finishWithError(ctx, run, output, err)
+	}
+	// 一次业务 Run 可以包含多段 SSE；等待用户时没有模型请求或执行计时器。
+	for {
+		paused = false
+		if resume == nil {
+			err = m.runner.Run(ctx, input, handle)
+		} else if runner, ok := m.runner.(agent.InteractionRunner); ok {
+			err = runner.Resume(ctx, *resume, handle)
+		} else {
+			err = errors.New("Agent does not support resume")
+		}
+		if err != nil {
+			m.finishWithError(ctx, run, output, err)
+			return
+		}
+		if runTerminal {
+			return
+		}
+		if !paused {
+			m.finishWithError(ctx, run, output, errors.New("agent stream ended before a terminal run event"))
+			return
+		}
+		select {
+		case <-ctx.Done():
+			m.finishWithError(ctx, run, output, ctx.Err())
+			return
+		case answer := <-responses:
+			resume = &answer
+		}
+	}
+}
+
+func (m *RunManager) discardCheckpoint(runID uuid.UUID) {
+	runner, ok := m.runner.(agent.InteractionRunner)
+	if !ok {
 		return
 	}
-	if !runTerminal {
-		m.finishWithError(ctx, run, output, errors.New("agent stream ended before a terminal run event"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := runner.Discard(ctx, runID.String()); err != nil {
+		m.logger.Warn("discard Agent checkpoint failed", "run_id", runID, "error", err)
 	}
 }
 

@@ -69,7 +69,7 @@ func (r *CommandRouter) HandleFrame(ctx context.Context, connection *Connection,
 	case CommandRunCancel:
 		r.handleCancel(ctx, connection, command)
 	case CommandInteractionRespond:
-		r.handleInteractionRespond(connection, command)
+		r.handleInteractionRespond(ctx, connection, command)
 	default:
 		r.reject(connection, command, invalidEnvelope("不支持的指令类型"))
 	}
@@ -219,19 +219,34 @@ func (r *CommandRouter) handleCancel(ctx context.Context, connection *Connection
 	_ = r.publisher.AcceptedRun(connection, command, *run)
 }
 
-func (r *CommandRouter) handleInteractionRespond(connection *Connection, command ClientCommand) {
+func (r *CommandRouter) handleInteractionRespond(ctx context.Context, connection *Connection, command ClientCommand) {
 	var payload InteractionRespondPayload
 	if command.MessageID != "" || command.RunID == "" || command.InteractionID == "" ||
 		decodeStrictJSON(command.Payload, &payload) != nil {
 		r.reject(connection, command, invalidEnvelope("interaction.respond payload 不合法"))
 		return
 	}
-	// The current Node runtime has no resumable HITL endpoint. Recognizing and
-	// explicitly rejecting the command keeps the wire contract stable without
-	// pretending that a run was resumed.
-	r.reject(connection, command, newBusinessError(
-		ErrorInteractionUnavailable, "当前 Agent Run 没有可回答的交互", false, http.StatusConflict,
-	))
+	runID, err := uuid.Parse(command.RunID)
+	if err != nil || len(command.InteractionID) > 128 {
+		r.reject(connection, command, invalidEnvelope("runId 或 interactionId 不合法"))
+		return
+	}
+	userID, err := uuid.Parse(connection.UserID())
+	if err != nil {
+		r.rejectInternal(connection, command, err)
+		return
+	}
+	threadID, _ := uuid.Parse(command.ThreadID)
+	run, err := r.service.FindRun(ctx, userID, threadID, runID)
+	if err != nil {
+		r.rejectError(connection, command, err)
+		return
+	}
+	if err := r.runs.Respond(ctx, run, command.InteractionID, payload.Answers); err != nil {
+		r.rejectError(connection, command, err)
+		return
+	}
+	_ = r.publisher.AcceptedRun(connection, command, *run)
 }
 
 func (r *CommandRouter) reject(connection *Connection, command ClientCommand, businessError *BusinessError) {

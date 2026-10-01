@@ -25,8 +25,20 @@ func (p *Publisher) Accepted(connection *Connection, command ClientCommand, reco
 func (p *Publisher) AcceptedRun(connection *Connection, command ClientCommand, run Run) error {
 	return connection.Send(AckFrame{
 		Type: "ack", OK: true, RequestID: command.RequestID, Timestamp: p.now().UnixMilli(),
-		CommandType: command.Type, ThreadID: run.ChatID.String(), RunID: run.ID.String(),
+		CommandType: command.Type, ThreadID: run.ChatID.String(), RunID: run.ID.String(), InteractionID: command.InteractionID,
 	})
+}
+
+func (p *Publisher) InteractionRequested(run Run, id string, seq int64, questions []HITLQuestion) {
+	p.publish(run.UserID.String(), ThreadEvent{Type: EventInteractionRequested,
+		ThreadID: run.ChatID.String(), RunID: run.ID.String(), InteractionID: id,
+		SeqID: seq, Timestamp: p.now().UnixMilli(), Payload: InteractionRequestedPayload{Questions: questions}})
+}
+
+func (p *Publisher) InteractionResolved(run Run, id string, seq int64, answers []HITLAnswer) {
+	p.publish(run.UserID.String(), ThreadEvent{Type: EventInteractionResolved,
+		ThreadID: run.ChatID.String(), RunID: run.ID.String(), InteractionID: id,
+		SeqID: seq, Timestamp: p.now().UnixMilli(), Payload: InteractionResolvedPayload{Answers: answers}})
 }
 
 func (p *Publisher) Rejected(connection *Connection, command ClientCommand, businessError *BusinessError) error {

@@ -1,15 +1,16 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
-import { restoreContext, serializeContext } from './memory/messages.js';
+import { attachSessionStart, restoreContext, serializeContext } from './memory/messages.js';
 import { isContextLimitError } from './memory/compaction.js';
 
 import type { Settings } from './config.js';
-import { runFailed, runRequestSchema, type AgentEvent, type AgentRuntime, type RunInput } from './protocol.js';
+import { runFailed, runRequestSchema, resumeRequestSchema, type AgentEvent, type AgentRuntime, type RunInput } from './protocol.js';
 import { buildRunInput } from './memory/load-context.js';
 import { registerRagRoutes } from './rag/ingestion/index.js';
 
 const contextRequestSchema = z.object({
+  session_started_at: z.number().int().nonnegative().optional(),
   model_id: z.string().min(1),
   agent_context: z.unknown().optional(),
   history: z.array(z.object({
@@ -21,11 +22,17 @@ const contextRequestSchema = z.object({
 // 查询与手动压缩必须恢复同一份消息，避免余量统计漏掉工具结果或摘要。
 function restoreRequestContext(input: z.infer<typeof contextRequestSchema>) {
   const messages = input.agent_context == null ? [] : restoreContext(input.agent_context);
+  let needsSessionStart = input.agent_context == null;
   for (const message of input.history) {
     if (message.status !== 'completed' || !message.content || message.role === 'system') continue;
-    messages.push(message.role === 'user'
+    const contextMessage = message.role === 'user'
       ? new HumanMessage({ id: message.id, content: message.content })
-      : new AIMessage({ id: message.id, content: message.content }));
+      : new AIMessage({ id: message.id, content: message.content });
+    if (needsSessionStart && message.role === 'user') {
+      if (input.session_started_at !== undefined) attachSessionStart(contextMessage, input.session_started_at);
+      needsSessionStart = false;
+    }
+    messages.push(contextMessage);
   }
   return messages;
 }
@@ -96,7 +103,33 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
       });
     }
 
-    // hijack 表示后续响应由我们直接写入 Node 原生 response，适合 SSE 长连接。
+    return streamRun(reply, parsed.data.run_id,
+      (signal) => buildRunInput(parsed.data, settings.apiBaseUrl, signal));
+  });
+
+  app.post('/runs/resume', async (request, reply) => {
+    const parsed = resumeRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_ANSWERS', message: '回答格式不合法' } });
+    if (!runtime.prepareResume) return reply.code(409).send({ error: { code: 'INTERACTION_NOT_AVAILABLE', message: '当前模式不支持恢复' } });
+    let input: RunInput;
+    try {
+      input = runtime.prepareResume(parsed.data);
+    } catch {
+      return reply.code(409).send({ error: { code: 'INTERACTION_NOT_AVAILABLE', message: '交互已失效、已处理或答案不合法' } });
+    }
+    return streamRun(reply, input.run_id, async () => input);
+  });
+
+  // 与 /runs 一样仅由可信 Go 服务调用，浏览器不能直接访问。
+  app.post('/runs/discard', async (request, reply) => {
+    const parsed = z.object({ run_id: z.string().min(1) }).strict().safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_RUN_INPUT', message: 'run_id 不合法' } });
+    await runtime.discardRun?.(parsed.data.run_id);
+    return reply.code(204).send();
+  });
+
+  async function streamRun(reply: FastifyReply, runId: string, loadInput: (signal: AbortSignal) => Promise<RunInput>) {
+    // 首次执行和恢复执行共用 SSE 生命周期；暂停会正常结束本次响应。
     reply.hijack();
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -106,7 +139,6 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
     });
 
     const response = reply.raw;
-    const runId = parsed.data.run_id;
     // 每个 HTTP 请求有自己的 Controller，取消不能影响同一 Runtime 的其他请求。
     const controller = new AbortController();
     // SSE 注释只用于保活，不属于前端需要消费的业务事件。
@@ -128,7 +160,7 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
       // 先由 Agent 获取并选择历史，再进入运行时；访问凭证不会进入模型或运行记录。
       let input: RunInput;
       try {
-        input = await buildRunInput(parsed.data, settings.apiBaseUrl, controller.signal);
+        input = await loadInput(controller.signal);
       } catch {
         if (!response.destroyed) {
           response.write(encodeSse(runFailed(runId, 'AGENT_CONTEXT_LOAD_FAILED', '读取会话历史失败', true)));
@@ -161,7 +193,7 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
       if (!response.destroyed) response.end();
     }
     return reply;
-  });
+  }
 
   return app;
 }

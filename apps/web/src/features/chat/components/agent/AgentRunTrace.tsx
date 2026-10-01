@@ -36,7 +36,7 @@ function getRunStatusLabel(run: RunState): string {
     case 'running':
       return '正在思考';
     case 'waiting_user':
-      return '等待你的确认';
+      return '等待你的回答';
     case 'failed':
       return run.error?.message || '本次运行失败';
     case 'cancelled':
@@ -206,11 +206,13 @@ function HITLQuestionField({
 }
 
 /** requested 状态下提供一个最小可用表单，提交结果仍等待服务端 Envelope 确认。 */
-function HITLResponseForm({ block }: { block: HITLInteractionState }) {
+function HITLResponseForm({ block, runStatus }: { block: HITLInteractionState; runStatus?: RunStatus }) {
   const [draft, setDraft] = useState<HITLDraft>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isClosed = runStatus !== undefined && !ACTIVE_RUN_STATUSES.has(runStatus);
+  const isWaiting = runStatus === 'waiting_user';
   const canSubmit = block.questions.every(
     (question) => !question.required || hasHITLValue(draft[question.questionId]),
   );
@@ -218,7 +220,7 @@ function HITLResponseForm({ block }: { block: HITLInteractionState }) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!canSubmit || isSubmitting || isSubmitted) return;
+    if (!isWaiting || !canSubmit || isSubmitting || isSubmitted) return;
 
     const answers: HITLAnswer[] = block.questions.flatMap((question) => {
       const value = draft[question.questionId];
@@ -254,20 +256,22 @@ function HITLResponseForm({ block }: { block: HITLInteractionState }) {
   return (
     <li className='chat-hitl-step' data-status={block.status}>
       <form onSubmit={(event) => void handleSubmit(event)}>
-        {block.questions.map((question) => (
-          <HITLQuestionField
-            key={question.questionId}
-            question={question}
-            value={draft[question.questionId]}
-            onChange={(value) => {
-              setDraft((current) => ({ ...current, [question.questionId]: value }));
-              setError(null);
-            }}
-          />
-        ))}
+        <fieldset disabled={!isWaiting || isSubmitting || isSubmitted} className='chat-hitl-fields'>
+          {block.questions.map((question) => (
+            <HITLQuestionField
+              key={question.questionId}
+              question={question}
+              value={draft[question.questionId]}
+              onChange={(value) => {
+                setDraft((current) => ({ ...current, [question.questionId]: value }));
+                setError(null);
+              }}
+            />
+          ))}
+        </fieldset>
 
-        <button type='submit' disabled={!canSubmit || isSubmitting || isSubmitted}>
-          {isSubmitted ? '已提交，等待继续执行' : isSubmitting ? '提交中…' : '提交回答'}
+        <button type='submit' disabled={!isWaiting || !canSubmit || isSubmitting || isSubmitted}>
+          {isClosed ? '本次交互已结束' : isSubmitted ? '已提交，等待继续执行' : isSubmitting ? '提交中…' : '提交回答'}
         </button>
         {error ? <p role='alert'>{error}</p> : null}
       </form>
@@ -275,8 +279,9 @@ function HITLResponseForm({ block }: { block: HITLInteractionState }) {
   );
 }
 
-function AgentBlockList({ blocks, onOpenSource }: {
+function AgentBlockList({ blocks, onOpenSource, runStatus }: {
   blocks: AgentBlockState[];
+  runStatus?: RunStatus;
   onOpenSource?: (source: KnowledgeSource) => void;
 }) {
   if (blocks.length === 0) return null;
@@ -287,7 +292,7 @@ function AgentBlockList({ blocks, onOpenSource }: {
         block.kind === 'tool' ? (
           <ToolCallItem key={`${block.kind}:${block.id}`} block={block} onOpenSource={onOpenSource} />
         ) : block.kind === 'hitl' && block.status === 'requested' ? (
-          <HITLResponseForm key={`${block.kind}:${block.id}`} block={block} />
+          <HITLResponseForm key={`${block.kind}:${block.id}`} block={block} runStatus={runStatus} />
         ) : (
           <AgentBlockItem key={`${block.kind}:${block.id}`} block={block} />
         ),
@@ -327,7 +332,7 @@ function CompletedRunTrace({ blocks, onOpenSource }: {
         <span>Agent 过程</span>
         <small>{blocks.length} 个过程</small>
       </summary>
-      <AgentBlockList blocks={blocks} onOpenSource={onOpenSource} />
+      <AgentBlockList blocks={blocks} onOpenSource={onOpenSource} runStatus='completed' />
     </details>
   );
 }
@@ -370,7 +375,7 @@ function RunTraceContent({
           )}
         </div>
       ) : null}
-      <AgentBlockList blocks={blocks} onOpenSource={onOpenSource} />
+      <AgentBlockList blocks={blocks} onOpenSource={onOpenSource} runStatus={run.status} />
     </div>
   );
 }

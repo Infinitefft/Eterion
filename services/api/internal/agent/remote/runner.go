@@ -174,12 +174,6 @@ func (r *Runner) Run(ctx context.Context, input agent.Input, handle func(agent.E
 		return &agent.Failure{Code: modelNotAvailableCode, Message: "所选模型不可用"}
 	}
 	input.ModelID = modelID
-	runContext := ctx
-	cancel := func() {}
-	if r.runTimeout > 0 {
-		runContext, cancel = context.WithTimeout(ctx, r.runTimeout)
-	}
-	defer cancel()
 	body, err := json.Marshal(runRequest{
 		RunID: input.RunID, UserID: input.UserID, ThreadID: input.ThreadID, ModelID: input.ModelID,
 		InputMessageID: input.InputMessageID, HistoryToken: input.HistoryToken,
@@ -187,7 +181,46 @@ func (r *Runner) Run(ctx context.Context, input agent.Input, handle func(agent.E
 	if err != nil {
 		return fmt.Errorf("encode Agent run request: %w", err)
 	}
-	request, err := r.newRequest(runContext, http.MethodPost, "/runs", bytes.NewReader(body))
+	return r.stream(ctx, "/runs", input.RunID, body, handle)
+}
+
+func (r *Runner) Resume(ctx context.Context, input agent.ResumeInput, handle func(agent.Event) error) error {
+	body, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+	return r.stream(ctx, "/runs/resume", input.RunID, body, handle)
+}
+
+func (r *Runner) Discard(ctx context.Context, runID string) error {
+	body, err := json.Marshal(map[string]string{"run_id": runID})
+	if err != nil {
+		return err
+	}
+	request, err := r.newRequest(ctx, http.MethodPost, "/runs/discard", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := r.client.Do(request)
+	if err != nil {
+		return serviceFailure("discard Agent run", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return responseStatusError(response)
+	}
+	return nil
+}
+
+func (r *Runner) stream(ctx context.Context, path, runID string, body []byte, handle func(agent.Event) error) error {
+	runContext := ctx
+	cancel := func() {}
+	if r.runTimeout > 0 {
+		runContext, cancel = context.WithTimeout(ctx, r.runTimeout)
+	}
+	defer cancel()
+	request, err := r.newRequest(runContext, http.MethodPost, path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -202,6 +235,9 @@ func (r *Runner) Run(ctx context.Context, input agent.Input, handle func(agent.E
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		if path == "/runs/resume" && response.StatusCode == http.StatusConflict {
+			return &agent.Failure{Code: "INTERACTION_NOT_AVAILABLE", Message: "等待中的执行已失效，请重新发送任务", Retryable: false}
+		}
 		return responseStatusError(response)
 	}
 	if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
@@ -214,7 +250,7 @@ func (r *Runner) Run(ctx context.Context, input agent.Input, handle func(agent.E
 		if err := json.Unmarshal(data, &envelope); err != nil {
 			return protocolFailure("Node Agent returned invalid event JSON", err)
 		}
-		if envelope.RunID != input.RunID {
+		if envelope.RunID != runID {
 			return protocolFailure("Node Agent event runId does not match the request", nil)
 		}
 		event, isTerminal, err := decodeEvent(agent.EventType(eventName), envelope)
@@ -245,7 +281,7 @@ func (r *Runner) Run(ctx context.Context, input agent.Input, handle func(agent.E
 func decodeEvent(eventType agent.EventType, envelope streamEnvelope) (agent.Event, bool, error) {
 	event := agent.Event{Type: eventType, RunID: envelope.RunID}
 	switch eventType {
-	case agent.EventRunStarted:
+	case agent.EventRunStarted, agent.EventRunResumed:
 		var payload struct {
 			ModelID string `json:"modelId"`
 		}
@@ -253,6 +289,17 @@ func decodeEvent(eventType agent.EventType, envelope streamEnvelope) (agent.Even
 			return event, false, protocolFailure("invalid run.started payload", err)
 		}
 		event.ModelID = payload.ModelID
+	case agent.EventRunPaused:
+		var payload struct {
+			InteractionID string          `json:"interactionId"`
+			Questions     json.RawMessage `json:"questions"`
+		}
+		if err := decodePayload(envelope.Payload, &payload); err != nil || payload.InteractionID == "" || len(payload.Questions) == 0 {
+			return event, false, protocolFailure("invalid run.paused payload", err)
+		}
+		event.InteractionID, event.Questions = payload.InteractionID, payload.Questions
+		// 只结束这段 HTTP 响应，RunManager 仍将业务 Run 保持为 waiting_user。
+		return event, true, nil
 	case agent.EventRunCompleted:
 		var payload struct {
 			AgentContext     json.RawMessage `json:"agentContext"`

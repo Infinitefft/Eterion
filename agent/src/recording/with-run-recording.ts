@@ -1,6 +1,7 @@
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
 import { AIMessage, AIMessageChunk, BaseMessage, ToolMessage } from '@langchain/core/messages';
 import { z } from 'zod';
+import { isGraphInterrupt } from '@langchain/langgraph';
 
 import type { Settings } from '../config.js';
 import type { AgentEvent, AgentRuntime, JsonValue, RunInput } from '../protocol.js';
@@ -12,7 +13,7 @@ export interface RecordingCallbacks extends BaseCallbackHandler {
 }
 
 // 框架回调只在内部 Runtime 之间传递，不进入 HTTP、SSE 或前端协议。
-type RecordableRuntime = Pick<AgentRuntime, 'models' | 'defaultModelId' | 'compact' | 'contextUsage' | 'close'> & {
+type RecordableRuntime = Pick<AgentRuntime, 'models' | 'defaultModelId' | 'compact' | 'contextUsage' | 'close' | 'prepareResume' | 'discardRun'> & {
   stream(input: RunInput, signal?: AbortSignal, callbacks?: RecordingCallbacks): AsyncGenerator<AgentEvent>;
 };
 
@@ -23,12 +24,22 @@ const parameterNames = [
   'thinking', 'stream', 'stream_options', 'n', 'seed',
 ] as const;
 
+interface ToolRequestRecord {
+  stepId: string;
+  ended: boolean;
+  metadata: { toolCallId: string; modelStepId: string; executionStarted: boolean;
+    executionStartedAt?: number; executionArgs?: JsonValue; frameworkRunId?: string;
+    ragStages?: RagStageEvent[] };
+}
+
 /**
  * 统一管理每次 Run 的记录生命周期，同时原样转发业务事件。
  * 每次调用独立持有连接、回调和部分输出；关闭记录时直接返回原 Runtime。
  */
 export function withRunRecording(settings: Settings, runtime: RecordableRuntime): AgentRuntime {
   if (!settings.recordingEnabled) return runtime;
+  // 暂停关闭 SQLite 连接，仅保留工具关联；恢复后续写同一 Run。
+  const pausedRecords = new Map<string, { tools: Map<string, ToolRequestRecord>; content: string | undefined }>();
 
   return {
     ...(runtime.close ? { close: runtime.close.bind(runtime) } : {}),
@@ -36,6 +47,28 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
     models: runtime.models,
     ...(runtime.contextUsage ? { contextUsage: runtime.contextUsage.bind(runtime) } : {}),
     ...(runtime.compact ? { compact: runtime.compact.bind(runtime) } : {}),
+    ...(runtime.prepareResume ? { prepareResume: runtime.prepareResume.bind(runtime) } : {}),
+    async discardRun(runId) {
+      await runtime.discardRun?.(runId);
+      if (!pausedRecords.delete(runId)) return;
+      let store: ReturnType<typeof openRecordStore> | undefined;
+      try {
+        const { openRecordStore: openStore } = await import('./store.js');
+        store = openStore(settings.recordingPath);
+        const saved = store.getRun(runId);
+        if (!saved || saved.status !== 'running') return;
+        const error = { code: 'AGENT_RUN_CANCELLED', message: '等待中的任务已结束' };
+        for (const step of saved.steps) {
+          if (step.status === 'running') store.finishStep({ runId, stepId: step.step_id,
+            status: 'cancelled', error, endedAt: Date.now() });
+        }
+        store.finishRun({ runId, status: 'cancelled', error, endedAt: Date.now() });
+      } catch (error) {
+        console.warn('run recording cleanup failed', { runId, errorName: errorName(error) });
+      } finally {
+        try { store?.close(); } catch { console.warn('run recording close failed', { runId }); }
+      }
+    },
     async *stream(input, signal) {
       if (!input.user_id?.trim()) {
         console.warn('run recording skipped', { runId: input.run_id, reason: 'missing_user_id' });
@@ -51,7 +84,7 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
           settings.bochaApiKey, ...settings.models.map((model) => model.apiKey),
           settings.rag?.apiKey ?? '', settings.rag?.databaseUrl ?? '',
         ]);
-        store.startRun({
+        if (!input.resume) store.startRun({
           runId: input.run_id, userId: input.user_id, threadId: input.thread_id,
           modelId: input.model_id, question: input.messages.at(-1)?.content ?? '',
           input: { messages: input.messages }, startedAt: Date.now(),
@@ -82,13 +115,9 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
       }
 
       const activeModels = new Map<string, { text: string; chunk?: AIMessageChunk }>();
-      const toolRequests = new Map<string, {
-        stepId: string;
-        ended: boolean;
-        metadata: { toolCallId: string; modelStepId: string; executionStarted: boolean;
-          executionStartedAt?: number; executionArgs?: JsonValue; frameworkRunId?: string;
-          ragStages?: RagStageEvent[] };
-      }>();
+      const previous = pausedRecords.get(input.run_id);
+      pausedRecords.delete(input.run_id);
+      const toolRequests = previous?.tools ?? new Map<string, ToolRequestRecord>();
       const toolExecutions = new Map<string, string>();
 
       function finishPendingTools(cancelled: boolean, reason: JsonValue): void {
@@ -248,6 +277,8 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
           });
         },
         handleToolError(error: unknown, frameworkRunId) {
+          // interrupt 是控制流，不是工具失败；恢复后继续同一个工具记录。
+          if (isGraphInterrupt(error)) return;
           record(() => {
             const request = toolRequests.get(toolExecutions.get(frameworkRunId) ?? '');
             if (!request || request.ended) return;
@@ -277,12 +308,14 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
       callbacks.awaitHandlers = true;
       callbacks.name = 'eterion-local-recording';
 
-      let content: string | undefined;
+      let content: string | undefined = previous?.content;
       let terminal = false;
+      let paused = false;
       let exhausted = false;
       let escapedError: JsonValue | undefined;
       try {
         for await (const event of runtime.stream(input, signal, callbacks)) {
+          if (event.type === 'run.paused') paused = true;
           if (event.type === 'content.delta' && typeof event.payload['delta'] === 'string') {
             content = (content ?? '') + event.payload['delta'];
           } else if (event.type === 'content.completed' && typeof event.payload['content'] === 'string') {
@@ -312,7 +345,7 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
             yield event;
             resumed = true;
           } finally {
-            if (!resumed && !terminal) consumerStopped = true;
+            if (!resumed && !terminal && !paused) consumerStopped = true;
           }
         }
         exhausted = true;
@@ -320,7 +353,8 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
         escapedError = errorSnapshot(error);
         throw error;
       } finally {
-        if (!terminal) {
+        if (paused) pausedRecords.set(input.run_id, { tools: toolRequests, content });
+        if (!terminal && !paused) {
           // 消费者提前结束迭代（例如 HTTP 断开）也必须留下可复盘的收尾记录。
           const cancelled = signal?.aborted || (!exhausted && escapedError === undefined);
           const status = cancelled ? 'cancelled' : 'failed';

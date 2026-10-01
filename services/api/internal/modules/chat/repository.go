@@ -870,6 +870,65 @@ func (r *GormRepository) SaveThinking(
 	})
 }
 
+// 问题快照与 waiting_user 在同一个事务中提交，刷新页面时不会只看到一半状态。
+func (r *GormRepository) PauseInteraction(ctx context.Context, runID uuid.UUID, id string, questions []HITLQuestion, now time.Time) ([2]int64, error) {
+	var sequences [2]int64
+	raw, err := json.Marshal(interactionBlockData{Questions: questions})
+	if err != nil {
+		return sequences, err
+	}
+	err = r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
+		if run.Status != RunStatusRunning {
+			return ErrRepositoryInvalidRunState
+		}
+		first, last, err := reserveThreadSeq(tx, run.ChatID, 2)
+		if err != nil {
+			return err
+		}
+		sequences = [2]int64{first, last}
+		block := AgentBlock{ID: id, ChatID: run.ChatID, RunID: run.ID, Kind: BlockKindInteraction,
+			Status: "requested", Data: raw, Sequence: first, CreatedAt: now, UpdatedAt: now}
+		if err := tx.Create(&block).Error; err != nil {
+			return err
+		}
+		return tx.Model(run).Updates(map[string]any{"status": RunStatusWaitingUser, "updated_at": now}).Error
+	})
+	return sequences, err
+}
+
+func (r *GormRepository) ResolveInteraction(ctx context.Context, runID uuid.UUID, id string, answers []HITLAnswer, now time.Time) ([2]int64, error) {
+	var sequences [2]int64
+	err := r.withLockedRun(ctx, runID, func(tx *gorm.DB, run *Run) error {
+		if run.Status != RunStatusWaitingUser {
+			return ErrRepositoryInvalidRunState
+		}
+		var block AgentBlock
+		if err := tx.Where("run_id = ? AND id = ? AND kind = ? AND status = ?", runID, id, BlockKindInteraction, "requested").First(&block).Error; err != nil {
+			return err
+		}
+		var data interactionBlockData
+		if err := json.Unmarshal(block.Data, &data); err != nil {
+			return err
+		}
+		data.Answers = answers
+		raw, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		first, last, err := reserveThreadSeq(tx, run.ChatID, 2)
+		if err != nil {
+			return err
+		}
+		sequences = [2]int64{first, last}
+		if err := tx.Model(&block).Updates(map[string]any{"status": "resolved", "data": json.RawMessage(raw), "updated_at": now}).Error; err != nil {
+			return err
+		}
+		// 恢复不覆盖首次 started_at，也不创建新的输出消息。
+		return tx.Model(run).Updates(map[string]any{"status": RunStatusRunning, "updated_at": now}).Error
+	})
+	return sequences, err
+}
+
 func (r *GormRepository) SaveTool(
 	ctx context.Context,
 	runID uuid.UUID,

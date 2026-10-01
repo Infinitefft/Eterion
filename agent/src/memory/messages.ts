@@ -6,6 +6,17 @@ import {
 } from '@langchain/core/messages';
 import { z } from 'zod';
 
+// 仅修改模型消息；固定会话时间随上下文持久化，压缩时通过元数据准确保留。
+export function attachSessionStart(message: BaseMessage, startedAt: number): void {
+  if (typeof message.content !== 'string') throw new Error('Session start requires a text message');
+  const localTime = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).format(new Date(startedAt)).replace(' ', 'T');
+  message.content = `[会话开始时间：${localTime}+08:00]\n[时区：Asia/Shanghai；此时间固定，不代表每轮对话的当前时间]\n\n${message.content}`;
+  message.additional_kwargs.session_started_at = startedAt;
+}
+
 // 内容块由模型提供，保留图片等扩展字段，只检查基本结构和文本块正文。
 const contentBlockSchema = z.looseObject({
   type: z.string().min(1),

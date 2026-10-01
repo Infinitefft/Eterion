@@ -90,7 +90,7 @@ func (r *GormRepository) compactContext(ctx context.Context, userID, chatID uuid
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		input := agent.CompactInput{ModelID: modelID, AgentContext: latest.AgentContext, History: []agent.ContextHistoryMessage{}}
+		input := agent.CompactInput{SessionStartedAt: chat.CreatedAt.UnixMilli(), ModelID: modelID, AgentContext: latest.AgentContext, History: []agent.ContextHistoryMessage{}}
 		query := tx.Omit("AgentContext").Where("chat_id = ? AND (created_at, id) <= (?, ?)", chatID, target.CreatedAt, target.ID)
 		if latest.ID != uuid.Nil {
 			query = query.Where("(created_at, id) > (?, ?)", latest.CreatedAt, latest.ID)

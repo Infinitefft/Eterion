@@ -57,6 +57,7 @@ func (r *GormRepository) readContextUsageInput(ctx context.Context, userID, chat
 			}
 			return err
 		}
+		input.SessionStartedAt = chat.CreatedAt.UnixMilli()
 		var active int64
 		if err := tx.Model(&Run{}).Where("chat_id = ? AND status IN ?", chatID,
 			[]RunStatus{RunStatusPending, RunStatusRunning, RunStatusWaitingUser}).Count(&active).Error; err != nil {

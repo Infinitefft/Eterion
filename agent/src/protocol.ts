@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { BaseMessage } from '@langchain/core/messages';
+import { answerSchema } from './tools/ask-user.js';
 
 const messageInputSchema = z.object({
   // System Prompt 由 Agent 自己构建，调用方只传用户和 Assistant 历史。
@@ -21,7 +22,18 @@ export const runInputSchema = z
     path: ['messages'],
   });
 
-export type RunInput = z.infer<typeof runInputSchema> & { contextMessages?: BaseMessage[] };
+export type RunInput = z.infer<typeof runInputSchema> & {
+  contextMessages?: BaseMessage[];
+  resume?: { interactionId: string; answers: z.infer<typeof answerSchema>['answers'] };
+};
+
+export const resumeRequestSchema = answerSchema.extend({
+  run_id: z.string().min(1),
+  user_id: z.string().min(1),
+  thread_id: z.string().min(1),
+  interaction_id: z.string().min(1),
+}).strict();
+export type ResumeRequest = z.infer<typeof resumeRequestSchema>;
 
 // 平台调用只传本轮身份与历史读取凭证；显式 messages 继续用于独立脚本和 Direct 基线。
 export const historyRunInputSchema = z.object({
@@ -53,6 +65,8 @@ export interface AgentRuntime {
 
   /** signal 由进程内调用方传入，用于取消本次执行，不属于请求 JSON。 */
   stream(input: RunInput, signal?: AbortSignal): AsyncGenerator<AgentEvent>;
+  prepareResume?(request: ResumeRequest): RunInput;
+  discardRun?(runId: string): Promise<void>;
   compact?(modelId: string, messages: BaseMessage[], signal: AbortSignal): Promise<{
     messages: BaseMessage[];
     changed: boolean;
@@ -80,6 +94,8 @@ export type JsonValue =
 /** 框架内部事件在 Runtime 中转换为这组领域事件，Go 再映射为前端 IM envelope。 */
 export type AgentEventType =
   | 'run.started'
+  | 'run.paused'
+  | 'run.resumed'
   | 'run.completed'
   | 'run.failed'
   | 'thinking.delta'

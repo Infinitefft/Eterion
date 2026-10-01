@@ -51,6 +51,8 @@ type EventType string
 
 const (
 	EventRunStarted        EventType = "run.started"
+	EventRunPaused         EventType = "run.paused"
+	EventRunResumed        EventType = "run.resumed"
 	EventRunCompleted      EventType = "run.completed"
 	EventRunFailed         EventType = "run.failed"
 	EventThinkingDelta     EventType = "thinking.delta"
@@ -76,6 +78,8 @@ type ToolEvent struct {
 
 // Event is the normalized Agent event consumed by the chat RunManager.
 type Event struct {
+	InteractionID string
+	Questions     json.RawMessage
 	// AgentContext is internal persistence data, not frontend presentation data.
 	AgentContext     json.RawMessage
 	ContextTruncated bool
@@ -113,6 +117,20 @@ type Runner interface {
 	Close() error
 }
 
+// HITL 是可选运行能力，Direct 和已有 Runner 不必实现恢复。
+type InteractionRunner interface {
+	Resume(ctx context.Context, input ResumeInput, handle func(Event) error) error
+	Discard(ctx context.Context, runID string) error
+}
+
+type ResumeInput struct {
+	RunID         string          `json:"run_id"`
+	UserID        string          `json:"user_id"`
+	ThreadID      string          `json:"thread_id"`
+	InteractionID string          `json:"interaction_id"`
+	Answers       json.RawMessage `json:"answers"`
+}
+
 type ContextHistoryMessage struct {
 	ID      string `json:"id"`
 	Role    string `json:"role"`
@@ -121,9 +139,10 @@ type ContextHistoryMessage struct {
 }
 
 type CompactInput struct {
-	ModelID      string                  `json:"model_id"`
-	AgentContext json.RawMessage         `json:"agent_context"`
-	History      []ContextHistoryMessage `json:"history"`
+	SessionStartedAt int64                   `json:"session_started_at,omitempty"`
+	ModelID          string                  `json:"model_id"`
+	AgentContext     json.RawMessage         `json:"agent_context"`
+	History          []ContextHistoryMessage `json:"history"`
 }
 
 type CompactResult struct {

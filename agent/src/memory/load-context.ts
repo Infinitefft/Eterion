@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { runInputSchema, type RunInput, type RunRequest } from '../protocol.js';
 import { HumanMessage, AIMessage, type BaseMessage } from '@langchain/core/messages';
-import { restoreContext } from './messages.js';
+import { attachSessionStart, restoreContext } from './messages.js';
 
 const historyPageSchema = z.object({
+  session_started_at: z.number().int().nonnegative().optional(),
   messages: z.array(z.object({
     id: z.string().uuid(),
     role: z.enum(['user', 'assistant', 'system']),
@@ -32,6 +33,7 @@ export async function buildRunInput(
   let cursor: string | null = null;
   let lastMessageId: string | undefined;
   const cursors = new Set<string>();
+  let needsSessionStart = true;
   do {
     const url = new URL(`/internal/agent/runs/${request.run_id}/messages`, apiBaseUrl);
     if (cursor) url.searchParams.set('after', cursor);
@@ -46,13 +48,20 @@ export async function buildRunInput(
     const page = historyPageSchema.parse(await response.json());
     if (!cursor && page.agent_context != null) {
       contextMessages.push(...restoreContext(page.agent_context));
+      // 已保存的上下文保持原样，包括压缩后的摘要，不能给增量消息再次加时间。
+      needsSessionStart = false;
     }
     for (const message of page.messages) {
       if (message.status !== 'completed' || !message.content || message.role === 'system') continue;
       messages.push({ role: message.role, content: message.content });
-      contextMessages.push(message.role === 'user'
+      const contextMessage = message.role === 'user'
         ? new HumanMessage({ content: message.content, id: message.id })
-        : new AIMessage({ content: message.content, id: message.id }));
+        : new AIMessage({ content: message.content, id: message.id });
+      if (needsSessionStart && message.role === 'user') {
+        if (page.session_started_at !== undefined) attachSessionStart(contextMessage, page.session_started_at);
+        needsSessionStart = false;
+      }
+      contextMessages.push(contextMessage);
       lastMessageId = message.id;
     }
     cursor = page.next_cursor;

@@ -1,6 +1,8 @@
 import { AIMessage, AIMessageChunk, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
+import { Command } from '@langchain/langgraph';
+import { askUser, validateAnswers } from '../tools/ask-user.js';
 
 import { createWebAgent, buildSystemPrompt, type WebAgent } from './create-agent.js';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
@@ -34,6 +36,7 @@ const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   web_search: '搜索网页',
   web_fetch: '读取网页',
   knowledge_search: '检索知识库',
+  ask_user: '询问用户',
 };
 
 /** 初始化可复用的 Agent，返回符合 HTTP 层契约的 Runtime 对象。 */
@@ -46,9 +49,34 @@ export function createAgentRuntime(
     createWebSearchTool(settings.bochaApiKey),
     webFetch,
     knowledgeSearch.tool,
+    askUser,
   ] as const;
 
   const agents = new Map<string, WebAgent>();
+  // 框架保存执行检查点；这里仅保留跨 SSE 请求的展示累积值和恢复身份。
+  const runs = new Map<string, {
+    input: RunInput;
+    content: string;
+    activeTools: Map<string, string>;
+    contextTruncated: boolean;
+    remainingMs: number;
+    busy: boolean;
+    controller?: AbortController;
+    interaction?: { id: string; questions: z.infer<typeof askUser.schema>['questions'] };
+  }>();
+
+  async function discardRun(runId: string, finished = false) {
+    const saved = runs.get(runId);
+    if (!saved) return;
+    // 活跃执行先取消，由它的 finally 在框架停止写检查点后清理。
+    if (!finished && saved.busy && saved.controller) {
+      saved.controller.abort();
+      return;
+    }
+    runs.delete(runId);
+    const checkpointer = agents.get(saved.input.model_id)?.checkpointer;
+    if (checkpointer && typeof checkpointer !== 'boolean') await checkpointer.deleteThread(runId);
+  }
   const compactions = new Map<string, ReturnType<typeof createContextCompaction>>();
   const summaryClients = buildModelClients(settings, true);
   const fixedInputTokens = estimateTokens(buildSystemPrompt(settings.systemPrompt))
@@ -70,7 +98,23 @@ export function createAgentRuntime(
   }
 
   return withRunRecording(settings, {
-    close: knowledgeSearch.close,
+    async close() {
+      for (const runId of runs.keys()) await discardRun(runId);
+      await knowledgeSearch.close();
+    },
+    discardRun,
+    prepareResume(request) {
+      const saved = runs.get(request.run_id);
+      if (!saved || !saved.interaction || saved.busy || saved.input.user_id !== request.user_id
+        || saved.input.thread_id !== request.thread_id || saved.interaction?.id !== request.interaction_id) {
+        throw new Error('交互已失效或已处理');
+      }
+      const response = validateAnswers(saved.interaction.questions, { answers: request.answers });
+      // 同步占用，两个 HTTP 请求不能同时恢复同一检查点。
+      saved.busy = true;
+      delete saved.controller;
+      return { ...saved.input, resume: { interactionId: request.interaction_id, answers: response.answers } };
+    },
     defaultModelId: settings.defaultModelId,
     models: settings.models.map(toPublicModel),
     contextUsage(modelId, messages) {
@@ -108,61 +152,73 @@ export function createAgentRuntime(
         return;
       }
 
-      yield {
-        type: 'run.started',
-        runId,
-        payload: {
-          modelId: input.model_id,
-        },
-      };
-
-      yield {
-        type: 'content.started',
-        runId,
-        payload: {
-          format: 'markdown',
-        },
-      };
-
+      if (!input.resume && runs.has(runId)) {
+        yield runFailed(runId, 'AGENT_RUN_ACTIVE', '本次任务已在执行', false);
+        return;
+      }
+      if (!input.resume) runs.set(runId, {
+        input, content: '', activeTools: new Map<string, string>(), contextTruncated: false,
+        remainingMs: settings.runTimeoutMs, busy: true,
+      });
+      const saved = runs.get(runId);
+      if (!saved) {
+        yield runFailed(runId, 'INTERACTION_NOT_AVAILABLE', '交互已失效，请重新发送任务', false);
+        return;
+      }
       // 累积已经发出的正文，供 content.completed 返回完整内容。
-      let content = '';
+      let content = saved.content;
       // 有中途说明不等于最后已经生成有效答复。
       let hasFinalAnswer = false;
       // Agent 按模型复用，但接收结果的变量与回调属于本次 Run，不能共享。
       let finalContext: JsonValue[] | undefined;
-      let contextTruncated = false;
+      let contextTruncated = saved.contextTruncated;
 
       // 保存本次运行的失败原因，统一在最后输出终态。
       let failure: AgentError | undefined;
 
       // toolCallId -> 工具名；只保存尚未结束的调用。
-      const activeTools = new Map<string, string>();
+      const activeTools = saved.activeTools;
+      let paused = false;
 
       // 将一次 Run 的取消信号交给框架，再由 Tool 传给实际的 fetch。
       const controller = new AbortController();
+      saved.controller = controller;
 
       // any() 合并调用方取消与内部取消，保留最先触发取消的 reason。
       const signal = externalSignal
         ? AbortSignal.any([externalSignal, controller.signal])
         : controller.signal;
 
-      // 总超时限制整轮执行时间，不是每次模型或 Tool 调用重新计时。
+      // 同一个 Run 累计执行时间，等待用户期间不消耗执行预算。
+      const segmentStartedAt = Date.now();
+      let timeoutTriggered = false;
       const timeout = setTimeout(() => {
+        timeoutTriggered = true;
         controller.abort();
-      }, settings.runTimeoutMs);
+      }, Math.max(1, saved.remainingMs));
 
       try {
         // 已经取消的请求不再启动模型；异常统一交给 catch 收尾。
         signal.throwIfAborted();
 
+        yield { type: input.resume ? 'run.resumed' : 'run.started', runId,
+          payload: { modelId: input.model_id } };
+        if (!input.resume) yield { type: 'content.started', runId, payload: { format: 'markdown' } };
+        signal.throwIfAborted();
+
         // stream() 真正启动 Agent Loop；不用手动执行 Tool 或回填 ToolMessage。
         const events = await agent.stream(
-          {
+          input.resume ? new Command({
+            resume: { [input.resume.interactionId]: { answers: input.resume.answers } },
+          }) : {
             messages: input.contextMessages ?? input.messages,
           },
           {
             // messages 接收文本片段，updates 接收完整步骤结果。
             streamMode: STREAM_MODES,
+            configurable: {
+              thread_id: input.run_id,
+            },
             context: {
               ...(input.user_id === undefined ? {} : { userId: input.user_id }),
               onContextTruncated() { contextTruncated = true; },
@@ -223,6 +279,7 @@ export function createAgentRuntime(
 
           // updates 按节点提供状态变化，Middleware 的更新可能带出旧消息。
           for (const [node, update] of Object.entries(data)) {
+            if (node === '__interrupt__') continue;
             for (const message of update.messages ?? []) {
               // 只从模型节点登记新调用，避免 Middleware 重放旧消息时重复发 tool.started。
               if (node === MODEL_NODE && AIMessage.isInstance(message)) {
@@ -301,8 +358,22 @@ export function createAgentRuntime(
         // 即使底层流正常关闭，也不能把已经取消的执行标记为成功。
         signal.throwIfAborted();
 
+        const snapshot = await agent.graph.getState({ configurable: { thread_id: runId } });
+        signal.throwIfAborted();
+        const pending = snapshot.tasks.flatMap((task) => task.interrupts)[0];
+        if (pending) {
+          if (!pending.id) throw new Error('Interrupt omitted its id');
+          const { questions } = askUser.schema.parse(pending.value);
+          saved.content = content;
+          saved.contextTruncated = contextTruncated;
+          saved.remainingMs -= Date.now() - segmentStartedAt;
+          saved.interaction = { id: pending.id, questions };
+          paused = true;
+          // 一个暂停事件结束当前 SSE 段，业务 Run 仍未结束。
+        }
+
         // 除有效答复和工具终态外，还必须取得最终上下文，供后续持久化使用。
-        if (!hasFinalAnswer || activeTools.size > 0 || finalContext === undefined) {
+        if (!paused && (!hasFinalAnswer || activeTools.size > 0 || finalContext === undefined)) {
           failure = {
             code: 'AGENT_INCOMPLETE_RESPONSE',
             message: 'Agent 未生成有效的最终答复',
@@ -314,10 +385,9 @@ export function createAgentRuntime(
 
         // 优先看 Run 的信号，避免底层 AbortError 被工具包装后误判成普通异常。
         if (signal.aborted) {
-          // 此时尚未进入 finally，内部 controller 只可能被超时计时器取消。
-          // 两个来源都取消时，用 reason 判断最先触发的是哪一个。
+          // 区分执行超时和显式取消；等待用户不在计时范围内。
           const timedOut =
-            controller.signal.aborted &&
+            timeoutTriggered &&
             signal.reason === controller.signal.reason;
 
           failure = {
@@ -353,6 +423,17 @@ export function createAgentRuntime(
         clearTimeout(timeout);
         // 同时通知仍在等待的模型或网络请求停止工作。
         controller.abort();
+        if (!paused) await discardRun(runId, true);
+      }
+
+      if (paused && saved.interaction) {
+        // 先结束框架迭代和计时器，再开放恢复入口。
+        saved.busy = false;
+        yield { type: 'run.paused', runId, payload: {
+          interactionId: saved.interaction.id,
+          questions: JSON.parse(JSON.stringify(saved.interaction.questions)) as JsonValue,
+        } };
+        return;
       }
 
       if (failure) {

@@ -21,9 +21,10 @@ type historyMessage struct {
 }
 
 type historyPage struct {
-	AgentContext json.RawMessage  `json:"agent_context,omitempty"`
-	Messages     []historyMessage `json:"messages"`
-	NextCursor   *string          `json:"next_cursor"`
+	SessionStartedAt int64            `json:"session_started_at"`
+	AgentContext     json.RawMessage  `json:"agent_context,omitempty"`
+	Messages         []historyMessage `json:"messages"`
+	NextCursor       *string          `json:"next_cursor"`
 }
 
 // Only an active Run's bearer capability can read its history. The capability
@@ -68,7 +69,8 @@ func RegisterHistoryRoute(engine *gin.Engine, runs *RunManager, repository *Gorm
 // Return raw facts, including status. Model-context selection belongs to Node.
 // The input message bounds every page so later turns cannot enter this Run.
 func (r *GormRepository) readHistoryPage(ctx context.Context, run Run, cursor uuid.UUID, includeContext ...bool) (*historyPage, error) {
-	if _, err := r.FindChatOwned(ctx, run.UserID, run.ChatID); err != nil {
+	chat, err := r.FindChatOwned(ctx, run.UserID, run.ChatID)
+	if err != nil {
 		return nil, err
 	}
 	var anchor Message
@@ -103,7 +105,7 @@ func (r *GormRepository) readHistoryPage(ctx context.Context, run Run, cursor uu
 	if err := query.Omit("AgentContext").Order("created_at ASC, id ASC").Limit(pageSize + 1).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	page := &historyPage{AgentContext: saved, Messages: make([]historyMessage, 0, len(rows))}
+	page := &historyPage{SessionStartedAt: chat.CreatedAt.UnixMilli(), AgentContext: saved, Messages: make([]historyMessage, 0, len(rows))}
 	if len(rows) > pageSize {
 		rows = rows[:pageSize]
 		cursor := rows[len(rows)-1].ID.String()
