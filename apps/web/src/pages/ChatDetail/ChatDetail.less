@@ -397,91 +397,188 @@
 
 button.chat-tool-heading {
   cursor: pointer;
+
+  &:hover {
+    .chat-tool-label {
+      color: var(--ink);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(64, 92, 245, 0.3);
+    outline-offset: 2px;
+  }
 }
 
-.chat-tool-heading svg,
-.chat-tool-websites svg {
+.chat-tool-icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+
+  &.chat-tool-icon-web {
+    color: #2563eb;
+  }
+
+  &.chat-tool-icon-knowledge {
+    color: #2e7d32;
+  }
+
+  &.chat-tool-icon-general {
+    color: #475569;
+  }
 }
 
-.chat-tool-heading span {
+.chat-tool-label {
+  flex: 0 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.chat-tool-chevron {
-  transform: rotate(-90deg);
+.chat-tool-status-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  .chat-tool-call[data-status='running'] & {
+    color: #2563eb;
+  }
+
+  .chat-tool-call[data-status='failed'] & {
+    color: #b42318;
+  }
 }
 
-.chat-tool-chevron.is-expanded {
-  transform: rotate(0deg);
+.chat-tool-chevron {
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+  transition: transform 160ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  &.is-expanded {
+    transform: rotate(0deg);
+  }
 }
 
 .chat-tool-websites {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin: 8px 0 2px;
+  padding: 0;
+  list-style: none;
+
+  li {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  a {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    color: #62656b;
+    font-size: 12.5px;
+    line-height: 1.5;
+    background: transparent;
+    border-radius: 6px;
+    transition: color 120ms ease, background-color 120ms ease;
+
+    svg {
+      flex-shrink: 0;
+      color: #71757d;
+    }
+
+    span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &:hover {
+      color: var(--ink);
+      background: var(--hover);
+    }
+  }
+}
+
+.chat-tool-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   margin: 10px 0 2px;
   padding: 0;
   list-style: none;
 }
 
-.chat-tool-websites li {
+.chat-source-item {
+  display: flex;
   min-width: 0;
-  max-width: 100%;
 }
 
-.chat-tool-websites a {
+.chat-source-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 84px;
+  padding: 6px 4px 4px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+
+  &:hover:not(:disabled) {
+    background: var(--hover);
+
+    .chat-source-icon {
+      color: #2b561e;
+    }
+
+    .chat-source-name {
+      color: var(--ink);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid #5a7d4e;
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+}
+
+.chat-source-icon {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  color: #62656b;
-  font-size: 13px;
-  line-height: 1.5;
-  background: #f4f4f5;
-  border-radius: 999px;
+  justify-content: center;
+  color: #4b6343;
+  background: transparent;
+  border: 0;
+  transition: color 140ms ease;
 }
 
-.chat-tool-websites a:hover {
-  color: var(--ink);
-  background: var(--hover);
-}
-
-.chat-tool-websites span {
+.chat-source-name {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #41473d;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-tool-sources {
-  display: grid;
-  gap: 6px;
-  margin: 10px 0 2px;
-  padding: 0;
-  list-style: none;
-  button {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    max-width: 420px;
-    padding: 8px 10px;
-    border-radius: 7px;
-    color: #525e4d;
-    background: #f0f3e9;
-    border: 0;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    &:hover { background: #e5ebda; }
-    &:focus-visible { outline: 2px solid #677a5c; outline-offset: 2px; }
-  }
-  svg { flex-shrink: 0; margin-top: 2px; }
-  span { min-width: 0; overflow-wrap: anywhere; }
-  strong, small { display: block; }
-  strong { font-size: 13px; font-weight: 550; }
-  small { margin-top: 2px; font-size: 11px; color: #6b7566; }
-}
 .chat-tool-call[data-status='failed'],
 .chat-tool-error {
   color: #b42318;
@@ -493,6 +590,7 @@ button.chat-tool-heading {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+
 
 .chat-hitl-step {
   color: var(--muted);

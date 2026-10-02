@@ -63,7 +63,7 @@ export function KnowledgeSourcePanel({ source, onClose }: {
   });
 
   useEffect(() => {
-    closeRef.current?.focus();
+    closeRef.current?.focus({ preventScroll: true });
   }, []);
 
   useEffect(() => {

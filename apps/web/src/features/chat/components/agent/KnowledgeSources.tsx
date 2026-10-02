@@ -24,19 +24,32 @@ export function KnowledgeSources({ sources, onOpenSource }: {
   sources: KnowledgeSource[];
   onOpenSource?: (source: KnowledgeSource) => void;
 }) {
-  return <ul className='chat-tool-sources' aria-label='引用的文件片段'>
-    {sources.map((source) => (
-      <li key={source.chunkId}>
-        <button type='button' onClick={() => onOpenSource?.(source)} disabled={!onOpenSource}>
-          <FileText size={15} aria-hidden='true' />
-          <span>
-            <strong>{source.fileName}</strong>
-            {source.headingPath.length > 0 && <small>{source.headingPath.join(' / ')}</small>}
-            {(source.startOffset === undefined || source.endOffset === undefined)
-              && <small>此片段暂无精确位置</small>}
-          </span>
-        </button>
-      </li>
-    ))}
-  </ul>;
+  return (
+    <ul className='chat-tool-sources' aria-label='引用的文件片段'>
+      {sources.map((source) => {
+        const headingText = source.headingPath.join(' / ');
+        const tooltip = headingText ? `${source.fileName}\n(${headingText})` : source.fileName;
+        return (
+          <li key={source.chunkId} className='chat-source-item'>
+            <button
+              type='button'
+              className='chat-source-card'
+              onClick={() => onOpenSource?.(source)}
+              disabled={!onOpenSource}
+              title={tooltip}
+              data-heading={headingText || undefined}
+            >
+              <div className='chat-source-icon'>
+                <FileText size={34} strokeWidth={1.75} aria-hidden='true' />
+              </div>
+              <span className='chat-source-name'>
+                {source.fileName}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
+

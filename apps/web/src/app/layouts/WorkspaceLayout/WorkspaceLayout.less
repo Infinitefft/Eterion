@@ -4,7 +4,9 @@
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
   background: var(--canvas);
   transition: grid-template-columns 220ms cubic-bezier(0.4, 0, 0.2, 1);
 
@@ -24,7 +26,8 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: var(--sidebar-width);
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
   overflow: hidden;
   border-right: 1px solid rgba(0, 0, 0, 0.035);
   background: var(--sidebar);
@@ -108,8 +111,10 @@
 
 .sidebar-scroll-area {
   min-height: 0;
+  height: 100%;
   padding: 2px 10px 18px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-color: #d4d4d6 transparent;
   scrollbar-width: thin;
 }
@@ -703,7 +708,9 @@
 .workspace-main {
   position: relative;
   min-width: 0;
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar-open-button {

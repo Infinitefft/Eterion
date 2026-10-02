@@ -49,6 +49,10 @@ export function ChatDetail() {
 
     const store = useIMStore.getState();
 
+    if (window.scrollY !== 0 || document.documentElement.scrollTop !== 0) {
+      window.scrollTo(0, 0);
+    }
+
     // 首轮列表结束后再加载，避免列表的迟到响应覆盖快照写入的会话信息。
     store.setActiveThread(threadId);
 
@@ -85,7 +89,7 @@ export function ChatDetail() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setSelectedSource(null);
-        sourceTriggerRef.current?.focus();
+        sourceTriggerRef.current?.focus({ preventScroll: true });
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -121,7 +125,7 @@ export function ChatDetail() {
         source={selectedSource.source}
         onClose={() => {
           setSelectedSource(null);
-          sourceTriggerRef.current?.focus();
+          sourceTriggerRef.current?.focus({ preventScroll: true });
         }}
       />}
     </section>

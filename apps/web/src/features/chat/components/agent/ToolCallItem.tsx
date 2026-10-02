@@ -74,13 +74,17 @@ export function ToolCallItem({ block, onOpenSource }: {
 
   const heading = (
     <>
-      {isWebTool ? <Globe size={15} aria-hidden='true' />
-        : block.name === 'knowledge_search' ? <Search size={15} aria-hidden='true' />
-          : <Wrench size={15} aria-hidden='true' />}
-      <span>{label}</span>
-      {isRunning ? <LoaderCircle className='chat-run-spinner' size={14} aria-hidden='true' />
-        : isFailed ? <CircleAlert size={14} aria-hidden='true' />
-          : <Check size={14} aria-hidden='true' />}
+      <span className={`chat-tool-icon-box chat-tool-icon-${isWebTool ? 'web' : block.name === 'knowledge_search' ? 'knowledge' : 'general'}`}>
+        {isWebTool ? <Globe size={14} aria-hidden='true' />
+          : block.name === 'knowledge_search' ? <Search size={14} aria-hidden='true' />
+            : <Wrench size={14} aria-hidden='true' />}
+      </span>
+      <span className='chat-tool-label'>{label}</span>
+      <span className='chat-tool-status-wrap'>
+        {isRunning ? <LoaderCircle className='chat-run-spinner' size={13} aria-hidden='true' />
+          : isFailed ? <CircleAlert size={13} aria-hidden='true' />
+            : <Check size={13} aria-hidden='true' />}
+      </span>
       {websites.length > 0 || sources.length > 0 ? (
         <ChevronDown className={expanded ? 'chat-tool-chevron is-expanded' : 'chat-tool-chevron'} size={14} aria-hidden='true' />
       ) : null}
