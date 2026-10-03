@@ -109,14 +109,12 @@
   }
 }
 
-.sidebar-scroll-area {
+.sidebar-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
-  height: 100%;
   padding: 2px 10px 18px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-color: #d4d4d6 transparent;
-  scrollbar-width: thin;
+  overflow: hidden;
 }
 
 .sidebar-primary-nav,
@@ -126,7 +124,13 @@
 }
 
 .conversation-nav {
+  align-content: start;
+  min-height: 0;
   gap: 1px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: #d4d4d6 transparent;
+  scrollbar-width: thin;
 }
 
 .sidebar-primary-nav {
@@ -184,7 +188,11 @@
 }
 
 .recent-section {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
   margin-top: 28px;
+  overflow: hidden;
 }
 
 .section-heading-row {

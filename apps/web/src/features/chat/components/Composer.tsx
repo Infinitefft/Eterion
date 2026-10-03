@@ -42,7 +42,6 @@ export function Composer({ threadId }: ComposerProps) {
   const [compactionNotice, setCompactionNotice] = useState<string | null>(null);
   const [compactionNoticeDismissed, setCompactionNoticeDismissed] = useState(false);
   const [showContextUsage, setShowContextUsage] = useState(false);
-  const [contextRevision, setContextRevision] = useState(0);
   const compactionController = useRef<AbortController | null>(null);
 
   const user = useAuthStore((state) => state.user);
@@ -60,7 +59,6 @@ export function Composer({ threadId }: ComposerProps) {
     setCompactionNotice(null);
     setCompactionNoticeDismissed(false);
     setShowContextUsage(false);
-    setContextRevision(0);
   }
 
   useLayoutEffect(() => {
@@ -99,7 +97,6 @@ export function Composer({ threadId }: ComposerProps) {
     try {
       const result = await compactThreadContext(threadId, selectedModelId, controller.signal);
       if (!isCurrentView(view)) return;
-      setContextRevision((value) => value + 1);
       setCompactionNotice(result.truncated
         ? '上下文已压缩，部分较早内容已舍弃；原始聊天记录仍保留。'
         : result.changed ? '上下文已压缩，聊天记录保持不变。' : '当前无需压缩。');
@@ -241,12 +238,12 @@ export function Composer({ threadId }: ComposerProps) {
 
   return (
     <>
-      {showContextUsage ? (
+      {user ? (
         <ContextUsageNotice
           threadId={threadId}
           modelId={selectedModelId}
           busy={!isThreadReady || isThreadBusy || isSubmitting || isCompacting}
-          revision={contextRevision}
+          visible={showContextUsage}
           onClose={() => setShowContextUsage(false)}
         />
       ) : null}

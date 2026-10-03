@@ -1,10 +1,11 @@
 import { ArrowDown } from 'lucide-react';
-import { useEffect, useRef, useState, type UIEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type UIEvent } from 'react';
 
 import type { ThreadId } from '@/service/im/types';
 import { useIMStore } from '@/store/im-store';
 
 import { ChatMessageList } from './ChatMessageList';
+
 import type { KnowledgeSource } from './agent/KnowledgeSources';
 
 interface ChatConversationProps {
@@ -20,9 +21,13 @@ const BOTTOM_THRESHOLD_PX = 96;
  */
 export function ChatConversation({ threadId, onOpenSource }: ChatConversationProps) {
   const viewportRef = useRef<HTMLElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const followsBottomRef = useRef(true);
   const frameRef = useRef<number | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const isThreadReady = useIMStore(
+    (state) => state.detailLoadStateByThread[threadId]?.status === 'ready',
+  );
 
   function scrollToBottom(behavior: ScrollBehavior) {
     const viewport = viewportRef.current;
@@ -33,8 +38,9 @@ export function ChatConversation({ threadId, onOpenSource }: ChatConversationPro
     viewport.scrollTo({ top: viewport.scrollHeight, behavior });
   }
 
-  useEffect(() => {
-    followsBottomRef.current = true;
+  useLayoutEffect(() => {
+    // 缓存会话切换和异步快照加载都在 DOM 提交后定位，避免用旧内容高度滚动。
+    scrollToBottom('instant');
 
     const scheduleFollow = () => {
       if (frameRef.current !== null) return;
@@ -50,35 +56,20 @@ export function ChatConversation({ threadId, onOpenSource }: ChatConversationPro
       });
     };
 
-    scheduleFollow();
-
-    /**
-     * 这里使用 Store 的原生 subscribe，而不是让组件读取全部详情后重新渲染。
-     * Conversation 自己只关心“内容高度变了”，真正的数据渲染交给 MessageList。
-     */
-    const unsubscribe = useIMStore.subscribe((current, previous) => {
-      /** 只判断当前 Thread 中会影响对话高度的数据是否发生变化。 */
-      const currentDetail = current.detailsByThread[threadId];
-      const previousDetail = previous.detailsByThread[threadId];
-
-      if (
-        currentDetail?.messages !== previousDetail?.messages ||
-        currentDetail?.runs !== previousDetail?.runs ||
-        currentDetail?.blocks !== previousDetail?.blocks
-      ) {
-        scheduleFollow();
-      }
-    });
+    // 观察实际布局，也覆盖工具展开、图片加载和输入框改变视口高度的情况。
+    const observer = new ResizeObserver(scheduleFollow);
+    if (contentRef.current) observer.observe(contentRef.current);
+    if (viewportRef.current) observer.observe(viewportRef.current);
 
     return () => {
-      unsubscribe();
+      observer.disconnect();
 
       if (frameRef.current !== null) {
         window.cancelAnimationFrame(frameRef.current);
         frameRef.current = null;
       }
     };
-  }, [threadId]);
+  }, [threadId, isThreadReady]);
 
   function handleScroll(event: UIEvent<HTMLElement>) {
     const viewport = event.currentTarget;
@@ -102,7 +93,9 @@ export function ChatConversation({ threadId, onOpenSource }: ChatConversationPro
         aria-label='对话内容'
         onScroll={handleScroll}
       >
-        <ChatMessageList threadId={threadId} onOpenSource={onOpenSource} />
+        <div ref={contentRef}>
+          <ChatMessageList threadId={threadId} onOpenSource={onOpenSource} />
+        </div>
       </section>
 
       {showScrollButton ? (

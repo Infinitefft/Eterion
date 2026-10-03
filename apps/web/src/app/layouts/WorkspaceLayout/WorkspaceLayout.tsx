@@ -99,7 +99,7 @@ export function WorkspaceLayout() {
           </div>
         </header>
 
-        <div className='sidebar-scroll-area'>
+        <div className='sidebar-body'>
           <nav className='sidebar-primary-nav' aria-label='工作区导航'>
             <NavLink
               className={({ isActive }) => `sidebar-link ${isActive ? 'is-active' : ''}`}
