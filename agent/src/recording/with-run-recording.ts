@@ -83,7 +83,7 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
         const { openRecordStore: openStore } = await import('./store.js');
         store = openStore(settings.recordingPath, [
           settings.bochaApiKey, ...settings.models.map((model) => model.apiKey),
-          settings.rag?.apiKey ?? '', settings.rag?.databaseUrl ?? '',
+          settings.rag?.apiKey ?? '', settings.rag?.databaseUrl ?? '', settings.rag?.rerank?.apiKey ?? '',
         ]);
         if (!input.resume) store.startRun({
           runId: input.run_id, userId: input.user_id, threadId: input.thread_id,
@@ -254,7 +254,7 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
             else {
               if (!args || typeof args !== 'object') return;
               const event = args as RagStageEvent;
-              if (event.name !== 'query_embedding' && event.name !== 'vector_search') return;
+              if (!['query_embedding', 'vector_search', 'rerank', 'filter'].includes(event.name)) return;
               const stages = request.metadata.ragStages ?? [];
               const index = stages.findIndex((stage) => stage.name === event.name);
               if (index < 0) stages.push(event);

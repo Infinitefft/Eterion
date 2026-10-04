@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 import type { EmbeddedChunk, SearchHit } from './types.js';
 
 const INSERT_BATCH_SIZE = 100;
-export const SEARCH_LIMIT = 5;
+export const SEARCH_LIMIT = 20;
 
 type SearchRow = Omit<SearchHit, 'startOffset' | 'endOffset'> & {
   startOffset: number | null;

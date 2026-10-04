@@ -40,7 +40,7 @@ export async function beginIngestionRecording(
     const { openRecordStore } = await import('./store.js');
     store = openRecordStore(settings.recordingPath, [
       settings.bochaApiKey, ...settings.models.map((model) => model.apiKey),
-      settings.rag?.apiKey ?? '', settings.rag?.databaseUrl ?? '',
+      settings.rag?.apiKey ?? '', settings.rag?.databaseUrl ?? '', settings.rag?.rerank?.apiKey ?? '',
     ]);
     store.startIngestion({ ingestionId, ...identity.data, fileId: input.fileId,
       format: input.format, sourceText: input.text, startedAt });

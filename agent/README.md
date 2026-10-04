@@ -346,10 +346,30 @@ OpenAI-compatible 接口相似并不意味着这些行为一致，当前也没�
 
 - 评估：按 `AGENTS.md` 的固定场景覆盖直接回复、仅搜索、搜索后阅读、参数错误、网络失败、内网拒绝和网页指令干扰，记录完成质量、延迟与成本。RAG/Memory 实现后再补引用和召回评估。
 - Memory：计划区分 Run 短期状态、Thread 历史与摘要、数据库长期事实；再明确每层的读写、更新、淘汰和错误记忆处理，不把数据库逻辑分散进 Prompt。
-- RAG：计划通过 `knowledge_search` Tool 暴露；检索、重排和引用等步骤按明确问题逐步实现。
+- RAG：已通过 `knowledge_search` 接入向量召回、重排和来源展示；当前检索规则见下节。
 - Skills：有真实任务后再加入 `skills/<name>/SKILL.md` 和可选 references，声明名称、描述与需要的工具，按需加载，不提前创建空模块。
 - 文件产物：若后续加入写文件工具，再管理元数据与下载引用，不向调用方暴露任意本地绝对路径。
 
 用户重点参与 Agent 编排、Tools 调用、RAG、Skills、Memory 和评估核心的设计与实现。
 环境配置、入口接线、重复类型、普通 mock、基础测试和文档同步可以由编码代理完成。
 本轮经用户授权接入 Agent 服务及取消链路，并保留核心逻辑注释；完整协作要求以 [AGENTS.md](AGENTS.md) 为准。
+
+## RAG 候选重排与阈值过滤（2026-10-04）
+
+当前链路为：query Embedding → 当前用户范围向量 Top 20 → qwen3-rerank → 分数 ≥ 阈值 → 最多返回 5 个 Chunk。切分、入库和 Embedding 模型不变，无需重新入库。
+
+在 `agent/.env` 显式配置以下字段（进程环境优先）：
+
+```dotenv
+RERANK_API_KEY=<同业务空间的阿里百炼 Key>
+RERANK_URL=https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks
+RERANK_SCORE_THRESHOLD=0.5
+```
+
+重排使用原 query 和每个候选的“标题路径 + 正文”，不发送完整历史；模型固定为 `qwen3-rerank`，默认问答检索任务。原生 HTTP 协议将 query/documents/top_n 放在顶层，读取顶层 results，通过 index 对齐候选。同分保留向量召回顺序；最多返回 5 个，允许为空，不补充低分片段。
+
+Key 和完整 URL 不从 Embedding 配置推导；配置在首次检索时校验，缺失不影响普通聊天和文件入库。阈值允许 0～1，默认 0.5 只是实验起点，不能把重排分数当作跨请求的绝对置信度。单次请求含响应读取限时 30 秒，响应 Run 取消，无自动重试；故障按工具失败处理，不回退到未重排候选。无候选不请求重排，正常空结果包含资料不足提醒，不要求模型重复同一查询。
+
+监控在现有工具 metadata 中记录重排与过滤阶段、耗时、阈值、候选/达标/最终数量，以及候选 ID、重排分数和入选状态；不新增表。只有最终片段进入 ToolMessage 和现有三项评测，前端来源协议不变。被过滤正文不送入回答模型，重排 Key 纳入脱敏。
+
+离线验证：`pnpm test`、`pnpm check:rag-search-recording`；监控执行 `pnpm typecheck`、`pnpm check:rag-search`、`pnpm check:rag-evaluation`。2026-10-04 最小真实接口验证使用两段合成文本，确认端点/权限和 0.5 过滤可用；未重跑用户评测集，不承诺指标提升。全量测试中原有 4 项 Agent Runtime 断言失败已在修改前 HEAD 复现，涉及上下文终态和工具上限，与重排无关。

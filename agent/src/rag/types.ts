@@ -35,11 +35,18 @@ export interface IngestionResult {
 }
 
 export interface RagConfig {
+  rerank?: RerankConfig;
   apiKey: string;
   baseUrl: string;
   model: string;
   dimensions: number;
   databaseUrl: string;
+}
+
+export interface RerankConfig {
+  apiKey: string;
+  url: string;
+  threshold: number;
 }
 
 export interface SearchInput {
@@ -61,4 +68,5 @@ export interface SearchHit {
   endOffset?: number;
   // 余弦距离越小越接近，不是置信度。
   cosineDistance: number;
+  rerankScore?: number;
 }

@@ -13,6 +13,7 @@ AGENTS.md
 !/services/api/docs/openapi.yaml
 !/services/api/docs/spec.go
 /scripts/
+/apps/web/scripts/
 /storage/
 /monitor/
 /.run-records/

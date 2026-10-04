@@ -106,6 +106,11 @@ export function loadSettings(environ?: NodeJS.ProcessEnv): Settings {
   return {
     // 这里只读取配置，创建入库组件时才校验和连接，避免影响普通聊天。
     rag: {
+      rerank: {
+        apiKey: value(environ, 'RERANK_API_KEY'),
+        url: value(environ, 'RERANK_URL'),
+        threshold: Number(value(environ, 'RERANK_SCORE_THRESHOLD', '0.5')),
+      },
       apiKey: value(environ, 'EMBEDDING_API_KEY'),
       baseUrl: value(environ, 'EMBEDDING_BASE_URL'),
       model: value(environ, 'EMBEDDING_MODEL', 'text-embedding-v4'),
