@@ -11,6 +11,7 @@ import type { ThreadId } from './types';
 interface ThreadSynchronization {
   promise: Promise<void>;
   isCurrent(): boolean;
+  needsResync: boolean;
 }
 
 /** 全局 IM Runtime 中真正需要长期持有的对象。 */
@@ -108,11 +109,32 @@ export function initializeIMService(): IMService {
           store.setConnectionState(event.state);
           if (runtime?.service === service) {
             invalidateSynchronizations(runtime);
+            if (event.state.status === 'connected' && store.connection.status !== 'connected') {
+              // 首次连接也可能晚于详情快照；连接建立后补齐这段窗口。
+              if (store.activeThreadId) {
+                const pending = runtime.synchronizations.get(store.activeThreadId);
+                if (pending?.isCurrent()) {
+                  pending.needsResync = true;
+                } else {
+                  void synchronizeThread(store.activeThreadId);
+                }
+              }
+            }
+          }
+          if (event.state.status === 'disconnected' || event.state.status === 'failed') {
+            console.warn('IM connection interrupted', event.state);
           }
           break;
         }
         case 'sequenceGap': {
-          // 缺口的自动恢复在后续模块接入，本步只支持详情加载和手动重试。
+          console.warn('IM sequence gap; synchronizing thread', event.gap);
+          const pending = runtime?.synchronizations.get(event.gap.threadId);
+          if (pending?.isCurrent()) {
+            // resumeThread 同步发布的新缺口不能被当前任务的去重逻辑吞掉。
+            pending.needsResync = true;
+          } else {
+            void synchronizeThread(event.gap.threadId);
+          }
           break;
         }
       }
@@ -159,6 +181,7 @@ export function synchronizeThread(threadId: ThreadId): Promise<void> {
   }
 
   const task: ThreadSynchronization = {
+    needsResync: true,
     isCurrent: () => (
       runtime === currentRuntime &&
       currentRuntime.synchronizations.get(threadId) === task &&
@@ -169,18 +192,17 @@ export function synchronizeThread(threadId: ThreadId): Promise<void> {
     // 先登记任务，再执行请求，使同步订阅和 StrictMode 重复调用也能复用它。
     promise: Promise.resolve().then(async () => {
       try {
-        if (!task.isCurrent()) {
-          return;
-        }
+        while (task.needsResync && task.isCurrent()) {
+          task.needsResync = false;
+          service.pauseThread(threadId);
+          const snapshot = await fetchThreadSnapshot(threadId);
+          if (!task.isCurrent()) {
+            return;
+          }
 
-        service.pauseThread(threadId);
-        const snapshot = await fetchThreadSnapshot(threadId);
-        if (!task.isCurrent()) {
-          return;
+          useIMStore.getState().applySnapshot(snapshot);
+          service.resumeThread(threadId, snapshot.lastSeqId);
         }
-
-        useIMStore.getState().applySnapshot(snapshot);
-        service.resumeThread(threadId, snapshot.lastSeqId);
       } catch (error) {
         if (task.isCurrent()) {
           useIMStore.getState().setThreadDetailLoadState(threadId, {

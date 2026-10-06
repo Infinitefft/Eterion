@@ -69,6 +69,17 @@ pnpm install
 `MODEL_NAME`、`MODEL_API_KEY` 和可选的 `MODEL_BASE_URL` 配置通用模型。
 配置读取位置固定为 `agent/.env`，不依赖启动命令所在目录。
 
+本地默认聊天模型为 DeepSeek-Flash，API 模型名使用官方的 `deepseek-flash`。新增配置如下，沿用已有的 `DEEPSEEK_API_KEY` 和可选的 `DEEPSEEK_BASE_URL`，Pro 仍可独立启用：
+
+```dotenv
+DEEPSEEK_FLASH_MODEL=deepseek-flash
+DEFAULT_MODEL_ID=deepseek-flash
+DEEPSEEK_FLASH_CONTEXT_WINDOW=258000
+DEEPSEEK_FLASH_AUTO_COMPACT_TOKEN_LIMIT=100000
+```
+
+这里沿用现有 Pro 的应用上下文预算，不代表厂商最大窗口；继续使用非思考模式和 4096 tokens 输出上限。配置修改后依次重启 Agent、Go API，再刷新前端；Go 在启动时缓存模型目录和默认模型。已有对话中手动选中的模型仍需自行切换。
+
 私人基础提示词放在 `agent/prompts/system.local.md`，由 `.env` 中的
 `SYSTEM_PROMPT_FILE=prompts/system.local.md` 指定。首次使用时自行创建
 `prompts/system.local.md` 并填写提示词；私人文件已被 Git 忽略。
@@ -355,6 +366,8 @@ OpenAI-compatible 接口相似并不意味着这些行为一致，当前也没�
 本轮经用户授权接入 Agent 服务及取消链路，并保留核心逻辑注释；完整协作要求以 [AGENTS.md](AGENTS.md) 为准。
 
 ## RAG 候选重排与阈值过滤（2026-10-04）
+
+2026-10-05 切分实验：完整 Embedding 输入预算调整为 256 个代理 token（含标题路径），overlap 继续按正文预算的 12.5%，当前目标最多 32。切分与 Embedding 校验、监控共用预算常量。已有文件需重新入库才会生效；本次没有自动重建索引，后续使用同一批约 10 条问题比较效果。
 
 当前链路为：query Embedding → 当前用户范围向量 Top 20 → qwen3-rerank → 分数 ≥ 阈值 → 最多返回 5 个 Chunk。切分、入库和 Embedding 模型不变，无需重新入库。
 

@@ -49,6 +49,16 @@ const MODEL_DEFINITIONS = [
     iconUrl: '/model-icons/doubao-seed-2-1-pro.png',
   },
   {
+    id: 'deepseek-flash',
+    provider: 'deepseek',
+    providerName: 'DeepSeek',
+    modelPrefix: 'DEEPSEEK_FLASH',
+    providerPrefix: 'DEEPSEEK',
+    modelName: 'DeepSeek-Flash',
+    baseUrl: 'https://api.deepseek.com',
+    iconUrl: '/model-icons/deepseek-v4-pro.png',
+  },
+  {
     id: 'deepseek-v4-pro',
     provider: 'deepseek',
     providerName: 'DeepSeek',

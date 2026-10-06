@@ -4,7 +4,7 @@ import type { EmbeddedChunk, RagChunk, RagConfig } from './types.js';
 // 监控采集：批次观察器不接收密钥或向量；记录失败不影响业务执行。
 import type { IngestionRecording } from '../recording/ingestion.js';
 
-export const EMBEDDING_TEXT_BUDGET = 512;
+export const EMBEDDING_TEXT_BUDGET = 256;
 export const MAX_OVERLAP_BUDGET = 64;
 
 // 这是切分预算的代理编码器，不代表阿里 text-embedding-v4 的真实 tokenizer。

@@ -98,7 +98,7 @@ try {
   assert.deepEqual(chunks.map((row) => row.embedding_text), sentTexts);
   for (const chunk of chunks) {
     assert.equal(input.text.slice(chunk.start_offset, chunk.end_offset), chunk.content);
-    assert.ok(chunk.budget_tokens <= 512);
+    assert.ok(chunk.budget_tokens <= 256);
     assert.equal(JSON.parse(chunk.metadata).budgetTokenizer, 'cl100k_base');
     assert.equal(Object.hasOwn(chunk, 'embedding'), false);
   }

@@ -6,6 +6,7 @@ import { useIMStore } from '@/store/im-store';
 
 import { destroyIMService, getIMService, synchronizeThread } from './index';
 
+import type { IMServiceListener } from './imService';
 import type { ServerThreadEvent } from './protocol';
 import type { IMConnectionState, IMTransportListener } from './transport';
 import type { ThreadSnapshot } from './types';
@@ -89,7 +90,7 @@ function emitDelta(seqId: number, delta: string) {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   useIMStore.getState().reset();
   useAuthStore.getState().setSession({
     access_token: 'test-token', token_type: 'Bearer', expires_in: 900,
@@ -107,6 +108,116 @@ afterEach(() => {
 });
 
 describe('thread snapshot synchronization', () => {
+  it('recovers a missing delta and delivers buffered completion events once', async () => {
+    vi.mocked(fetchThreadSnapshot).mockResolvedValueOnce(snapshot());
+    await synchronizeThread('thread-a');
+    const response = deferred<ThreadSnapshot>();
+    vi.mocked(fetchThreadSnapshot).mockReturnValueOnce(response.promise);
+    const listener = vi.fn<IMServiceListener>();
+    getIMService().subscribe(listener);
+    emitDelta(4, 'D'); // 3 never arrives.
+    await Promise.resolve();
+    expect(fetchThreadSnapshot).toHaveBeenCalledTimes(2);
+    const recovered = snapshot();
+    recovered.lastSeqId = 3;
+    recovered.messages[0].content = 'ABC';
+    const completed: ServerThreadEvent = {
+      type: 'message.completed', threadId: 'thread-a', runId: 'run-a',
+      messageId: 'assistant-a', seqId: 5, timestamp: 5,
+      payload: { role: 'assistant', format: 'plain_text', content: 'ABCD',
+        status: 'completed', createdAt: 1, completedAt: 5, error: null },
+    };
+    emit(completed);
+    emit({
+      type: 'run.status', threadId: 'thread-a', runId: 'run-a', seqId: 6, timestamp: 6,
+      payload: { modelId: 'test', inputMessageId: 'user-a', outputMessageId: 'assistant-a',
+        status: 'completed', createdAt: 1, startedAt: 1, completedAt: 6, error: null },
+    });
+    const pending = synchronizeThread('thread-a');
+    response.resolve(recovered);
+    await pending;
+    emitDelta(4, 'D');
+    emit(completed);
+    expect(useIMStore.getState().detailsByThread['thread-a']?.messages[0])
+      .toMatchObject({ content: 'ABCD', status: 'completed' });
+    expect(useIMStore.getState().detailsByThread['thread-a']?.runs[0].status).toBe('completed');
+    expect(listener.mock.calls.filter(([event]) => event.kind === 'envelope')).toHaveLength(3);
+  });
+
+  it('fetches another snapshot when resuming reveals a new gap', async () => {
+    const response = deferred<ThreadSnapshot>();
+    const recovered = snapshot();
+    recovered.lastSeqId = 4;
+    recovered.messages[0].content = 'ABCD';
+    vi.mocked(fetchThreadSnapshot).mockReturnValueOnce(response.promise)
+      .mockResolvedValueOnce(recovered);
+    const pending = synchronizeThread('thread-a');
+    await Promise.resolve();
+    emitDelta(3, 'C');
+    emitDelta(5, 'E'); // 4 is missing while the first snapshot is in flight.
+    response.resolve(snapshot());
+    await pending;
+    expect(fetchThreadSnapshot).toHaveBeenCalledTimes(2);
+    expect(useIMStore.getState().detailsByThread['thread-a']?.messages[0].content).toBe('ABCDE');
+  });
+
+  it('recovers completion during disconnection without any new websocket frame', async () => {
+    vi.mocked(fetchThreadSnapshot).mockResolvedValueOnce(snapshot());
+    await synchronizeThread('thread-a');
+    useIMStore.getState().setActiveThread('thread-a');
+    transport.state = { ...transport.state, status: 'disconnected', disconnectedAt: 3 };
+    transport.listener?.({ type: 'state.changed', state: transport.state });
+    const completed = snapshot();
+    completed.lastSeqId = 6;
+    completed.messages[0] = { ...completed.messages[0], content: 'complete', status: 'completed' };
+    completed.runs = [{
+      id: 'run-a', threadId: 'thread-a', modelId: 'test', inputMessageId: 'user-a',
+      outputMessageId: 'assistant-a', status: 'completed', createdAt: 1,
+      startedAt: 1, completedAt: 6, error: null,
+    }];
+    vi.mocked(fetchThreadSnapshot).mockResolvedValueOnce(completed);
+    transport.state = { ...transport.state, status: 'connected', connectedAt: 7 };
+    transport.listener?.({ type: 'state.changed', state: transport.state });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetchThreadSnapshot).toHaveBeenCalledTimes(2);
+    expect(useIMStore.getState().detailsByThread['thread-a']?.messages[0])
+      .toMatchObject({ content: 'complete', status: 'completed' });
+    expect(useIMStore.getState().detailsByThread['thread-a']?.runs[0].status).toBe('completed');
+  });
+
+  it('isolates a throwing listener from Store updates and other listeners', () => {
+    const service = getIMService();
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    service.subscribe(() => { throw new Error('listener failure'); });
+    const listener = vi.fn();
+    service.subscribe(listener);
+    emitDelta(1, 'A');
+    emitDelta(2, 'B');
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(errorLog).toHaveBeenCalledTimes(2);
+    errorLog.mockRestore();
+  });
+
+  it('refreshes a snapshot started before the socket opened', async () => {
+    transport.state = { ...transport.state, status: 'connecting' };
+    const response = deferred<ThreadSnapshot>();
+    const latest = snapshot();
+    latest.lastSeqId = 3;
+    latest.messages[0].content = 'ABC';
+    vi.mocked(fetchThreadSnapshot).mockReturnValueOnce(response.promise)
+      .mockResolvedValueOnce(latest);
+    useIMStore.getState().setActiveThread('thread-a');
+    const pending = synchronizeThread('thread-a');
+    await Promise.resolve();
+    transport.state = { ...transport.state, status: 'connected' };
+    transport.listener?.({ type: 'state.changed', state: transport.state });
+    response.resolve(snapshot());
+    await pending;
+    expect(fetchThreadSnapshot).toHaveBeenCalledTimes(2);
+    expect(useIMStore.getState().detailsByThread['thread-a']?.messages[0].content).toBe('ABC');
+  });
+
   it('drops covered events and applies later deltas once, preserving local messages and unread', async () => {
     const response = deferred<ThreadSnapshot>();
     vi.mocked(fetchThreadSnapshot).mockReturnValueOnce(response.promise);

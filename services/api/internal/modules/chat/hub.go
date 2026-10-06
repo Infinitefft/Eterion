@@ -64,6 +64,8 @@ func (h *Hub) PublishToUser(userID string, event ThreadEvent) int {
 				"connection_id", connection.ID(),
 				"user_id", userID,
 				"event_type", event.Type,
+				"thread_id", event.ThreadID,
+				"seq_id", event.SeqID,
 				"error", err,
 			)
 			continue
