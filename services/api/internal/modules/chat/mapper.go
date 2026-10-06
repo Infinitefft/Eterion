@@ -63,7 +63,7 @@ func snapshotBlock(block AgentBlock) (any, error) {
 		}
 		return SnapshotThinkingBlock{
 			Kind: BlockKindThinking, ID: block.ID, ThreadID: block.ChatID.String(),
-			RunID: block.RunID.String(), Status: block.Status, Content: data.Content,
+			RunID: block.RunID.String(), Status: block.Status, Content: data.Content, ContentOffset: data.ContentOffset,
 		}, nil
 	case BlockKindTool:
 		var data toolBlockData
@@ -74,7 +74,7 @@ func snapshotBlock(block AgentBlock) (any, error) {
 			Kind: BlockKindTool, ID: block.ID, ThreadID: block.ChatID.String(),
 			RunID: block.RunID.String(), Status: block.Status, Name: data.Name,
 			DisplayName: data.DisplayName, Args: data.Args, Summary: data.Summary,
-			Result: data.Result, Error: data.Error,
+			Result: data.Result, Error: data.Error, ContentOffset: data.ContentOffset,
 		}, nil
 	case BlockKindInteraction:
 		var data interactionBlockData

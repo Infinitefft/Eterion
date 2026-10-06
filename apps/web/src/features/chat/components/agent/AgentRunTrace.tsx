@@ -1,7 +1,7 @@
-import { Ban, Check, CircleAlert, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { Ban, Check, ChevronDown, CircleAlert, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
+import { useId, useState, type FormEvent } from 'react';
 
-import { getAssistantContentParts } from '@/features/chat/model/chatSelectors';
+import thinkingProcessIcon from '@/assets/icons/thinking-process.png';
 import { getIMService } from '@/service/im';
 import type {
   AgentBlockState,
@@ -15,6 +15,7 @@ import type {
 } from '@/service/im/types';
 import { useIMStore } from '@/store/im-store';
 
+import { ThinkingBlock } from './ThinkingBlock';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolCallItem } from './ToolCallItem';
 import type { KnowledgeSource } from './KnowledgeSources';
@@ -289,7 +290,9 @@ function AgentBlockList({ blocks, onOpenSource, runStatus }: {
   return (
     <ul className='chat-run-steps'>
       {blocks.map((block) =>
-        block.kind === 'tool' ? (
+        block.kind === 'thinking' ? (
+          <ThinkingBlock key={`${block.kind}:${block.id}`} block={block} />
+        ) : block.kind === 'tool' ? (
           <ToolCallItem key={`${block.kind}:${block.id}`} block={block} onOpenSource={onOpenSource} />
         ) : block.kind === 'hitl' && block.status === 'requested' ? (
           <HITLResponseForm key={`${block.kind}:${block.id}`} block={block} runStatus={runStatus} />
@@ -316,66 +319,66 @@ function RunStatusIcon({ run }: { run: RunState }) {
   }
 }
 
-function CompletedRunTrace({ blocks, onOpenSource }: {
+/** 正文首次出现时收起一次，后续正文增量不覆盖用户的手动展开选择。 */
+function RunProcess({ blocks, run, hasContent, onOpenSource }: {
   blocks: AgentBlockState[];
+  run: RunState;
+  hasContent: boolean;
   onOpenSource?: (source: KnowledgeSource) => void;
 }) {
-  if (blocks.length === 0) return null;
-
-  if (blocks.some((block) => block.kind === 'tool')) {
-    return <div className='chat-run-trace chat-run-trace-completed'><AgentBlockList blocks={blocks} onOpenSource={onOpenSource} /></div>;
+  const [view, setView] = useState({ hasContent, expanded: !hasContent });
+  const contentId = useId();
+  if (view.hasContent !== hasContent) {
+    setView({ hasContent, expanded: !hasContent });
   }
+  const isWorking = run.status === 'running' || run.status === 'pending';
 
   return (
-    <details className='chat-run-trace chat-run-trace-completed'>
-      <summary>
-        <span>Agent 过程</span>
-        <small>{blocks.length} 个过程</small>
-      </summary>
-      <AgentBlockList blocks={blocks} onOpenSource={onOpenSource} runStatus='completed' />
-    </details>
+    <div className='chat-run-process'>
+      <button type='button' className='chat-run-process-heading'
+        aria-expanded={view.expanded} aria-controls={contentId}
+        onClick={() => setView({ hasContent, expanded: !view.expanded })}>
+        <img src={thinkingProcessIcon} width={18} height={18} alt='' aria-hidden='true'
+          className={isWorking ? 'chat-run-process-icon is-active' : 'chat-run-process-icon'} />
+        <span>思考过程</span>
+        <ChevronDown size={14} className={view.expanded ? 'chat-tool-chevron is-expanded' : 'chat-tool-chevron'} aria-hidden='true' />
+      </button>
+      <div id={contentId} hidden={!view.expanded}>
+        <AgentBlockList blocks={blocks} onOpenSource={onOpenSource} runStatus={run.status} />
+      </div>
+    </div>
   );
 }
 
-function RunTraceContent({
-  run,
-  blocks,
-  hideThinkingIndicator,
-  showHeading = true,
-  onOpenSource,
-}: {
+function RunTraceContent({ run, blocks, hideThinkingIndicator, hasContent, onOpenSource }: {
   run: RunState;
   blocks: AgentBlockState[];
   hideThinkingIndicator: boolean;
-  showHeading?: boolean;
+  hasContent: boolean;
   onOpenSource?: (source: KnowledgeSource) => void;
 }) {
   const isActive = ACTIVE_RUN_STATUSES.has(run.status);
-  const statusLabel = getRunStatusLabel(run);
+  const processBlocks = blocks.filter((block) => block.kind !== 'hitl');
+  // 用户问题始终在折叠区外，避免正文中的执行说明把待回答表单一起藏起来。
+  const interactions = blocks.filter((block) => block.kind === 'hitl');
+  const showHeading = run.status !== 'completed' &&
+    !(isActive && (processBlocks.length > 0 || hideThinkingIndicator));
 
-  if (hideThinkingIndicator && isActive && blocks.length === 0) {
-    return null;
-  }
-
-  if (run.status === 'completed') {
-    return <CompletedRunTrace blocks={blocks} onOpenSource={onOpenSource} />;
-  }
+  if (blocks.length === 0 && !showHeading) return null;
 
   return (
     <div className='chat-run-trace' data-status={run.status}>
       {showHeading ? (
         <div className='chat-run-heading'>
-          {run.status === 'running' && !hideThinkingIndicator ? (
-            <ThinkingIndicator />
-          ) : (
-            <>
-              <RunStatusIcon run={run} />
-              <span>{statusLabel}</span>
-            </>
+          {run.status === 'running' ? <ThinkingIndicator /> : (
+            <><RunStatusIcon run={run} /><span>{getRunStatusLabel(run)}</span></>
           )}
         </div>
       ) : null}
-      <AgentBlockList blocks={blocks} onOpenSource={onOpenSource} runStatus={run.status} />
+      {processBlocks.length > 0 ? (
+        <RunProcess blocks={processBlocks} run={run} hasContent={hasContent} onOpenSource={onOpenSource} />
+      ) : null}
+      <AgentBlockList blocks={interactions} onOpenSource={onOpenSource} runStatus={run.status} />
     </div>
   );
 }
@@ -397,27 +400,11 @@ export function AgentRunTrace({
 
   const blocks = detail.blocks.filter((block) => block.runId === runId);
 
-  if (content === undefined || blocks.length === 0) {
-    return (
-      <>
-        <RunTraceContent run={run} blocks={blocks} hideThinkingIndicator={hideThinkingIndicator} onOpenSource={onOpenSource} />
-        {content ? <p className='chat-message-text'>{content}</p> : null}
-      </>
-    );
-  }
-
-  const parts = getAssistantContentParts(content, blocks);
-  const firstBlockPart = parts.find((part) => part.kind === 'blocks');
-  return parts.map((part) => part.kind === 'text' ? (
-    <p key={`text:${part.key}`} className='chat-message-text'>{part.content}</p>
-  ) : (
-    <RunTraceContent
-      key={`blocks:${part.key}`}
-      run={run}
-      blocks={part.blocks}
-      hideThinkingIndicator={hideThinkingIndicator}
-      showHeading={part === firstBlockPart}
-      onOpenSource={onOpenSource}
-    />
-  ));
+  return (
+    <>
+      <RunTraceContent run={run} blocks={blocks} hideThinkingIndicator={hideThinkingIndicator}
+        hasContent={Boolean(content?.trim())} onOpenSource={onOpenSource} />
+      {content ? <p className='chat-message-text'>{content}</p> : null}
+    </>
+  );
 }

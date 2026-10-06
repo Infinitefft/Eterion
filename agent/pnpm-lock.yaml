@@ -5,6 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
+  '@langchain/openai@1.5.10':
+    hash: f817c84e1fc146020207c268a6a503ebaef89d807e048d23cd9fa8ac80491d77
+    path: patches/@langchain__openai@1.5.10.patch
   langchain@1.5.10:
     hash: 3c2034e946b0a1c68ce6cf4ac5ea9876679db467a2be4fa91dd4ed7ae6485d24
     path: patches/langchain@1.5.10.patch
@@ -21,7 +24,7 @@ importers:
         version: 1.4.13(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))(zod@4.4.3)
       '@langchain/openai':
         specifier: 1.5.10
-        version: 1.5.10(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))
+        version: 1.5.10(patch_hash=f817c84e1fc146020207c268a6a503ebaef89d807e048d23cd9fa8ac80491d77)(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))
       '@langchain/textsplitters':
         specifier: 1.0.1
         version: 1.0.1(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))
@@ -992,7 +995,7 @@ snapshots:
       - react
       - react-dom
 
-  '@langchain/openai@1.5.10(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))':
+  '@langchain/openai@1.5.10(patch_hash=f817c84e1fc146020207c268a6a503ebaef89d807e048d23cd9fa8ac80491d77)(@langchain/core@1.2.9(openai@7.5.0(zod@4.4.3)))':
     dependencies:
       '@langchain/core': 1.2.9(openai@7.5.0(zod@4.4.3))
       js-tiktoken: 1.0.21

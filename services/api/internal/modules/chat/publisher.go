@@ -100,19 +100,19 @@ func (p *Publisher) MessageCompleted(run Run, message Message, seq int64, eventE
 	})
 }
 
-func (p *Publisher) ThinkingDelta(run Run, thinkingID string, seq int64, delta string) {
+func (p *Publisher) ThinkingDelta(run Run, thinkingID string, seq int64, delta string, contentOffset *int) {
 	p.publish(run.UserID.String(), ThreadEvent{
 		Type: EventThinkingDelta, ThreadID: run.ChatID.String(), SeqID: seq,
 		Timestamp: p.now().UnixMilli(), RunID: run.ID.String(), ThinkingID: thinkingID,
-		Payload: ThinkingDeltaPayload{Delta: delta},
+		Payload: ThinkingDeltaPayload{Delta: delta, ContentOffset: contentOffset},
 	})
 }
 
-func (p *Publisher) ThinkingCompleted(run Run, thinkingID string, seq int64, content string) {
+func (p *Publisher) ThinkingCompleted(run Run, thinkingID string, seq int64, content string, status string, contentOffset *int) {
 	p.publish(run.UserID.String(), ThreadEvent{
 		Type: EventThinkingCompleted, ThreadID: run.ChatID.String(), SeqID: seq,
 		Timestamp: p.now().UnixMilli(), RunID: run.ID.String(), ThinkingID: thinkingID,
-		Payload: ThinkingCompletedPayload{Content: content},
+		Payload: ThinkingCompletedPayload{Content: content, Status: status, ContentOffset: contentOffset},
 	})
 }
 

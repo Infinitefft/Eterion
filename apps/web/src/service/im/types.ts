@@ -148,10 +148,11 @@ export interface RunState {
 }
 
 /** Thinking Block 在前端可能处于的状态。 */
-export type ThinkingBlockStatus = 'streaming' | 'completed';
+export type ThinkingBlockStatus = 'streaming' | 'completed' | 'failed' | 'cancelled';
 
 /** 模型公开 Thinking 内容在前端合并后的状态。 */
 export interface ThinkingBlockState {
+  contentOffset?: number;
   /** Agent Block 的判别字段。 */
   kind: 'thinking';
 

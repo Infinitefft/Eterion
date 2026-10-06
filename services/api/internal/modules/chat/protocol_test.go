@@ -28,3 +28,28 @@ func TestProtocolUsesFrontendFieldNames(t *testing.T) {
 		}
 	}
 }
+
+func TestThinkingAndToolSnapshotPositions(t *testing.T) {
+	for _, kind := range []string{BlockKindThinking, BlockKindTool} {
+		raw := json.RawMessage(`{"content":"thought","contentOffset":4,"name":"web_search"}`)
+		block, err := snapshotBlock(AgentBlock{Kind: kind, Status: "cancelled", Data: raw})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(block)
+		var decoded map[string]any
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded["contentOffset"] != float64(4) || decoded["status"] != "cancelled" {
+			t.Fatalf("lost snapshot data: %s", encoded)
+		}
+	}
+	block, err := snapshotBlock(AgentBlock{Kind: BlockKindThinking, Status: "completed", Data: json.RawMessage(`{"content":"old thought"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if block.(SnapshotThinkingBlock).ContentOffset != nil {
+		t.Fatal("old snapshot must preserve missing offset")
+	}
+}

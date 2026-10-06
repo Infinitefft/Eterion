@@ -255,6 +255,9 @@ export const useIMStore = create<IMStore>()(
                 threadId: event.threadId,
                 runId: event.runId,
                 status: 'streaming',
+                contentOffset: event.payload.contentOffset ?? detail.messages.find(
+                  (message) => message.role === 'assistant' && message.runId === event.runId,
+                )?.content.length ?? 0,
                 content: event.payload.delta,
               })
             }
@@ -276,14 +279,16 @@ export const useIMStore = create<IMStore>()(
 
             if (block) {
               block.content = event.payload.content;
-              block.status = 'completed';
+              block.status = event.payload.status ?? 'completed';
+              block.contentOffset ??= event.payload.contentOffset;
             } else {
               detail.blocks.push({
                 kind: 'thinking',
                 id: event.thinkingId,
                 threadId: event.threadId,
                 runId: event.runId,
-                status: 'completed',
+                status: event.payload.status ?? 'completed',
+                contentOffset: event.payload.contentOffset ?? 0,
                 content: event.payload.content, 
               })
             }

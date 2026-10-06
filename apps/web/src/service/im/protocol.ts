@@ -365,6 +365,7 @@ export interface RunStatusEvent extends ThreadEventEnvelope<'run.status', RunSta
 
 /** 一段可公开 Thinking 的流式增量。 */
 export interface ThinkingDeltaPayload {
+  contentOffset?: number;
   /** 本次追加到 Thinking Block 的文本。 */
   delta: string;
 }
@@ -382,6 +383,8 @@ export interface ThinkingDeltaEvent extends ThreadEventEnvelope<'thinking.delta'
 
 /** Thinking 结束时返回的最终权威内容。 */
 export interface ThinkingCompletedPayload {
+  contentOffset?: number;
+  status?: 'completed' | 'failed' | 'cancelled';
   /** 完整 Thinking 内容，用于校正之前的增量拼接结果。 */
   content: string;
 }

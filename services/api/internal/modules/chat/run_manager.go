@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"github.com/Infinitefft/Eterion/services/api/internal/agent"
 	"github.com/google/uuid"
@@ -43,7 +44,7 @@ type RunRepository interface {
 	AppendDelta(ctx context.Context, runID, messageID uuid.UUID, delta string, now time.Time) (int64, error)
 	CompleteRun(ctx context.Context, runID, messageID uuid.UUID, fullText string, format TextFormat, agentContext json.RawMessage, now time.Time) (int64, int64, error)
 	EndRun(ctx context.Context, runID, messageID uuid.UUID, status RunStatus, code, message string, retryable bool, now time.Time) (EndRunResult, error)
-	SaveThinking(ctx context.Context, runID uuid.UUID, blockID, content, status string, now time.Time) (int64, error)
+	SaveThinking(ctx context.Context, runID uuid.UUID, blockID, content, status string, contentOffset *int, now time.Time) (int64, error)
 	SaveTool(ctx context.Context, runID uuid.UUID, blockID, status string, data toolBlockData, now time.Time) (int64, error)
 }
 
@@ -170,6 +171,7 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 		contentError    *agent.Failure
 		thinkingID      string
 		thinkingContent string
+		thinkingOffset  *int
 	)
 	tools := make(map[string]toolBlockData)
 	var resume *agent.ResumeInput
@@ -288,14 +290,16 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 			}
 			if thinkingID == "" {
 				thinkingID = uuid.NewString()
+				offset := len(utf16.Encode([]rune(fullText)))
+				thinkingOffset = &offset
 			}
 			thinkingContent += event.Delta
 			now := m.now()
-			seq, err := m.repository.SaveThinking(ctx, run.ID, thinkingID, thinkingContent, "streaming", now)
+			seq, err := m.repository.SaveThinking(ctx, run.ID, thinkingID, thinkingContent, "streaming", thinkingOffset, now)
 			if err != nil {
 				return err
 			}
-			m.publisher.ThinkingDelta(*run, thinkingID, seq, event.Delta)
+			m.publisher.ThinkingDelta(*run, thinkingID, seq, event.Delta, thinkingOffset)
 			return nil
 
 		case agent.EventThinkingCompleted:
@@ -304,14 +308,19 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 			}
 			if thinkingID == "" {
 				thinkingID = uuid.NewString()
+				offset := len(utf16.Encode([]rune(fullText)))
+				thinkingOffset = &offset
 			}
 			thinkingContent = event.Content
+			if event.Status == "" {
+				event.Status = "completed"
+			}
 			now := m.now()
-			seq, err := m.repository.SaveThinking(ctx, run.ID, thinkingID, thinkingContent, "completed", now)
+			seq, err := m.repository.SaveThinking(ctx, run.ID, thinkingID, thinkingContent, event.Status, thinkingOffset, now)
 			if err != nil {
 				return err
 			}
-			m.publisher.ThinkingCompleted(*run, thinkingID, seq, thinkingContent)
+			m.publisher.ThinkingCompleted(*run, thinkingID, seq, thinkingContent, event.Status, thinkingOffset)
 			thinkingID, thinkingContent = "", ""
 			return nil
 
@@ -322,7 +331,8 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 			if _, exists := tools[event.Tool.CallID]; exists {
 				return errors.New("agent started a duplicate tool call")
 			}
-			data := toolBlockData{Name: event.Tool.Name, DisplayName: event.Tool.DisplayName, Args: event.Tool.Args}
+			offset := len(utf16.Encode([]rune(fullText)))
+			data := toolBlockData{Name: event.Tool.Name, DisplayName: event.Tool.DisplayName, Args: event.Tool.Args, ContentOffset: &offset}
 			now := m.now()
 			seq, err := m.repository.SaveTool(ctx, run.ID, event.Tool.CallID, "running", data, now)
 			if err != nil {
@@ -330,7 +340,7 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 			}
 			tools[event.Tool.CallID] = data
 			m.publisher.ToolStarted(*run, event.Tool.CallID, seq, ToolStartedPayload{
-				Name: data.Name, DisplayName: data.DisplayName, Args: data.Args,
+				Name: data.Name, DisplayName: data.DisplayName, Args: data.Args, ContentOffset: data.ContentOffset,
 			})
 			return nil
 
@@ -502,6 +512,9 @@ func (m *RunManager) endRun(
 		return err
 	}
 	applyTerminalState(run, output, status, code, message, retryable, now)
+	for _, thinking := range result.ThinkingTerminals {
+		m.publisher.ThinkingCompleted(*run, thinking.ID, thinking.Seq, thinking.Content, string(status), thinking.ContentOffset)
+	}
 	for _, tool := range result.ToolFailures {
 		m.publisher.ToolFailed(*run, tool.ToolCallID, tool.Seq, tool.Error)
 	}

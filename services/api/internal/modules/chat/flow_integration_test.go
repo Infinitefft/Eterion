@@ -208,10 +208,27 @@ func (h *integrationChat) serveAgent(w http.ResponseWriter, r *http.Request) {
 	emit("run.started", map[string]any{"modelId": input.ModelID})
 	emit("content.started", map[string]any{"format": "markdown"})
 	question := input.Messages[len(input.Messages)-1].Content
+	if question == "thinking-flow" {
+		emit("content.delta", map[string]any{"delta": "中😀"})
+		emit("thinking.delta", map[string]any{"delta": "first"})
+		emit("thinking.completed", map[string]any{"content": "first"})
+		emit("tool.started", map[string]any{"toolCallId": "search", "name": "web_search", "args": map[string]any{}})
+		emit("tool.completed", map[string]any{"toolCallId": "search"})
+		emit("content.delta", map[string]any{"delta": "文"})
+		emit("thinking.delta", map[string]any{"delta": "second"})
+		emit("thinking.completed", map[string]any{"content": "second", "status": "completed"})
+		emit("content.completed", map[string]any{"content": "中😀文", "format": "markdown", "status": "completed"})
+		emit("run.completed", map[string]any{})
+		return
+	}
+	if strings.HasSuffix(question, "thinking") {
+		emit("thinking.delta", map[string]any{"delta": "partial thought"})
+	}
+
 	if question == "cancel-tool" || question == "fail-tool" {
 		for _, id := range []string{"completed-search", "failed-search", "active-search"} {
 			emit("tool.started", map[string]any{
-				"toolCallId": id, "name": "web_search", "displayName": "搜索网页", "args": map[string]any{"query": id},
+				"toolCallId": id, "name": "web_search", "displayName": "鎼滅储缃戦〉", "args": map[string]any{"query": id},
 			})
 			if id == "completed-search" {
 				emit("tool.completed", map[string]any{"toolCallId": id, "summary": "saved result", "result": map[string]any{"title": "saved title"}})
@@ -495,6 +512,8 @@ func TestPostgresIMFailureAndCancellation(t *testing.T) {
 		{"cancel-content", RunStatusCancelled, ""},
 		{"cancel-tool", RunStatusCancelled, ""},
 		{"fail-tool", RunStatusFailed, "FIXTURE_FAILED"},
+		{"cancel-thinking", RunStatusCancelled, ""},
+		{"fail-thinking", RunStatusFailed, "FIXTURE_FAILED"},
 	} {
 		t.Run(scenario.question, func(t *testing.T) {
 			h := newIntegrationChat(t)
@@ -516,6 +535,24 @@ func TestPostgresIMFailureAndCancellation(t *testing.T) {
 			snapshot := h.checkTerminal(ack, scenario.status, "partial answer", scenario.errorCode)
 			if strings.HasSuffix(scenario.question, "tool") {
 				h.checkToolTerminals(ack, snapshot, scenario.status)
+			}
+			if strings.HasSuffix(scenario.question, "thinking") {
+				if len(snapshot.Blocks) != 1 || snapshot.Blocks[0].Status != string(scenario.status) {
+					t.Fatalf("unfinished thought after termination: %+v", snapshot.Blocks)
+				}
+				found := false
+				for _, frame := range h.frames {
+					if frame.Type == string(EventThinkingCompleted) {
+						payload := decodeIntegrationPayload[ThinkingCompletedPayload](t, frame)
+						if payload.Status != string(scenario.status) || payload.Content != "partial thought" {
+							t.Fatalf("incorrect thought terminal: %+v", payload)
+						}
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("missing thinking terminal event")
+				}
 			}
 			h.checkRepeatedCancel(ack, snapshot)
 		})
@@ -592,5 +629,33 @@ func (h *integrationChat) checkToolTerminals(ack integrationFrame, snapshot inte
 	if last[0].Type != string(EventToolFailed) || last[0].ToolCallID != "active-search" ||
 		last[1].Type != string(EventMessageCompleted) || last[2].Type != string(EventRunStatus) {
 		h.t.Fatalf("wrong terminal event order: %+v", last)
+	}
+}
+
+func TestPostgresIMThinkingPositions(t *testing.T) {
+	h := newIntegrationChat(t)
+	ack := h.submit(CommandThreadStart, uuid.NewString(), "thinking-flow")
+	snapshot := h.checkTerminal(ack, RunStatusCompleted, "中😀文", "")
+	if len(snapshot.Blocks) != 3 {
+		t.Fatalf("blocks = %+v", snapshot.Blocks)
+	}
+	for index, offset := range []int{3, 3, 4} {
+		block := snapshot.Blocks[index]
+		if block.ContentOffset == nil || *block.ContentOffset != offset {
+			t.Fatalf("wrong UTF-16 offset: %+v", block)
+		}
+	}
+	var offsets []int
+	for _, frame := range h.frames {
+		if frame.Type == string(EventThinkingDelta) {
+			payload := decodeIntegrationPayload[ThinkingDeltaPayload](t, frame)
+			if payload.ContentOffset == nil {
+				t.Fatal("missing event offset")
+			}
+			offsets = append(offsets, *payload.ContentOffset)
+		}
+	}
+	if !reflect.DeepEqual(offsets, []int{3, 4}) {
+		t.Fatalf("thinking offsets: %v", offsets)
 	}
 }

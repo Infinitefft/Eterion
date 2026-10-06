@@ -44,11 +44,19 @@ type ToolFailure struct {
 	Error      ProtocolError
 }
 
+type ThinkingTerminal struct {
+	ID            string
+	Seq           int64
+	Content       string
+	ContentOffset *int
+}
+
 type EndRunResult struct {
-	PreviousStatus RunStatus
-	ToolFailures   []ToolFailure
-	MessageSeq     int64
-	StatusSeq      int64
+	ThinkingTerminals []ThinkingTerminal
+	PreviousStatus    RunStatus
+	ToolFailures      []ToolFailure
+	MessageSeq        int64
+	StatusSeq         int64
 }
 
 // Repository 让 Service 和 RunManager 不依赖 GORM 的具体写法，方便后续测试。
@@ -142,7 +150,7 @@ type Repository interface {
 		retryable bool,
 		now time.Time,
 	) (EndRunResult, error)
-	SaveThinking(ctx context.Context, runID uuid.UUID, blockID, content, status string, now time.Time) (int64, error)
+	SaveThinking(ctx context.Context, runID uuid.UUID, blockID, content, status string, contentOffset *int, now time.Time) (int64, error)
 	SaveTool(ctx context.Context, runID uuid.UUID, blockID, status string, data toolBlockData, now time.Time) (int64, error)
 }
 
@@ -797,11 +805,26 @@ func (r *GormRepository) EndRun(
 			return fmt.Errorf("load unfinished tools: %w", err)
 		}
 
+		var thoughts []AgentBlock
+		if err := tx.Where("run_id = ? AND kind = ? AND status = ?", runID, BlockKindThinking, "streaming").Order("sequence ASC, id ASC").Find(&thoughts).Error; err != nil {
+			return fmt.Errorf("load unfinished thinking: %w", err)
+		}
 		result.PreviousStatus = run.Status
-		first, last, err := reserveThreadSeq(tx, run.ChatID, int64(len(tools))+2)
+		first, last, err := reserveThreadSeq(tx, run.ChatID, int64(len(tools)+len(thoughts))+2)
 		if err != nil {
 			return err
 		}
+		for index, block := range thoughts {
+			var data thinkingBlockData
+			if err := json.Unmarshal(block.Data, &data); err != nil {
+				return fmt.Errorf("decode unfinished thinking: %w", err)
+			}
+			if err := tx.Model(&block).Updates(map[string]any{"status": string(status), "updated_at": now}).Error; err != nil {
+				return err
+			}
+			result.ThinkingTerminals = append(result.ThinkingTerminals, ThinkingTerminal{ID: block.ID, Seq: first + int64(index), Content: data.Content, ContentOffset: data.ContentOffset})
+		}
+		first += int64(len(thoughts))
 		result.MessageSeq = last - 1
 		result.StatusSeq = last
 		toolError := ProtocolError{Code: code, Message: message}
@@ -878,9 +901,10 @@ func (r *GormRepository) SaveThinking(
 	blockID string,
 	content string,
 	status string,
+	contentOffset *int,
 	now time.Time,
 ) (int64, error) {
-	data, err := json.Marshal(thinkingBlockData{Content: content})
+	data, err := json.Marshal(thinkingBlockData{Content: content, ContentOffset: contentOffset})
 	if err != nil {
 		return 0, fmt.Errorf("encode thinking block: %w", err)
 	}

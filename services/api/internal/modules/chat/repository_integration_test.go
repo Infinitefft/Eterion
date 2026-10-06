@@ -50,7 +50,8 @@ func newIntegrationDatabase(t *testing.T) (*gorm.DB, uuid.UUID) {
 			t.Errorf("clean integration schema: %v", err)
 		}
 	})
-	configuration.RuntimeParams["search_path"] = schema
+	// Keep test tables isolated while resolving the preinstalled public vector type.
+	configuration.RuntimeParams["search_path"] = schema + ",public"
 	connection := stdlib.OpenDB(*configuration)
 	connection.SetMaxOpenConns(4)
 	t.Cleanup(func() { _ = connection.Close() })
@@ -195,5 +196,48 @@ func TestPostgresSnapshotUsesOneCommittedView(t *testing.T) {
 	}
 	if afterSequence != beforeSequence+1 {
 		t.Fatalf("delta sequence = %d after %d", afterSequence, beforeSequence)
+	}
+}
+
+func TestPostgresEndRunClosesThinking(t *testing.T) {
+	db, userID := newIntegrationDatabase(t)
+	repository := NewRepository(db)
+	ctx := context.Background()
+	for _, status := range []RunStatus{RunStatusCancelled, RunStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			now := time.Now().UTC()
+			messageID := uuid.New()
+			record, err := repository.StartChat(ctx, userID, uuid.New(), messageID, messageID.String(), "test-model", "Thinking", "question", TextFormatPlainText, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := repository.TransitionRun(ctx, record.Run.ID, []RunStatus{RunStatusPending}, RunStatusRunning, now); err != nil {
+				t.Fatal(err)
+			}
+			offset := 4
+			id := uuid.NewString()
+			if _, err := repository.SaveThinking(ctx, record.Run.ID, id, "partial thought", "streaming", &offset, now); err != nil {
+				t.Fatal(err)
+			}
+			result, err := repository.EndRun(ctx, record.Run.ID, record.Run.OutputMessageID, status, "TEST_INTERRUPTED", "interrupted", false, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.ThinkingTerminals) != 1 || result.ThinkingTerminals[0].Seq >= result.MessageSeq {
+				t.Fatalf("invalid terminal sequence: %+v", result)
+			}
+			var block AgentBlock
+			if err := db.First(&block, "run_id = ? AND id = ?", record.Run.ID, id).Error; err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := snapshotBlock(block)
+			if err != nil {
+				t.Fatal(err)
+			}
+			thought := snapshot.(SnapshotThinkingBlock)
+			if thought.Status != string(status) || thought.Content != "partial thought" || thought.ContentOffset == nil || *thought.ContentOffset != offset {
+				t.Fatalf("invalid thinking snapshot: %+v", thought)
+			}
+		})
 	}
 }

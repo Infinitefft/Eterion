@@ -6,7 +6,8 @@
   "packageManager": "pnpm@10.20.0",
   "pnpm": {
     "patchedDependencies": {
-      "langchain@1.5.10": "patches/langchain@1.5.10.patch"
+      "langchain@1.5.10": "patches/langchain@1.5.10.patch",
+      "@langchain/openai@1.5.10": "patches/@langchain__openai@1.5.10.patch"
     }
   },
   "scripts": {

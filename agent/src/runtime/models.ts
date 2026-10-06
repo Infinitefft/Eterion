@@ -21,13 +21,13 @@ export function buildModelClients(settings: Settings, summary = false): Map<stri
         ...(model.provider === 'deepseek'
           ? {
               /**
-               * DeepSeek 默认开启 Thinking。Thinking 与多轮 Tool Calling 组合时，
-               * 必须额外回传 reasoning_content；第一阶段先关闭，单独验证后再开启。
+               * 正式对话开启 Thinking；内部摘要与标题保持关闭。
+               * 多轮工具调用的 reasoning_content 回传由已登记的 SDK 补丁保留。
                *
                * modelKwargs 会把 SDK 未显式声明的厂商参数透传给 Chat API。
                */
               modelKwargs: {
-                thinking: { type: 'disabled' },
+                thinking: { type: summary ? 'disabled' : 'enabled' },
 
                 // 请求模型不要并行调用 Tools；这不是 Runtime 的并发锁。
                 parallel_tool_calls: false,
@@ -63,6 +63,13 @@ export function extractContentDelta(chunk: unknown): string {
     .filter((block) => block.type === 'text' || block.type === 'output_text')
     .map((block) => (typeof block.text === 'string' ? block.text : ''))
     .join('');
+}
+
+/** 只读取模型明确公开的思考字段，不从普通正文猜测。 */
+export function extractThinkingDelta(chunk: unknown): string {
+  if (!isRecord(chunk) || !isRecord(chunk.additional_kwargs)) return '';
+  const reasoning = chunk.additional_kwargs.reasoning_content;
+  return typeof reasoning === 'string' ? reasoning : '';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

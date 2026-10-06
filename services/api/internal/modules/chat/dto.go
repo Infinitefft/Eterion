@@ -54,26 +54,28 @@ type SnapshotRun struct {
 }
 
 type SnapshotThinkingBlock struct {
-	Kind     string `json:"kind"`
-	ID       string `json:"id"`
-	ThreadID string `json:"threadId"`
-	RunID    string `json:"runId"`
-	Status   string `json:"status"`
-	Content  string `json:"content"`
+	ContentOffset *int   `json:"contentOffset,omitempty"`
+	Kind          string `json:"kind"`
+	ID            string `json:"id"`
+	ThreadID      string `json:"threadId"`
+	RunID         string `json:"runId"`
+	Status        string `json:"status"`
+	Content       string `json:"content"`
 }
 
 type SnapshotToolBlock struct {
-	Kind        string         `json:"kind"`
-	ID          string         `json:"id"`
-	ThreadID    string         `json:"threadId"`
-	RunID       string         `json:"runId"`
-	Status      string         `json:"status"`
-	Name        string         `json:"name"`
-	DisplayName *string        `json:"displayName"`
-	Args        any            `json:"args"`
-	Summary     *string        `json:"summary"`
-	Result      any            `json:"result"`
-	Error       *ProtocolError `json:"error"`
+	ContentOffset *int           `json:"contentOffset,omitempty"`
+	Kind          string         `json:"kind"`
+	ID            string         `json:"id"`
+	ThreadID      string         `json:"threadId"`
+	RunID         string         `json:"runId"`
+	Status        string         `json:"status"`
+	Name          string         `json:"name"`
+	DisplayName   *string        `json:"displayName"`
+	Args          any            `json:"args"`
+	Summary       *string        `json:"summary"`
+	Result        any            `json:"result"`
+	Error         *ProtocolError `json:"error"`
 }
 
 type SnapshotInteractionBlock struct {
@@ -95,16 +97,18 @@ type SnapshotResponse struct {
 }
 
 type thinkingBlockData struct {
-	Content string `json:"content"`
+	ContentOffset *int   `json:"contentOffset,omitempty"`
+	Content       string `json:"content"`
 }
 
 type toolBlockData struct {
-	Name        string         `json:"name"`
-	DisplayName *string        `json:"displayName"`
-	Args        any            `json:"args"`
-	Summary     *string        `json:"summary"`
-	Result      any            `json:"result"`
-	Error       *ProtocolError `json:"error"`
+	ContentOffset *int           `json:"contentOffset,omitempty"`
+	Name          string         `json:"name"`
+	DisplayName   *string        `json:"displayName"`
+	Args          any            `json:"args"`
+	Summary       *string        `json:"summary"`
+	Result        any            `json:"result"`
+	Error         *ProtocolError `json:"error"`
 }
 
 type interactionBlockData struct {

@@ -77,7 +77,12 @@ function AssistantMessage({ message, onOpenSource }: MessageProps & {
 }) {
   const statusText = getAssistantStatus(message);
   const isStreaming = message.status === 'streaming';
-  const isWaitingForContent = isStreaming && !message.content;
+  const hasProcess = useIMStore((state) => Boolean(
+    message.runId && state.detailsByThread[message.threadId]?.blocks.some(
+      (block) => block.runId === message.runId,
+    ),
+  ));
+  const isWaitingForContent = isStreaming && !message.content && !hasProcess;
   const isError = message.status === 'failed';
 
   return (
@@ -86,10 +91,6 @@ function AssistantMessage({ message, onOpenSource }: MessageProps & {
       data-status={message.status}
       aria-busy={isStreaming}
     >
-      <div className='chat-assistant-avatar' aria-hidden='true'>
-        <img src='/eterion-icon-transparent.png' alt='' />
-      </div>
-
       <div className='chat-assistant-content'>
         {message.contextTruncated ? (
           <p className='chat-message-status' role='status'>
@@ -137,9 +138,6 @@ function PendingAssistantMessage({ threadId, runId, onOpenSource }: {
 }) {
   return (
     <article className='chat-message-row chat-message-row-assistant' aria-live='polite'>
-      <div className='chat-assistant-avatar' aria-hidden='true'>
-        <img src='/eterion-icon-transparent.png' alt='' />
-      </div>
       <div className='chat-assistant-content'>
         {runId === null ? (
           <p className='chat-assistant-thinking'>

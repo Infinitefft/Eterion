@@ -103,11 +103,14 @@ type RunStatusPayload struct {
 }
 
 type ThinkingDeltaPayload struct {
-	Delta string `json:"delta"`
+	ContentOffset *int   `json:"contentOffset,omitempty"`
+	Delta         string `json:"delta"`
 }
 
 type ThinkingCompletedPayload struct {
-	Content string `json:"content"`
+	Status        string `json:"status,omitempty"`
+	ContentOffset *int   `json:"contentOffset,omitempty"`
+	Content       string `json:"content"`
 }
 
 type MessageStartedPayload struct {
@@ -132,9 +135,10 @@ type MessageCompletedPayload struct {
 }
 
 type ToolStartedPayload struct {
-	Name        string  `json:"name"`
-	DisplayName *string `json:"displayName"`
-	Args        any     `json:"args"`
+	ContentOffset *int    `json:"contentOffset,omitempty"`
+	Name          string  `json:"name"`
+	DisplayName   *string `json:"displayName"`
+	Args          any     `json:"args"`
 }
 
 type ToolCompletedPayload struct {

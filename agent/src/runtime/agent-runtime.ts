@@ -9,7 +9,7 @@ import { createWebAgent, buildSystemPrompt, type WebAgent } from './create-agent
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { createContextCompaction, estimateTokens, isContextLimitError } from '../memory/compaction.js';
 import { toPublicModel, type Settings } from '../config.js';
-import { buildModelClients, extractContentDelta } from './models.js';
+import { buildModelClients, extractContentDelta, extractThinkingDelta } from './models.js';
 import { serializeContext } from '../memory/messages.js';
 import { createWebSearchTool } from '../tools/web-search.js';
 import { webFetch } from '../tools/web-fetch.js';
@@ -181,6 +181,8 @@ export function createAgentRuntime(
       }
       // 累积已经发出的正文，供 content.completed 返回完整内容。
       let content = saved.content;
+      let thinking = '';
+      let outputTruncated = false;
       // 有中途说明不等于最后已经生成有效答复。
       let hasFinalAnswer = false;
       // Agent 按模型复用，但接收结果的变量与回调属于本次 Run，不能共享。
@@ -273,7 +275,23 @@ export function createAgentRuntime(
               continue;
             }
 
-            // 复用正文过滤，不发送 reasoning 或工具结果内容。
+            // 分别处理同一分片里的思考、正文和工具信息。
+            const reasoning = extractThinkingDelta(message);
+            if (reasoning) {
+              thinking += reasoning;
+              yield { type: 'thinking.delta', runId, payload: { delta: reasoning } };
+            }
+            const finishReason = message.response_metadata.finish_reason;
+            if (finishReason === 'length') outputTruncated = true;
+            const hasToolCalls = (message.tool_calls?.length ?? 0) > 0 ||
+              (AIMessageChunk.isInstance(message) && (message.tool_call_chunks?.length ?? 0) > 0);
+            if (thinking && (extractContentDelta(message) || hasToolCalls || finishReason)) {
+              yield { type: 'thinking.completed', runId, payload: {
+                content: thinking, status: outputTruncated ? 'failed' : 'completed',
+              } };
+              thinking = '';
+            }
+            // 正文过滤不接收 reasoning 或工具结果内容。
             const delta = extractContentDelta(message);
             if (!delta) {
               continue;
@@ -298,6 +316,13 @@ export function createAgentRuntime(
             for (const message of update.messages ?? []) {
               // 只从模型节点登记新调用，避免 Middleware 重放旧消息时重复发 tool.started。
               if (node === MODEL_NODE && AIMessage.isInstance(message)) {
+                if (message.response_metadata.finish_reason === 'length') outputTruncated = true;
+                if (thinking) {
+                  yield { type: 'thinking.completed', runId, payload: {
+                    content: thinking, status: outputTruncated ? 'failed' : 'completed',
+                  } };
+                  thinking = '';
+                }
                 const calls = message.tool_calls ?? [];
 
                 hasFinalAnswer =
@@ -391,7 +416,7 @@ export function createAgentRuntime(
         }
 
         // 除有效答复和工具终态外，还必须取得最终上下文，供后续持久化使用。
-        if (!paused && (!hasFinalAnswer || activeTools.size > 0 || finalContext === undefined)) {
+        if (!paused && (outputTruncated || !hasFinalAnswer || activeTools.size > 0 || finalContext === undefined)) {
           failure = {
             code: 'AGENT_INCOMPLETE_RESPONSE',
             message: 'Agent 未生成有效的最终答复',
@@ -442,6 +467,13 @@ export function createAgentRuntime(
         // 同时通知仍在等待的模型或网络请求停止工作。
         controller.abort();
         if (!paused) await discardRun(runId, true);
+      }
+
+      if (thinking) {
+        yield { type: 'thinking.completed', runId, payload: {
+          content: thinking,
+          status: failure?.code === 'AGENT_RUN_CANCELLED' ? 'cancelled' : failure ? 'failed' : 'completed',
+        } };
       }
 
       if (paused && saved.interaction) {

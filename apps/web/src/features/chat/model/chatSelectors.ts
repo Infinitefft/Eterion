@@ -15,14 +15,14 @@ type AssistantContentPart =
   | { kind: 'text'; key: string; content: string }
   | { kind: 'blocks'; key: string; blocks: AgentBlockState[] };
 
-/** 正文只在工具开始的位置分段；同一位置的过程块仍使用原来的列表展示。 */
+/** 正文在工具或思考开始的位置分段；同一位置的过程块仍使用原来的列表展示。 */
 export function getAssistantContentParts(
   content: string,
   blocks: readonly AgentBlockState[],
 ): AssistantContentPart[] {
   const blocksByOffset = new Map<number, AgentBlockState[]>();
   for (const block of blocks) {
-    const position = block.kind === 'tool' ? block.contentOffset : undefined;
+    const position = block.kind === 'tool' || block.kind === 'thinking' ? block.contentOffset : undefined;
     const offset = position !== undefined && Number.isInteger(position) && position >= 0
       ? Math.min(position, content.length)
       : 0;

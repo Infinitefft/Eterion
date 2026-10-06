@@ -97,3 +97,24 @@ func TestConsumeSSEDecodesAgentEvent(t *testing.T) {
 		t.Fatalf("unexpected event: %+v", received)
 	}
 }
+
+func TestThinkingCompletedStatus(t *testing.T) {
+	for _, status := range []string{"", "completed", "failed", "cancelled", "running"} {
+		t.Run(status, func(t *testing.T) {
+			payload, _ := json.Marshal(map[string]string{"content": "partial thought", "status": status})
+			event, terminal, err := decodeEvent(agent.EventThinkingCompleted, streamEnvelope{RunID: "run-1", Payload: payload})
+			if status == "running" {
+				if err == nil {
+					t.Fatal("invalid status accepted")
+				}
+				return
+			}
+			if status == "" {
+				status = "completed"
+			}
+			if err != nil || terminal || event.Status != status || event.Content != "partial thought" {
+				t.Fatalf("unexpected thinking completion: %+v %v", event, err)
+			}
+		})
+	}
+}

@@ -2,7 +2,7 @@
 
 Eterion 的 Node.js + TypeScript Agent 模块。当前 HTTP 服务使用 Agent Runtime：
 接收 Go 传入的本轮身份，主动查询原始聊天历史并组装上下文，由模型决定直接回答或调用网页工具，
-通过 SSE 输出项目自己的 `run.*`、`content.*`、`tool.*` 事件。
+通过 SSE 输出项目自己的 `run.*`、`thinking.*`、`content.*`、`tool.*` 事件。
 
 `web_search`、`web_fetch` 和 LangChain `createAgent()` 组装已有实现，
 `evals/smoke-agent.ts` 可单独调用这条 Tool Calling 链路。

@@ -335,11 +335,19 @@ func decodeEvent(eventType agent.EventType, envelope streamEnvelope) (agent.Even
 		event.Delta = payload.Delta
 	case agent.EventThinkingCompleted:
 		var payload struct {
+			Status  string `json:"status"`
 			Content string `json:"content"`
 		}
 		if err := decodePayload(envelope.Payload, &payload); err != nil {
 			return event, false, protocolFailure("invalid thinking.completed payload", err)
 		}
+		if payload.Status == "" {
+			payload.Status = "completed"
+		}
+		if payload.Status != "completed" && payload.Status != "failed" && payload.Status != "cancelled" {
+			return event, false, protocolFailure("invalid thinking status", nil)
+		}
+		event.Status = payload.Status
 		event.Content = payload.Content
 	case agent.EventContentStarted:
 		var payload struct {

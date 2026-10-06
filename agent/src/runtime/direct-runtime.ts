@@ -3,7 +3,7 @@ import type { BaseCallbackHandler } from '@langchain/core/callbacks/base';
 import { withRunRecording } from '../recording/with-run-recording.js';
 
 import { toPublicModel, type Settings } from '../config.js';
-import { buildModelClients, extractContentDelta } from './models.js';
+import { buildModelClients, extractContentDelta, extractThinkingDelta } from './models.js';
 import {
   runFailed,
   type AgentError,
@@ -47,6 +47,8 @@ export function createDirectRuntime(
 
       // 每轮请求独立保存正文和取消信号，不能放到共享的工厂作用域中。
       const textParts: string[] = [];
+      let thinking = '';
+      let outputTruncated = false;
       const abortController = new AbortController();
 
       // Direct 基线也接收外部取消，不能在切回基线后失去停止能力。
@@ -72,7 +74,19 @@ export function createDirectRuntime(
           // 外部取消后，不再转发已经缓冲的正文片段。
           signal.throwIfAborted();
 
+          const reasoning = extractThinkingDelta(chunk);
+          if (reasoning) {
+            thinking += reasoning;
+            yield { type: 'thinking.delta', runId: input.run_id, payload: { delta: reasoning } };
+          }
+          if (chunk.response_metadata.finish_reason === 'length') outputTruncated = true;
           const delta = extractContentDelta(chunk);
+          if (thinking && (delta || chunk.response_metadata.finish_reason)) {
+            yield { type: 'thinking.completed', runId: input.run_id, payload: {
+              content: thinking, status: outputTruncated ? 'failed' : 'completed',
+            } };
+            thinking = '';
+          }
           if (!delta) continue;
 
           textParts.push(delta);
@@ -108,6 +122,11 @@ export function createDirectRuntime(
             errorName: error instanceof Error ? error.name : 'UnknownError',
           });
         }
+        if (thinking) {
+          yield { type: 'thinking.completed', runId: input.run_id, payload: {
+            content: thinking, status: cancelled ? 'cancelled' : 'failed',
+          } };
+        }
         yield failedContent(input.run_id, textParts.join(''), agentError);
         yield runFailed(
           input.run_id,
@@ -122,11 +141,16 @@ export function createDirectRuntime(
         abortController.abort();
       }
 
+      if (thinking) {
+        yield { type: 'thinking.completed', runId: input.run_id, payload: {
+          content: thinking, status: outputTruncated ? 'failed' : 'completed',
+        } };
+      }
       const content = textParts.join('');
-      if (!content.trim()) {
+      if (outputTruncated || !content.trim()) {
         const error: AgentError = {
-          code: 'AGENT_EMPTY_RESPONSE',
-          message: '模型没有返回有效文本',
+          code: outputTruncated ? 'AGENT_INCOMPLETE_RESPONSE' : 'AGENT_EMPTY_RESPONSE',
+          message: outputTruncated ? '模型输出达到长度上限，回答未完成' : '模型没有返回有效文本',
           retryable: false,
         };
         yield failedContent(input.run_id, content, error);
