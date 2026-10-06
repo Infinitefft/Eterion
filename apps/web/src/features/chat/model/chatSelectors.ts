@@ -15,17 +15,17 @@ type AssistantContentPart =
   | { kind: 'text'; key: string; content: string }
   | { kind: 'blocks'; key: string; blocks: AgentBlockState[] };
 
-/** 正文在工具或思考开始的位置分段；同一位置的过程块仍使用原来的列表展示。 */
+/** 按过程块出现的位置切分正文；同一位置保持原有块顺序。 */
 export function getAssistantContentParts(
   content: string,
   blocks: readonly AgentBlockState[],
 ): AssistantContentPart[] {
   const blocksByOffset = new Map<number, AgentBlockState[]>();
   for (const block of blocks) {
-    const position = block.kind === 'tool' || block.kind === 'thinking' ? block.contentOffset : undefined;
+    const position = block.contentOffset;
     const offset = position !== undefined && Number.isInteger(position) && position >= 0
       ? Math.min(position, content.length)
-      : 0;
+      : block.kind === 'hitl' ? content.length : 0;
     const group = blocksByOffset.get(offset);
     if (group) {
       group.push(block);

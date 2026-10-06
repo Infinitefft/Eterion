@@ -383,6 +383,9 @@ export const useIMStore = create<IMStore>()(
               runId: event.runId,
               status: 'requested',
               questions: event.payload.questions,
+              contentOffset: event.payload.contentOffset ?? detail.messages.find(
+                (message) => message.role === 'assistant' && message.runId === event.runId,
+              )?.content.length ?? 0,
               answers: null,
             };
 

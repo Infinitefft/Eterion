@@ -219,6 +219,8 @@ export type HITLInteractionStatus = 'requested' | 'resolved';
 
 /** 一次 Human-in-the-loop 交互在前端合并后的状态。 */
 export interface HITLInteractionState {
+  /** 提问出现时的正文位置（UTF-16）；恢复回答后保持不变。 */
+  contentOffset?: number;
   /** Agent Block 的判别字段。 */
   kind: 'hitl';
 

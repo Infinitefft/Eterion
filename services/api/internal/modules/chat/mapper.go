@@ -84,7 +84,7 @@ func snapshotBlock(block AgentBlock) (any, error) {
 		return SnapshotInteractionBlock{
 			Kind: BlockKindInteraction, ID: block.ID, ThreadID: block.ChatID.String(),
 			RunID: block.RunID.String(), Status: block.Status,
-			Questions: data.Questions, Answers: data.Answers,
+			Questions: data.Questions, Answers: data.Answers, ContentOffset: data.ContentOffset,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported agent block kind %q", block.Kind)

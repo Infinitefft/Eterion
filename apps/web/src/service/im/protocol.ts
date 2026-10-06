@@ -547,6 +547,7 @@ export interface ToolFailedEvent extends ThreadEventEnvelope<'tool.failed', Tool
 
 /** HITL 请求用户输入时的数据。 */
 export interface InteractionRequestedPayload {
+  contentOffset?: number;
   /** 需要用户回答的问题列表。 */
   questions: HITLQuestion[];
 }

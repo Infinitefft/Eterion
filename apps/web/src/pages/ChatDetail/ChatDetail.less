@@ -201,6 +201,12 @@
   font-weight: 450;
 }
 
+// 正文中的 HITL 与下一段回复分开；不影响折叠区内部的工具列表。
+.chat-assistant-content > .chat-run-steps {
+  margin: 18px 0 22px;
+  padding-top: 12px;
+}
+
 .chat-message-text {
   margin: 0;
   font-size: 15px;
@@ -288,8 +294,8 @@
   color: #9f2d20;
 }
 
-.chat-run-trace[data-status='running'] {
-  margin-bottom: 0;
+.chat-run-heading + .chat-run-process {
+  margin-top: 8px;
 }
 
 .chat-run-heading,

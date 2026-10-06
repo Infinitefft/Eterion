@@ -29,8 +29,8 @@ func TestProtocolUsesFrontendFieldNames(t *testing.T) {
 	}
 }
 
-func TestThinkingAndToolSnapshotPositions(t *testing.T) {
-	for _, kind := range []string{BlockKindThinking, BlockKindTool} {
+func TestAgentBlockSnapshotPositions(t *testing.T) {
+	for _, kind := range []string{BlockKindThinking, BlockKindTool, BlockKindInteraction} {
 		raw := json.RawMessage(`{"content":"thought","contentOffset":4,"name":"web_search"}`)
 		block, err := snapshotBlock(AgentBlock{Kind: kind, Status: "cancelled", Data: raw})
 		if err != nil {

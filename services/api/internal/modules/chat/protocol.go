@@ -159,7 +159,8 @@ type HITLQuestion struct {
 }
 
 type InteractionRequestedPayload struct {
-	Questions []HITLQuestion `json:"questions"`
+	ContentOffset *int           `json:"contentOffset,omitempty"`
+	Questions     []HITLQuestion `json:"questions"`
 }
 
 type InteractionResolvedPayload struct {

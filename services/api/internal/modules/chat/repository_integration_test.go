@@ -199,6 +199,45 @@ func TestPostgresSnapshotUsesOneCommittedView(t *testing.T) {
 	}
 }
 
+func TestPostgresInteractionPreservesPositionOnResume(t *testing.T) {
+	db, userID := newIntegrationDatabase(t)
+	repository := NewRepository(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	messageID := uuid.New()
+	record, err := repository.StartChat(ctx, userID, uuid.New(), messageID, messageID.String(), "test-model", "HITL", "question", TextFormatPlainText, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repository.TransitionRun(ctx, record.Run.ID, []RunStatus{RunStatusPending}, RunStatusRunning, now); err != nil {
+		t.Fatal(err)
+	}
+	offset := 4
+	id := uuid.NewString()
+	if _, err := repository.PauseInteraction(ctx, record.Run.ID, id, []HITLQuestion{{QuestionID: "color", Prompt: "颜色？"}}, &offset, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"requested", "resolved"} {
+		if status == "resolved" {
+			if _, err := repository.ResolveInteraction(ctx, record.Run.ID, id, []HITLAnswer{{QuestionID: "color", Value: "蓝色"}}, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var block AgentBlock
+		if err := db.First(&block, "run_id = ? AND id = ?", record.Run.ID, id).Error; err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := snapshotBlock(block)
+		if err != nil {
+			t.Fatal(err)
+		}
+		interaction := snapshot.(SnapshotInteractionBlock)
+		if interaction.Status != status || interaction.ContentOffset == nil || *interaction.ContentOffset != offset {
+			t.Fatalf("lost interaction position: %+v", interaction)
+		}
+	}
+}
+
 func TestPostgresEndRunClosesThinking(t *testing.T) {
 	db, userID := newIntegrationDatabase(t)
 	repository := NewRepository(db)

@@ -79,13 +79,14 @@ type SnapshotToolBlock struct {
 }
 
 type SnapshotInteractionBlock struct {
-	Kind      string         `json:"kind"`
-	ID        string         `json:"id"`
-	ThreadID  string         `json:"threadId"`
-	RunID     string         `json:"runId"`
-	Status    string         `json:"status"`
-	Questions []HITLQuestion `json:"questions"`
-	Answers   []HITLAnswer   `json:"answers"`
+	ContentOffset *int           `json:"contentOffset,omitempty"`
+	Kind          string         `json:"kind"`
+	ID            string         `json:"id"`
+	ThreadID      string         `json:"threadId"`
+	RunID         string         `json:"runId"`
+	Status        string         `json:"status"`
+	Questions     []HITLQuestion `json:"questions"`
+	Answers       []HITLAnswer   `json:"answers"`
 }
 
 type SnapshotResponse struct {
@@ -112,6 +113,7 @@ type toolBlockData struct {
 }
 
 type interactionBlockData struct {
-	Questions []HITLQuestion `json:"questions"`
-	Answers   []HITLAnswer   `json:"answers"`
+	ContentOffset *int           `json:"contentOffset,omitempty"`
+	Questions     []HITLQuestion `json:"questions"`
+	Answers       []HITLAnswer   `json:"answers"`
 }

@@ -29,10 +29,10 @@ func (p *Publisher) AcceptedRun(connection *Connection, command ClientCommand, r
 	})
 }
 
-func (p *Publisher) InteractionRequested(run Run, id string, seq int64, questions []HITLQuestion) {
+func (p *Publisher) InteractionRequested(run Run, id string, seq int64, questions []HITLQuestion, contentOffset *int) {
 	p.publish(run.UserID.String(), ThreadEvent{Type: EventInteractionRequested,
 		ThreadID: run.ChatID.String(), RunID: run.ID.String(), InteractionID: id,
-		SeqID: seq, Timestamp: p.now().UnixMilli(), Payload: InteractionRequestedPayload{Questions: questions}})
+		SeqID: seq, Timestamp: p.now().UnixMilli(), Payload: InteractionRequestedPayload{Questions: questions, ContentOffset: contentOffset}})
 }
 
 func (p *Publisher) InteractionResolved(run Run, id string, seq int64, answers []HITLAnswer) {

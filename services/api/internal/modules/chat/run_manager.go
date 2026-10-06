@@ -32,7 +32,7 @@ type pendingInteraction struct {
 }
 
 type InteractionRepository interface {
-	PauseInteraction(context.Context, uuid.UUID, string, []HITLQuestion, time.Time) ([2]int64, error)
+	PauseInteraction(context.Context, uuid.UUID, string, []HITLQuestion, *int, time.Time) ([2]int64, error)
 	ResolveInteraction(context.Context, uuid.UUID, string, []HITLAnswer, time.Time) ([2]int64, error)
 }
 
@@ -192,7 +192,8 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 				return errors.New("invalid interaction questions")
 			}
 			now := m.now()
-			sequences, err := repository.PauseInteraction(ctx, run.ID, event.InteractionID, questions, now)
+			offset := len(utf16.Encode([]rune(fullText)))
+			sequences, err := repository.PauseInteraction(ctx, run.ID, event.InteractionID, questions, &offset, now)
 			if err != nil {
 				return err
 			}
@@ -202,7 +203,7 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 			current.interaction = &pendingInteraction{id: event.InteractionID, questions: questions}
 			m.active[run.ID] = current
 			m.mu.Unlock()
-			m.publisher.InteractionRequested(*run, event.InteractionID, sequences[0], questions)
+			m.publisher.InteractionRequested(*run, event.InteractionID, sequences[0], questions, &offset)
 			m.publisher.RunStatus(*run, sequences[1])
 			paused = true
 			return nil

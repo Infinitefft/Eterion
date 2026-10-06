@@ -915,9 +915,9 @@ func (r *GormRepository) SaveThinking(
 }
 
 // 问题快照与 waiting_user 在同一个事务中提交，刷新页面时不会只看到一半状态。
-func (r *GormRepository) PauseInteraction(ctx context.Context, runID uuid.UUID, id string, questions []HITLQuestion, now time.Time) ([2]int64, error) {
+func (r *GormRepository) PauseInteraction(ctx context.Context, runID uuid.UUID, id string, questions []HITLQuestion, contentOffset *int, now time.Time) ([2]int64, error) {
 	var sequences [2]int64
-	raw, err := json.Marshal(interactionBlockData{Questions: questions})
+	raw, err := json.Marshal(interactionBlockData{Questions: questions, ContentOffset: contentOffset})
 	if err != nil {
 		return sequences, err
 	}

@@ -1,5 +1,5 @@
 import { Ban, Check, ChevronDown, CircleAlert, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
-import { useId, useState, type FormEvent } from 'react';
+import { Fragment, useId, useState, type FormEvent } from 'react';
 
 import thinkingProcessIcon from '@/assets/icons/thinking-process.png';
 import { getIMService } from '@/service/im';
@@ -320,10 +320,11 @@ function RunStatusIcon({ run }: { run: RunState }) {
 }
 
 /** 正文首次出现时收起一次，后续正文增量不覆盖用户的手动展开选择。 */
-function RunProcess({ blocks, run, hasContent, onOpenSource }: {
+function RunProcess({ blocks, run, hasContent, isCurrent, onOpenSource }: {
   blocks: AgentBlockState[];
   run: RunState;
   hasContent: boolean;
+  isCurrent: boolean;
   onOpenSource?: (source: KnowledgeSource) => void;
 }) {
   const [view, setView] = useState({ hasContent, expanded: !hasContent });
@@ -331,7 +332,7 @@ function RunProcess({ blocks, run, hasContent, onOpenSource }: {
   if (view.hasContent !== hasContent) {
     setView({ hasContent, expanded: !hasContent });
   }
-  const isWorking = run.status === 'running' || run.status === 'pending';
+  const isWorking = isCurrent && (run.status === 'running' || run.status === 'pending');
 
   return (
     <div className='chat-run-process'>
@@ -350,18 +351,17 @@ function RunProcess({ blocks, run, hasContent, onOpenSource }: {
   );
 }
 
-function RunTraceContent({ run, blocks, hideThinkingIndicator, hasContent, onOpenSource }: {
+function RunTraceContent({ run, blocks, hideThinkingIndicator, hasContent, isCurrent, onOpenSource }: {
   run: RunState;
   blocks: AgentBlockState[];
   hideThinkingIndicator: boolean;
   hasContent: boolean;
+  isCurrent: boolean;
   onOpenSource?: (source: KnowledgeSource) => void;
 }) {
   const isActive = ACTIVE_RUN_STATUSES.has(run.status);
   const processBlocks = blocks.filter((block) => block.kind !== 'hitl');
-  // 用户问题始终在折叠区外，避免正文中的执行说明把待回答表单一起藏起来。
-  const interactions = blocks.filter((block) => block.kind === 'hitl');
-  const showHeading = run.status !== 'completed' &&
+  const showHeading = isCurrent && run.status !== 'completed' &&
     !(isActive && (processBlocks.length > 0 || hideThinkingIndicator));
 
   if (blocks.length === 0 && !showHeading) return null;
@@ -376,9 +376,8 @@ function RunTraceContent({ run, blocks, hideThinkingIndicator, hasContent, onOpe
         </div>
       ) : null}
       {processBlocks.length > 0 ? (
-        <RunProcess blocks={processBlocks} run={run} hasContent={hasContent} onOpenSource={onOpenSource} />
+        <RunProcess blocks={processBlocks} run={run} hasContent={hasContent} isCurrent={isCurrent} onOpenSource={onOpenSource} />
       ) : null}
-      <AgentBlockList blocks={interactions} onOpenSource={onOpenSource} runStatus={run.status} />
     </div>
   );
 }
@@ -399,12 +398,41 @@ export function AgentRunTrace({
   }
 
   const blocks = detail.blocks.filter((block) => block.runId === runId);
+  // 块数组保留发生顺序，即使 HITL 和恢复后的思考处于同一正文位置，也能划分为两段。
+  const text = content ?? '';
+  const sections: { key: string; blocks: AgentBlockState[]; content: string; interaction?: HITLInteractionState }[] = [];
+  let section: (typeof sections)[number] = { key: 'start', blocks: [], content: '' };
+  let cursor = 0;
+  for (const block of blocks) {
+    if (block.kind !== 'hitl') {
+      section.blocks.push(block);
+      continue;
+    }
+    const offset = block.contentOffset;
+    const end = offset !== undefined && Number.isInteger(offset) && offset >= 0
+      ? Math.max(cursor, Math.min(offset, text.length))
+      : text.length;
+    section.content = text.slice(cursor, end);
+    section.interaction = block;
+    sections.push(section);
+    section = { key: `after:${block.id}`, blocks: [], content: '' };
+    cursor = end;
+  }
+  section.content = text.slice(cursor);
+  sections.push(section);
 
   return (
     <>
-      <RunTraceContent run={run} blocks={blocks} hideThinkingIndicator={hideThinkingIndicator}
-        hasContent={Boolean(content?.trim())} onOpenSource={onOpenSource} />
-      {content ? <p className='chat-message-text'>{content}</p> : null}
+      {sections.map((part, index) => (
+        <Fragment key={part.key}>
+          <RunTraceContent run={run} blocks={part.blocks} hideThinkingIndicator={hideThinkingIndicator || run.status === 'waiting_user'}
+            isCurrent={index === sections.length - 1} hasContent={Boolean(part.content.trim())} onOpenSource={onOpenSource} />
+          {part.content ? <p className='chat-message-text'>{part.content}</p> : null}
+          {part.interaction ? (
+            <AgentBlockList blocks={[part.interaction]} runStatus={run.status} onOpenSource={onOpenSource} />
+          ) : null}
+        </Fragment>
+      ))}
     </>
   );
 }
