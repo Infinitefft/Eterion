@@ -1,7 +1,8 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useMutation } from '@tanstack/react-query';
 import { ChevronRight, LoaderCircle, LogOut, RefreshCw, UserRound } from 'lucide-react';
-import { useState } from 'react';
+import { Tooltip } from 'radix-ui';
+import { useState, type ReactElement } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
 import { logout } from '@/api/auth';
@@ -17,6 +18,21 @@ import './WorkspaceLayout.less';
 
 function getInitialSidebarState() {
   return !window.matchMedia('(max-width: 800px)').matches;
+}
+
+function SidebarTooltip({ label, children }: { label: string; children: ReactElement }) {
+  return (
+    <Tooltip.Provider delayDuration={350}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>{children}</Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content className='workspace-action-tooltip' side='bottom' sideOffset={8} collisionPadding={12}>
+            {label}
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
 }
 
 function RoundedComposeIcon() {
@@ -88,14 +104,16 @@ export function WorkspaceLayout() {
             <span className='product-name'>Eterion</span>
           </NavLink>
           <div className='sidebar-header-actions'>
-            <button
-              className='icon-button sidebar-toggle-button'
-              type='button'
-              aria-label='隐藏侧边栏'
-              onClick={() => setIsSidebarOpen(false)}
-            >
-              <span className='sidebar-panel-icon' aria-hidden='true' />
-            </button>
+            <SidebarTooltip label='隐藏侧边栏'>
+              <button
+                className='icon-button sidebar-toggle-button'
+                type='button'
+                aria-label='隐藏侧边栏'
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <span className='sidebar-panel-icon' aria-hidden='true' />
+              </button>
+              </SidebarTooltip>
           </div>
         </header>
 
@@ -145,14 +163,24 @@ export function WorkspaceLayout() {
 
       <main className='workspace-main'>
         {!isSidebarOpen ? (
-          <button
-            className='sidebar-open-button'
-            type='button'
-            aria-label='显示侧边栏'
-            onClick={() => setIsSidebarOpen(true)}
-          >
-            <span className='sidebar-panel-icon' aria-hidden='true' />
-          </button>
+          <div className='workspace-quick-actions workspace-quick-actions-floating'>
+            <SidebarTooltip label='显示侧边栏'>
+              <button
+                className='icon-button sidebar-toggle-button'
+                type='button'
+                aria-label='显示侧边栏'
+                onClick={() => setIsSidebarOpen(true)}
+              >
+                <span className='sidebar-panel-icon' aria-hidden='true' />
+              </button>
+              </SidebarTooltip>
+            <SidebarTooltip label='新会话'>
+              <NavLink className='icon-button sidebar-toggle-button' to={routePaths.chat}
+                aria-label='新会话'>
+                <RoundedComposeIcon />
+              </NavLink>
+              </SidebarTooltip>
+          </div>
         ) : null}
         <Outlet />
       </main>

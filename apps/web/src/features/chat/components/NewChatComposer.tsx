@@ -1,4 +1,4 @@
-import { ArrowUp, Paperclip } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 import {
   forwardRef,
   useImperativeHandle,
@@ -202,12 +202,6 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
           />
 
           <div className='composer-toolbar'>
-            <div className='composer-tools'>
-              <button type='button' aria-label='添加附件'>
-                <Paperclip size={18} />
-              </button>
-            </div>
-
             <div className='composer-actions'>
               <ModelList value={selectedModelId} onChange={setSelectedModelId} disabled={isSubmitting} />
 

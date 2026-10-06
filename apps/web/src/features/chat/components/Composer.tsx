@@ -1,4 +1,4 @@
-import { ArrowUp, LoaderCircle, Paperclip, Square, Minimize2, X, Gauge } from 'lucide-react';
+import { ArrowUp, LoaderCircle, Square, Minimize2, X, Gauge } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import { getApiError } from '@/api/errors';
@@ -293,16 +293,6 @@ export function Composer({ threadId }: ComposerProps) {
         />
 
         <div className='chat-detail-composer-toolbar'>
-          <button
-            className='chat-detail-tool-button'
-            type='button'
-            disabled
-            title='附件功能稍后接入'
-            aria-label='添加附件（暂不可用）'
-          >
-            <Paperclip size={18} />
-          </button>
-
           <div className='chat-detail-composer-actions'>
             <button
               className='chat-detail-tool-button'
