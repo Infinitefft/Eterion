@@ -537,6 +537,42 @@ button.chat-tool-heading {
   }
 }
 
+.chat-tool-call[data-tool='web_search'] {
+  .chat-tool-heading {
+    gap: 9px;
+    border-radius: 10px;
+  }
+
+  .chat-tool-icon-box {
+    width: 20px;
+    height: 20px;
+
+    img {
+      display: block;
+      object-fit: contain;
+    }
+  }
+
+  .chat-tool-label {
+    color: #62656b;
+  }
+
+  .chat-tool-websites {
+    margin-left: 29px;
+    gap: 7px;
+
+    a {
+      padding: 4px 10px;
+      background: #f5f6f7;
+      border-radius: 10px;
+
+      &:hover {
+        background: #eceef1;
+      }
+    }
+  }
+}
+
 .chat-tool-sources {
   display: flex;
   flex-wrap: wrap;

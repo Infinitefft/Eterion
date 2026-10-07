@@ -1,5 +1,6 @@
 import { Check, ChevronDown, CircleAlert, Globe, LoaderCircle, Search, Wrench } from 'lucide-react';
 import { useState } from 'react';
+import webSearchIcon from '@/assets/icons/web-search.png';
 
 import { getKnowledgeSources, KnowledgeSources, type KnowledgeSource } from './KnowledgeSources';
 
@@ -75,7 +76,8 @@ export function ToolCallItem({ block, onOpenSource }: {
   const heading = (
     <>
       <span className={`chat-tool-icon-box chat-tool-icon-${isWebTool ? 'web' : block.name === 'knowledge_search' ? 'knowledge' : 'general'}`}>
-        {isWebTool ? <Globe size={14} aria-hidden='true' />
+        {block.name === 'web_search' ? <img src={webSearchIcon} width={20} height={20} alt='' />
+          : isWebTool ? <Globe size={14} aria-hidden='true' />
           : block.name === 'knowledge_search' ? <Search size={14} aria-hidden='true' />
             : <Wrench size={14} aria-hidden='true' />}
       </span>
@@ -92,7 +94,7 @@ export function ToolCallItem({ block, onOpenSource }: {
   );
 
   return (
-    <li className='chat-tool-call' data-status={block.status}>
+    <li className='chat-tool-call' data-status={block.status} data-tool={block.name}>
       {websites.length > 0 || sources.length > 0 ? (
         <button className='chat-tool-heading' type='button' aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
           {heading}
