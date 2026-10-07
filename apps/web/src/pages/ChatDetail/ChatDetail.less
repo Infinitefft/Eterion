@@ -801,17 +801,24 @@ button.chat-tool-heading {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   color: #111;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid var(--line);
+  background: #fff;
+  border: 1px solid #e1e1e1;
   border-radius: 50%;
   box-shadow: none;
   cursor: pointer;
   transform: translateX(50%);
-  backdrop-filter: blur(8px);
+  &:hover {
+    background: #f8f8f8;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #9ca3af;
+    outline-offset: 3px;
+  }
 }
 
 .chat-detail-compaction-notice {

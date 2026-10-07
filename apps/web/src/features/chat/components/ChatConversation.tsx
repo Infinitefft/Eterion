@@ -105,7 +105,7 @@ export function ChatConversation({ threadId, onOpenSource }: ChatConversationPro
           aria-label='回到底部'
           onClick={handleScrollButtonClick}
         >
-          <ArrowDown size={22} strokeWidth={2.4} aria-hidden='true' />
+          <ArrowDown size={22} strokeWidth={1.7} aria-hidden='true' />
         </button>
       ) : null}
     </div>

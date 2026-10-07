@@ -43,7 +43,7 @@ export interface IMStore {
   }>>;
 
   // 根据 IM 分发的消息类型进行判断，然后保存到 detailsByThread 中
-  applyEnvelope(event: ServerThreadEvent): void;
+  applyEnvelope(event: ServerThreadEvent | ServerThreadEvent[]): void;
 
   // 刚进入网站首页时调用后端接口获取历史会话列表
   setThreads(threads: ThreadRecord[]): void;
@@ -117,304 +117,306 @@ export const useIMStore = create<IMStore>()(
       });
     },
 
-    applyEnvelope: (event) => {
+    applyEnvelope: (events) => {
       set((state) => {
-        switch (event.type) {
-          case 'thread.updated': {
-            const thread: ThreadRecord = {
-              id: event.threadId,
-              ...event.payload,
+        for (const event of Array.isArray(events) ? events : [events]) {
+          switch (event.type) {
+            case 'thread.updated': {
+              const thread: ThreadRecord = {
+                id: event.threadId,
+                ...event.payload,
+              }
+
+              const index = state.threads.findIndex((item) => item.id === event.threadId);
+
+              if (index === -1) {
+                state.threads.push(thread);
+              } else {
+                state.threads[index] = thread;
+              }
+
+              state.threads.sort((a, b) => b.updatedAt - a.updatedAt);
+
+              break;
             }
 
-            const index = state.threads.findIndex((item) => item.id === event.threadId);
-            
-            if (index === -1) {
-              state.threads.push(thread);
-            } else {
-              state.threads[index] = thread;
-            }
+            case 'message.started': {
+              // ??= 表示只有该会话还没还有详情时，才创建消息列表
+              const detail = (state.detailsByThread[event.threadId]) ??= {
+                messages: [],
+                runs: [],
+                blocks: [],
+              }
 
-            state.threads.sort((a, b) => b.updatedAt - a.updatedAt);
-
-            break;
-          }
-          
-          case 'message.started': {
-            // ??= 表示只有该会话还没还有详情时，才创建消息列表
-            const detail = (state.detailsByThread[event.threadId]) ??= {
-              messages: [],
-              runs: [],
-              blocks: [],
-            }
-
-            const message: MessageState = {
-              id: event.messageId,
-              threadId: event.threadId,
-              runId: event.runId,
-              ...event.payload,
-              
-              content: '',
-              status: 'streaming',
-              completedAt: null,
-              error: null,
-            }
-
-            detail.messages.push(message);
-
-            break;
-          }
-
-          case 'message.delta': {
-            const message = state.detailsByThread[event.threadId]?.messages.find(
-              (item) => item.id === event.messageId
-            )
-
-            if (!message) {
-              return;
-            }
-
-            message.content += event.payload.delta;
-
-            break;
-          }
-
-          case 'message.completed': {
-            const detail = (state.detailsByThread[event.threadId] ??= {
-              messages: [],
-              runs: [],
-              blocks: [],
-            })
-
-            const index = detail.messages.findIndex(
-              (item) => item.id === event.messageId
-            )
-
-            // index 为 -1 时，current 就是 undefined，表示本地还没有这条消息
-            const current = detail.messages[index];
-
-            const message: MessageState = {
-              id: event.messageId,
-              threadId: event.threadId,
-              runId: event.runId ?? current?.runId ?? null,
-              ...event.payload,
-            }
-
-            if (index === -1) {
-              detail.messages.push(message);
-            } else {
-              detail.messages[index] = message;
-            }
-
-            break;
-          }
-
-          case 'run.status' : {
-            const detail = (state.detailsByThread[event.threadId] ??= {
-              messages: [],
-              runs: [],
-              blocks: [],
-            });
-
-            const run: RunState = {
-              id: event.runId,
-              threadId: event.threadId,
-              ...event.payload,
-            }
-
-            const index = detail.runs.findIndex(
-              (item) => item.id === event.runId,
-            );
-
-            if (index === -1) {
-              detail.runs.push(run);
-            } else {
-              detail.runs[index] = run;
-            }
-            
-            break;
-          }
-
-          case 'thinking.delta': {
-            const detail = (state.detailsByThread[event.threadId] ??= {
-              messages: [],
-              runs: [],
-              blocks: [],
-            })
-            
-            const block = detail.blocks.find(
-              (item): item is ThinkingBlockState => 
-                item.kind === 'thinking' && item.id === event.thinkingId
-            )
-
-            if (block) {
-              block.content += event.payload.delta;
-            } else {
-              detail.blocks.push({
-                kind: 'thinking',
-                id: event.thinkingId,
+              const message: MessageState = {
+                id: event.messageId,
                 threadId: event.threadId,
                 runId: event.runId,
+                ...event.payload,
+
+                content: '',
                 status: 'streaming',
+                completedAt: null,
+                error: null,
+              }
+
+              detail.messages.push(message);
+
+              break;
+            }
+
+            case 'message.delta': {
+              const message = state.detailsByThread[event.threadId]?.messages.find(
+                (item) => item.id === event.messageId
+              )
+
+              if (!message) {
+                break;
+              }
+
+              message.content += event.payload.delta;
+
+              break;
+            }
+
+            case 'message.completed': {
+              const detail = (state.detailsByThread[event.threadId] ??= {
+                messages: [],
+                runs: [],
+                blocks: [],
+              })
+
+              const index = detail.messages.findIndex(
+                (item) => item.id === event.messageId
+              )
+
+              // index 为 -1 时，current 就是 undefined，表示本地还没有这条消息
+              const current = detail.messages[index];
+
+              const message: MessageState = {
+                id: event.messageId,
+                threadId: event.threadId,
+                runId: event.runId ?? current?.runId ?? null,
+                ...event.payload,
+              }
+
+              if (index === -1) {
+                detail.messages.push(message);
+              } else {
+                detail.messages[index] = message;
+              }
+
+              break;
+            }
+
+            case 'run.status' : {
+              const detail = (state.detailsByThread[event.threadId] ??= {
+                messages: [],
+                runs: [],
+                blocks: [],
+              });
+
+              const run: RunState = {
+                id: event.runId,
+                threadId: event.threadId,
+                ...event.payload,
+              }
+
+              const index = detail.runs.findIndex(
+                (item) => item.id === event.runId,
+              );
+
+              if (index === -1) {
+                detail.runs.push(run);
+              } else {
+                detail.runs[index] = run;
+              }
+
+              break;
+            }
+
+            case 'thinking.delta': {
+              const detail = (state.detailsByThread[event.threadId] ??= {
+                messages: [],
+                runs: [],
+                blocks: [],
+              })
+
+              const block = detail.blocks.find(
+                (item): item is ThinkingBlockState =>
+                  item.kind === 'thinking' && item.id === event.thinkingId
+              )
+
+              if (block) {
+                block.content += event.payload.delta;
+              } else {
+                detail.blocks.push({
+                  kind: 'thinking',
+                  id: event.thinkingId,
+                  threadId: event.threadId,
+                  runId: event.runId,
+                  status: 'streaming',
+                  contentOffset: event.payload.contentOffset ?? detail.messages.find(
+                    (message) => message.role === 'assistant' && message.runId === event.runId,
+                  )?.content.length ?? 0,
+                  content: event.payload.delta,
+                })
+              }
+
+              break;
+            }
+
+            case 'thinking.completed': {
+              const detail = (state.detailsByThread[event.threadId] ??= {
+                messages: [],
+                runs: [],
+                blocks: [],
+              });
+
+              const block = detail.blocks.find(
+                (item): item is ThinkingBlockState =>
+                  item.kind === 'thinking' && item.id === event.thinkingId
+              )
+
+              if (block) {
+                block.content = event.payload.content;
+                block.status = event.payload.status ?? 'completed';
+                block.contentOffset ??= event.payload.contentOffset;
+              } else {
+                detail.blocks.push({
+                  kind: 'thinking',
+                  id: event.thinkingId,
+                  threadId: event.threadId,
+                  runId: event.runId,
+                  status: event.payload.status ?? 'completed',
+                  contentOffset: event.payload.contentOffset ?? 0,
+                  content: event.payload.content,
+                })
+              }
+
+              break;
+            }
+
+            case 'tool.started': {
+              const detail = (state.detailsByThread[event.threadId] ??= {
+                messages: [],
+                runs: [],
+                blocks: [],
+              });
+
+              const tool: ToolCallBlockState = {
+                kind: 'tool',
+                id: event.toolCallId,
+                threadId: event.threadId,
+                runId: event.runId,
+                ...event.payload,
                 contentOffset: event.payload.contentOffset ?? detail.messages.find(
                   (message) => message.role === 'assistant' && message.runId === event.runId,
                 )?.content.length ?? 0,
-                content: event.payload.delta,
-              })
+                status: 'running',
+                summary: null,
+                result: null,
+                error: null,
+              }
+
+              const index = detail.blocks.findIndex(
+                (item) => item.kind === 'tool' && item.id === event.toolCallId,
+              );
+
+              if (index === -1) {
+                detail.blocks.push(tool);
+              } else {
+                // 重复的开始事件不能把工具移动到后续正文之后。
+                const previous = detail.blocks[index];
+                if (previous.kind === 'tool') {
+                  tool.contentOffset = previous.contentOffset ?? tool.contentOffset;
+                }
+                detail.blocks[index] = tool;
+              }
+
+              break;
             }
 
-            break;
-          }
+            case 'tool.completed': {
+              const tool = state.detailsByThread[event.threadId]?.blocks.find(
+                (item): item is ToolCallBlockState =>
+                  item.kind === 'tool' && item.id === event.toolCallId
+              );
 
-          case 'thinking.completed': {
-            const detail = (state.detailsByThread[event.threadId] ??= {
-              messages: [],
-              runs: [],
-              blocks: [],
-            });
+              if (!tool) {
+                break;
+              }
 
-            const block = detail.blocks.find(
-              (item): item is ThinkingBlockState => 
-                item.kind === 'thinking' && item.id === event.thinkingId
-            )
+              tool.status = 'completed';
+              tool.summary = event.payload.summary;
+              tool.result = event.payload.result;
 
-            if (block) {
-              block.content = event.payload.content;
-              block.status = event.payload.status ?? 'completed';
-              block.contentOffset ??= event.payload.contentOffset;
-            } else {
-              detail.blocks.push({
-                kind: 'thinking',
-                id: event.thinkingId,
+              break;
+            }
+
+            case 'tool.failed': {
+              const tool = state.detailsByThread[event.threadId]?.blocks.find(
+                (item): item is ToolCallBlockState =>
+                  item.kind === 'tool' && item.id === event.toolCallId
+              );
+
+              if (!tool) {
+                break;
+              }
+
+              tool.status = 'failed';
+              tool.error = event.payload.error;
+
+              break;
+            }
+
+            case 'interaction.requested': {
+              const detail = (state.detailsByThread[event.threadId] ??= {
+                messages: [],
+                runs: [],
+                blocks: [],
+              })
+
+              const interaction: HITLInteractionState = {
+                kind: 'hitl',
+                id: event.interactionId,
                 threadId: event.threadId,
                 runId: event.runId,
-                status: event.payload.status ?? 'completed',
-                contentOffset: event.payload.contentOffset ?? 0,
-                content: event.payload.content, 
-              })
-            }
+                status: 'requested',
+                questions: event.payload.questions,
+                contentOffset: event.payload.contentOffset ?? detail.messages.find(
+                  (message) => message.role === 'assistant' && message.runId === event.runId,
+                )?.content.length ?? 0,
+                answers: null,
+              };
 
-            break;
-          }
+              const index = detail.blocks.findIndex(
+                (item) => item.kind === 'hitl' && item.id === event.interactionId
+              );
 
-          case 'tool.started': {
-            const detail = (state.detailsByThread[event.threadId] ??= {
-              messages: [],
-              runs: [],
-              blocks: [],
-            });
-
-            const tool: ToolCallBlockState = {
-              kind: 'tool',
-              id: event.toolCallId,
-              threadId: event.threadId,
-              runId: event.runId,
-              ...event.payload,
-              contentOffset: event.payload.contentOffset ?? detail.messages.find(
-                (message) => message.role === 'assistant' && message.runId === event.runId,
-              )?.content.length ?? 0,
-              status: 'running',
-              summary: null,
-              result: null,
-              error: null,
-            }
-
-            const index = detail.blocks.findIndex(
-              (item) => item.kind === 'tool' && item.id === event.toolCallId,
-            );
-
-            if (index === -1) {
-              detail.blocks.push(tool);
-            } else {
-              // 重复的开始事件不能把工具移动到后续正文之后。
-              const previous = detail.blocks[index];
-              if (previous.kind === 'tool') {
-                tool.contentOffset = previous.contentOffset ?? tool.contentOffset;
+              if (index === -1) {
+                detail.blocks.push(interaction);
+              } else {
+                detail.blocks[index] = interaction;
               }
-              detail.blocks[index] = tool;
-            }
 
-            break;
-          }
-
-          case 'tool.completed': {
-            const tool = state.detailsByThread[event.threadId]?.blocks.find(
-              (item): item is ToolCallBlockState => 
-                item.kind === 'tool' && item.id === event.toolCallId
-            );
-
-            if (!tool) {
               break;
             }
 
-            tool.status = 'completed';
-            tool.summary = event.payload.summary;
-            tool.result = event.payload.result;
+            case 'interaction.resolved': {
+              const interaction = state.detailsByThread[event.threadId]?.blocks.find(
+                (item): item is HITLInteractionState =>
+                  item.kind === 'hitl' && item.id === event.interactionId,
+              );
 
-            break;
-          }
+              if (!interaction) {
+                break;
+              }
 
-          case 'tool.failed': {
-            const tool = state.detailsByThread[event.threadId]?.blocks.find(
-              (item): item is ToolCallBlockState => 
-                item.kind === 'tool' && item.id === event.toolCallId
-            );
-
-            if (!tool) {
-              break;
+              interaction.status = 'resolved';
+              interaction.answers = event.payload.answers;
             }
-
-            tool.status = 'failed';
-            tool.error = event.payload.error;
-
-            break;
-          }
-
-          case 'interaction.requested': {
-            const detail = (state.detailsByThread[event.threadId] ??= {
-              messages: [],
-              runs: [],
-              blocks: [],
-            })
-
-            const interaction: HITLInteractionState = {
-              kind: 'hitl',
-              id: event.interactionId,
-              threadId: event.threadId,
-              runId: event.runId,
-              status: 'requested',
-              questions: event.payload.questions,
-              contentOffset: event.payload.contentOffset ?? detail.messages.find(
-                (message) => message.role === 'assistant' && message.runId === event.runId,
-              )?.content.length ?? 0,
-              answers: null,
-            };
-
-            const index = detail.blocks.findIndex(
-              (item) => item.kind === 'hitl' && item.id === event.interactionId
-            );
-
-            if (index === -1) {
-              detail.blocks.push(interaction);
-            } else {
-              detail.blocks[index] = interaction;
-            }
-
-            break;
-          }
-          
-          case 'interaction.resolved': {
-            const interaction = state.detailsByThread[event.threadId]?.blocks.find(
-              (item): item is HITLInteractionState =>
-                item.kind === 'hitl' && item.id === event.interactionId,
-            );
-
-            if (!interaction) {
-              break;
-            }
-
-            interaction.status = 'resolved';
-            interaction.answers = event.payload.answers;
-          }
+        }
         }
       })
     },

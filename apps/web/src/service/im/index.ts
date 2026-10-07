@@ -4,6 +4,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { useIMStore } from '@/store/im-store';
 
 import { IMService } from './imService';
+import { createFrameEventBuffer } from './frameEventBuffer';
 import { WebSocketTransport } from './transport';
 
 import type { ThreadId } from './types';
@@ -19,6 +20,7 @@ interface IMRuntime {
   service: IMService;
   unbindStore: () => void;
   synchronizations: Map<ThreadId, ThreadSynchronization>;
+  flushEvents: () => void;
 }
 
 /** 当前页面生命周期内唯一的 IM Runtime。 */
@@ -82,13 +84,41 @@ export function initializeIMService(): IMService {
 
     const service = new IMService({ transport });
 
+    const frameEvents = createFrameEventBuffer((events) => {
+      const store = useIMStore.getState();
+      // 删除会话之后到帧提交之前，旧 delta 不能重新创建它。
+      store.applyEnvelope(events.filter((event) =>
+        (event.type !== 'thinking.delta' && event.type !== 'message.delta') ||
+        store.detailsByThread[event.threadId] !== undefined,
+      ));
+    });
+    const unbindAuth = useAuthStore.subscribe((state, previous) => {
+      if (state.sessionVersion !== previous.sessionVersion) frameEvents.clear();
+    });
+    const unbindReset = useIMStore.subscribe((state) => {
+      if (state.detailsByThread === useIMStore.getInitialState().detailsByThread) frameEvents.clear();
+    });
+
     const unbindStore = service.subscribe((event) => {
       const store = useIMStore.getState();
 
       switch (event.kind) {
         case 'envelope': {
           const envelope = event.envelope;
-          store.applyEnvelope(envelope);
+          if (import.meta.env.DEV && envelope.type === 'message.completed') {
+            frameEvents.flush();
+            const previous = useIMStore.getState().detailsByThread[envelope.threadId]?.messages
+              .find((message) => message.id === envelope.messageId);
+            if (previous && envelope.payload.content.length > previous.content.length) {
+              // 只记字数，不输出正文：区分终态补齐与 HTTP 快照覆盖。
+              console.warn('IM completion filled missing text', {
+                threadId: envelope.threadId, runId: envelope.runId,
+                streamedChars: previous.content.length,
+                completedChars: envelope.payload.content.length,
+              });
+            }
+          }
+          frameEvents.enqueue(envelope);
 
           const currentStore = useIMStore.getState();
 
@@ -105,6 +135,7 @@ export function initializeIMService(): IMService {
         }
         
         case 'connection': {
+          frameEvents.flush();
           // 将连接、断线、重连等状态同步给页面使用
           store.setConnectionState(event.state);
           if (runtime?.service === service) {
@@ -127,6 +158,7 @@ export function initializeIMService(): IMService {
           break;
         }
         case 'sequenceGap': {
+          frameEvents.flush();
           console.warn('IM sequence gap; synchronizing thread', event.gap);
           const pending = runtime?.synchronizations.get(event.gap.threadId);
           if (pending?.isCurrent()) {
@@ -143,7 +175,13 @@ export function initializeIMService(): IMService {
     // 保存实例和它对应的取消订阅函数
     runtime = {
       service,
-      unbindStore,
+      unbindStore: () => {
+        frameEvents.clear();
+        unbindAuth();
+        unbindReset();
+        unbindStore();
+      },
+      flushEvents: frameEvents.flush,
       synchronizations: new Map(),
     };
 
@@ -200,8 +238,23 @@ export function synchronizeThread(threadId: ThreadId): Promise<void> {
             return;
           }
 
+          // 快照包含这些增量：先清空帧缓冲，避免下一帧重复追加到快照正文。
+          currentRuntime.flushEvents();
+          if (import.meta.env.DEV) {
+            const previous = useIMStore.getState().detailsByThread[threadId];
+            for (const message of snapshot.messages) {
+              const current = previous?.messages.find((item) => item.id === message.id);
+              if (current?.status === 'streaming' && message.content.length > current.content.length) {
+                console.warn('IM snapshot filled missing text', {
+                  threadId, runId: message.runId, streamedChars: current.content.length,
+                  snapshotChars: message.content.length, lastSeqId: snapshot.lastSeqId,
+                });
+              }
+            }
+          }
           useIMStore.getState().applySnapshot(snapshot);
           service.resumeThread(threadId, snapshot.lastSeqId);
+          currentRuntime.flushEvents();
         }
       } catch (error) {
         if (task.isCurrent()) {

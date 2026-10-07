@@ -105,6 +105,95 @@ beforeEach(() => {
 afterEach(() => {
   destroyIMService();
   useIMStore.getState().reset();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe('animation frame delta updates', () => {
+  let paint: () => void;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextId = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++nextId, callback);
+      return nextId;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    paint = () => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((callback) => callback(0));
+    };
+  });
+
+  async function load() {
+    vi.mocked(fetchThreadSnapshot).mockResolvedValueOnce(snapshot());
+    await synchronizeThread('thread-a');
+  }
+
+  it('commits a burst of thinking and body deltas in one store notification', async () => {
+    await load();
+    const changed = vi.fn();
+    const unsubscribe = useIMStore.subscribe(changed);
+    emit({ type: 'thinking.delta', threadId: 'thread-a', runId: 'run-a', thinkingId: 'thought-a',
+      seqId: 3, timestamp: 3, payload: { delta: '思考', contentOffset: 2 } });
+    for (let seqId = 4; seqId < 104; seqId++) emitDelta(seqId, '字');
+    expect(changed).not.toHaveBeenCalled();
+    paint();
+    expect(changed).toHaveBeenCalledTimes(1);
+    const detail = useIMStore.getState().detailsByThread['thread-a'];
+    expect(detail?.messages[0].content).toBe(`AB${'字'.repeat(100)}`);
+    expect(detail?.blocks[0]).toMatchObject({ content: '思考', contentOffset: 2 });
+    unsubscribe();
+  });
+
+  it('flushes before completion and never appends stale text afterward', async () => {
+    await load();
+    emitDelta(3, 'C');
+    emit({ type: 'message.completed', threadId: 'thread-a', runId: 'run-a', messageId: 'assistant-a',
+      seqId: 4, timestamp: 4, payload: { role: 'assistant', format: 'plain_text', content: 'ABC',
+        status: 'completed', createdAt: 1, completedAt: 4, error: null } });
+    expect(useIMStore.getState().detailsByThread['thread-a']?.messages[0])
+      .toMatchObject({ content: 'ABC', status: 'completed' });
+    paint();
+    vi.advanceTimersByTime(100);
+    expect(useIMStore.getState().detailsByThread['thread-a']?.messages[0].content).toBe('ABC');
+  });
+
+  it('does not duplicate buffered text after snapshot replacement', async () => {
+    await load();
+    emitDelta(3, 'C');
+    const recovered = snapshot();
+    recovered.lastSeqId = 3;
+    recovered.messages[0].content = 'ABC';
+    vi.mocked(fetchThreadSnapshot).mockResolvedValueOnce(recovered);
+    await synchronizeThread('thread-a');
+    paint();
+    expect(useIMStore.getState().detailsByThread['thread-a']?.messages[0].content).toBe('ABC');
+  });
+
+  it('flushes in a hidden tab and discards pending text on reset', async () => {
+    await load();
+    emitDelta(3, 'C');
+    vi.advanceTimersByTime(100);
+    expect(useIMStore.getState().detailsByThread['thread-a']?.messages[0].content).toBe('ABC');
+    emitDelta(4, 'D');
+    useIMStore.getState().reset();
+    paint();
+    vi.advanceTimersByTime(100);
+    expect(useIMStore.getState().detailsByThread).toEqual({});
+  });
+
+  it.each(['identity', 'destroy'] as const)('discards scheduled text on %s changes', async (reason) => {
+    await load();
+    emitDelta(3, 'C');
+    if (reason === 'identity') useAuthStore.getState().clearSession();
+    else destroyIMService();
+    paint();
+    vi.advanceTimersByTime(100);
+    expect(useIMStore.getState().detailsByThread['thread-a']?.messages[0].content).toBe('AB');
+  });
 });
 
 describe('thread snapshot synchronization', () => {

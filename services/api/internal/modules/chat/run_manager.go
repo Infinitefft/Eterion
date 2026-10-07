@@ -177,7 +177,7 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 	var resume *agent.ResumeInput
 	paused := false
 
-	handle := func(event agent.Event) error {
+	handle := func(ctx context.Context, event agent.Event) error {
 		switch event.Type {
 		case agent.EventRunPaused:
 			if !runStarted || !contentStarted || contentTerminal || run.Status != RunStatusRunning {
@@ -422,13 +422,15 @@ func (m *RunManager) execute(ctx context.Context, initialRun Run, historyToken s
 	// 一次业务 Run 可以包含多段 SSE；等待用户时没有模型请求或执行计时器。
 	for {
 		paused = false
-		if resume == nil {
-			err = m.runner.Run(ctx, input, handle)
-		} else if runner, ok := m.runner.(agent.InteractionRunner); ok {
-			err = runner.Resume(ctx, *resume, handle)
-		} else {
-			err = errors.New("Agent does not support resume")
-		}
+		err = consumeBatchedStream(ctx, func(streamCtx context.Context, emit func(agent.Event) error) error {
+			if resume == nil {
+				return m.runner.Run(streamCtx, input, emit)
+			}
+			if runner, ok := m.runner.(agent.InteractionRunner); ok {
+				return runner.Resume(streamCtx, *resume, emit)
+			}
+			return errors.New("Agent does not support resume")
+		}, handle)
 		if err != nil {
 			m.finishWithError(ctx, run, output, err)
 			return
