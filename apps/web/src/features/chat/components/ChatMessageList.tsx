@@ -1,4 +1,6 @@
 import { Fragment } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import { getAssistantPlaceholders } from '@/features/chat/model/chatSelectors';
 import type { AgentBlockState, MessageState, RunId, RunState, ThreadId } from '@/service/im/types';
@@ -114,7 +116,7 @@ function AssistantMessage({ message, onOpenSource }: MessageProps & {
         ) : null}
 
         {!message.runId && message.content ? (
-          <p className='chat-message-text'>{message.content}</p>
+          <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown></div>
         ) : null}
 
         {statusText ? (

@@ -30,6 +30,14 @@ function render(content: string, status: 'running' | 'completed' | 'waiting_user
 }
 
 describe('combined run process', () => {
+  it('renders a GFM table in the answer instead of showing pipe separators', () => {
+    const html = render('汇总结论\n\n| 检查项 | 结果 |\n|---|---|\n| 英文查询 | ✅ 正常 |', 'completed');
+    expect(html).toContain('<table>');
+    expect(html).toContain('<th>检查项</th>');
+    expect(html).toContain('<td>✅ 正常</td>');
+    expect(html).not.toContain('|---|---|');
+  });
+
   it('shows web tools inside their process group at the saved UTF-16 position', () => {
     render('你好🙂搜索后的正文', 'completed');
     const detail = store.detailsByThread['thread-1']!;
@@ -44,10 +52,10 @@ describe('combined run process', () => {
         tool.status = status;
         const html = renderToStaticMarkup(<AgentRunTrace threadId='thread-1' runId='run-1' content='你好🙂搜索后的正文' />);
         expect(html).toContain('chat-run-process-heading" aria-expanded="false"');
-        expect(html).toContain('<p class="chat-message-text">你好🙂</p><div class="chat-run-trace"');
+        expect(html).toContain('<div class="chat-message-text"><p>你好🙂</p></div><div class="chat-run-trace"');
         expect(html).toMatch(/hidden=""><ul class="chat-run-steps"><li class="chat-tool-call"/);
         expect(html).toContain('href="https://example.com/result"');
-        expect(html).toContain('</ul></div></div></div><p class="chat-message-text">搜索后的正文</p>');
+        expect(html).toContain('</ul></div></div></div><div class="chat-message-text"><p>搜索后的正文</p></div>');
       }
     }
   });
@@ -94,13 +102,13 @@ describe('combined run process', () => {
       expect(html).toMatch(/class="chat-run-process-heading" aria-expanded="false"/);
       expect(html).toContain('获取时间 · 已完成');
       expect(html).toContain('思考内容');
-      expect(html).toContain('<p class="chat-message-text">正式正文</p>');
+      expect(html).toContain('<div class="chat-message-text"><p>正式正文</p></div>');
     }
   });
 
   it('keeps unanswered HITL inside an expanded process after the preceding text', () => {
     const html = render('需要你补充信息', 'waiting_user');
-    expect(html).toContain('<p class="chat-message-text">需要你补充信息</p><div class="chat-run-trace"');
+    expect(html).toContain('<div class="chat-message-text"><p>需要你补充信息</p></div><div class="chat-run-trace"');
     expect(html).toMatch(/aria-expanded="true"[\s\S]*<ul class="chat-run-steps"><li class="chat-hitl-step"/);
     expect(html).toContain('选择颜色');
     expect(html).toContain('提交回答');
@@ -109,8 +117,8 @@ describe('combined run process', () => {
   it('keeps HITL at its UTF-16 position before resumed text, including resolved history', () => {
     const content = '你好🙂回答后的内容';
     const html = render(content, 'waiting_user', 4);
-    expect(html).toContain('<p class="chat-message-text">你好🙂</p><div class="chat-run-trace"');
-    expect(html).toContain('</ul></div></div></div><p class="chat-message-text">回答后的内容</p>');
+    expect(html).toContain('<div class="chat-message-text"><p>你好🙂</p></div><div class="chat-run-trace"');
+    expect(html).toContain('</ul></div></div></div><div class="chat-message-text"><p>回答后的内容</p></div>');
     const detail = store.detailsByThread['thread-1']!;
     const interaction = detail.blocks.find((block) => block.kind === 'hitl')!;
     interaction.status = 'resolved';
@@ -157,7 +165,7 @@ describe('combined run process', () => {
     expect(history).not.toContain('chat-run-process-icon is-active');
   });
 
-  it('keeps consecutive HITL boundaries separate without adding empty process groups', () => {
+  it('merges consecutive HITL and thinking when no text separates them', () => {
     render('正文', 'waiting_user', 2);
     const detail = store.detailsByThread['thread-1']!;
     detail.blocks.push({ kind: 'hitl', id: 'hitl-2', threadId: 'thread-1', runId: 'run-1',
@@ -165,9 +173,25 @@ describe('combined run process', () => {
     detail.blocks.push({ kind: 'thinking', id: 'thinking-3', threadId: 'thread-1', runId: 'run-1',
       status: 'completed', content: '最后一段思考', contentOffset: 2 });
     const html = renderToStaticMarkup(<AgentRunTrace threadId='thread-1' runId='run-1' content='正文结束' />);
-    expect(html.match(/>思考过程</g)).toHaveLength(4);
+    expect(html.match(/>思考过程</g)).toHaveLength(2);
     expect(html.indexOf('选择颜色')).toBeLessThan(html.indexOf('选择大小'));
     expect(html.indexOf('选择大小')).toBeLessThan(html.indexOf('最后一段思考'));
-    expect(html.indexOf('最后一段思考')).toBeLessThan(html.indexOf('>结束</p>'));
+    expect(html.indexOf('最后一段思考')).toBeLessThan(html.indexOf('>结束</p></div>'));
+  });
+
+  it('keeps one process across HITL resume without body text, including whitespace-only output', () => {
+    for (const content of ['', ' \n']) {
+      render(content, 'waiting_user', 0);
+      const detail = store.detailsByThread['thread-1']!;
+      detail.runs[0].status = 'running';
+      const interaction = detail.blocks.find((block) => block.kind === 'hitl')!;
+      interaction.status = 'resolved';
+      detail.blocks.push({ kind: 'thinking', id: 'resumed', threadId: 'thread-1', runId: 'run-1',
+        status: 'streaming', content: '恢复后的思考', contentOffset: content.length });
+      const html = renderToStaticMarkup(<AgentRunTrace threadId='thread-1' runId='run-1' content={content} />);
+      expect(html.match(/>思考过程</g)).toHaveLength(1);
+      expect(html).toContain('chat-run-process-heading" aria-expanded="true"');
+      expect(html.indexOf('获取时间')).toBeLessThan(html.indexOf('恢复后的思考'));
+    }
   });
 });

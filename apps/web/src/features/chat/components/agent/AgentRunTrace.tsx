@@ -1,5 +1,7 @@
 import { Ban, Check, ChevronDown, CircleAlert, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
 import { Fragment, useId, useState, type FormEvent } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import thinkingProcessIcon from '@/assets/icons/thinking-process.png';
 import { getHITLAnswerValue, type HITLAnswerDraft } from '@/features/chat/model/hitlAnswers';
@@ -388,11 +390,11 @@ export function AgentRunTrace({
   const run = detail?.runs.find((current) => current.id === runId);
 
   if (!detail || !run) {
-    return content ? <p className='chat-message-text'>{content}</p> : null;
+    return content ? <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown></div> : null;
   }
 
   const blocks = detail.blocks.filter((block) => block.runId === runId);
-  // 正文决定过程块的位置；同一位置的思考和工具合并，HITL 恢复后另起一段。
+  // 只有实际正文才分隔过程；工具调用、HITL 暂停和恢复本身不另起一段。
   const text = content ?? '';
   const sections: { key: string; blocks: AgentBlockState[]; content: string }[] = [];
   let section: (typeof sections)[number] = { key: 'start', blocks: [], content: '' };
@@ -402,17 +404,13 @@ export function AgentRunTrace({
     const end = offset !== undefined && Number.isInteger(offset) && offset >= 0
       ? Math.max(cursor, Math.min(offset, text.length))
       : block.kind === 'hitl' ? text.length : cursor;
-    if (end > cursor) {
+    if (end > cursor && text.slice(cursor, end).trim()) {
       section.content = text.slice(cursor, end);
       sections.push(section);
       section = { key: `before:${block.kind}:${block.id}`, blocks: [], content: '' };
       cursor = end;
     }
     section.blocks.push(block);
-    if (block.kind === 'hitl') {
-      sections.push(section);
-      section = { key: `after:hitl:${block.id}`, blocks: [], content: '' };
-    }
   }
   section.content = text.slice(cursor);
   sections.push(section);
@@ -426,7 +424,7 @@ export function AgentRunTrace({
             isCurrent={index === sections.length - 1}
             hasContent={Boolean(part.content.trim()) || !ACTIVE_RUN_STATUSES.has(run.status)}
             onOpenSource={onOpenSource} />
-          {part.content ? <p className='chat-message-text'>{part.content}</p> : null}
+          {part.content ? <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]}>{part.content}</Markdown></div> : null}
         </Fragment>
       ))}
     </>
