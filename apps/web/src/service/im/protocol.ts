@@ -94,6 +94,9 @@ export interface HITLQuestion {
   /** 没有 options 时，前端展示自由文本输入框。 */
   options?: string[];
 
+  /** 模型推荐的候选项，前端置顶展示但不自动选择。 */
+  recommendedOption?: string;
+
   /** true 表示用户可以选择多个 options。 */
   multiple?: boolean;
 

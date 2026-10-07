@@ -106,7 +106,11 @@ func validateInteractionAnswers(questions []HITLQuestion, answers []HITLAnswer) 
 		}
 		seen := map[string]bool{}
 		for _, value := range values {
-			if utf8.RuneCountInString(value) > 8000 {
+			limit := 8000
+			if question.Multiple {
+				limit = 500
+			}
+			if utf8.RuneCountInString(value) > limit {
 				return fmt.Errorf("回答过长")
 			}
 			if question.Required && strings.TrimSpace(value) == "" {
@@ -116,18 +120,6 @@ func validateInteractionAnswers(questions []HITLQuestion, answers []HITLAnswer) 
 				return fmt.Errorf("不能重复选择同一选项")
 			}
 			seen[value] = true
-			if len(question.Options) > 0 {
-				valid := false
-				for _, option := range question.Options {
-					if option == value {
-						valid = true
-						break
-					}
-				}
-				if !valid {
-					return fmt.Errorf("答案不在可选范围内")
-				}
-			}
 		}
 	}
 	return nil

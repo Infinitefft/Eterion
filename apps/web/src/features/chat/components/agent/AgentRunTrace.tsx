@@ -2,6 +2,7 @@ import { Ban, Check, ChevronDown, CircleAlert, LoaderCircle, Sparkles, Wrench } 
 import { Fragment, useId, useState, type FormEvent } from 'react';
 
 import thinkingProcessIcon from '@/assets/icons/thinking-process.png';
+import { getHITLAnswerValue, type HITLAnswerDraft } from '@/features/chat/model/hitlAnswers';
 import { getIMService } from '@/service/im';
 import type {
   AgentBlockState,
@@ -132,80 +133,70 @@ function AgentBlockItem({ block }: { block: AgentBlockState }) {
   );
 }
 
-type HITLDraft = Partial<Record<string, string | string[]>>;
+type HITLDraft = Partial<Record<string, HITLAnswerDraft>>;
 
-function hasHITLValue(value: string | string[] | undefined): boolean {
-  return Array.isArray(value) ? value.length > 0 : Boolean(value?.trim());
+function hasHITLValue(value: string | string[]): boolean {
+  return Array.isArray(value) ? value.length > 0 : Boolean(value.trim());
 }
 
-function HITLQuestionField({
-  question,
-  value,
-  onChange,
-}: {
+function HITLQuestionField({ question, value, onChange }: {
   question: HITLQuestion;
-  value: string | string[] | undefined;
-  onChange: (value: string | string[]) => void;
+  value: HITLAnswerDraft | undefined;
+  onChange: (value: HITLAnswerDraft) => void;
 }) {
-  if (question.options && question.multiple) {
-    const selectedValues = Array.isArray(value) ? value : [];
-
-    return (
-      <fieldset className='chat-hitl-question'>
-        <legend>{question.prompt}</legend>
-        {question.options.map((option) => (
-          <label key={option}>
-            <input
-              type='checkbox'
-              checked={selectedValues.includes(option)}
-              onChange={(event) => {
-                onChange(
-                  event.target.checked
-                    ? [...selectedValues, option]
-                    : selectedValues.filter((current) => current !== option),
-                );
-              }}
-            />
-            <span>{option}</span>
-          </label>
-        ))}
-      </fieldset>
-    );
-  }
-
-  if (question.options) {
-    return (
-      <label className='chat-hitl-question'>
-        <span>{question.prompt}</span>
-        <select
-          value={typeof value === 'string' ? value : ''}
-          required={question.required}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          <option value=''>请选择</option>
-          {question.options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-      </label>
-    );
-  }
+  const fieldId = useId();
+  const selected = value?.selected ?? [];
+  const custom = value?.custom ?? '';
+  const options = question.options ?? [];
+  const recommended = question.recommendedOption;
+  const orderedOptions = recommended && options.includes(recommended)
+    ? [recommended, ...options.filter((option) => option !== recommended)]
+    : options;
 
   return (
-    <label className='chat-hitl-question'>
-      <span>{question.prompt}</span>
-      <input
-        type='text'
-        value={typeof value === 'string' ? value : ''}
-        required={question.required}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
+    <fieldset className='chat-hitl-question'>
+      <legend>{question.prompt}</legend>
+      {orderedOptions.length > 0 ? (
+        <>
+          <span className='chat-hitl-hint'>{question.multiple ? '可多选，也可以补充自己的想法' : '请选择一项，或直接填写你的想法'}</span>
+          <div className='chat-hitl-options'>
+            {orderedOptions.map((option) => (
+              <label key={option} className='chat-hitl-option'>
+                <input
+                  type={question.multiple ? 'checkbox' : 'radio'}
+                  name={fieldId}
+                  checked={selected.includes(option)}
+                  onChange={(event) => onChange({
+                    selected: question.multiple
+                      ? event.target.checked ? [...selected, option] : selected.filter((item) => item !== option)
+                      : [option],
+                    custom: question.multiple ? custom : '',
+                  })}
+                />
+                <span>{option}</span>
+                {option === recommended ? <span className='chat-hitl-recommended'>推荐</span> : null}
+              </label>
+            ))}
+          </div>
+        </>
+      ) : null}
+      <label className='chat-hitl-custom' htmlFor={fieldId}>
+        <span>{orderedOptions.length > 0 ? '自己的想法' : '你的回答'}</span>
+        <textarea
+          id={fieldId}
+          rows={2}
+          value={custom}
+          maxLength={question.multiple ? 500 : 8000}
+          placeholder={orderedOptions.length > 0 ? '没有合适的选项？在这里告诉我…' : '在这里填写…'}
+          onChange={(event) => onChange({
+            selected: question.multiple ? selected : [],
+            custom: event.target.value,
+          })}
+        />
+      </label>
+    </fieldset>
   );
 }
-
 /** requested 状态下提供一个最小可用表单，提交结果仍等待服务端 Envelope 确认。 */
 function HITLResponseForm({ block, runStatus }: { block: HITLInteractionState; runStatus?: RunStatus }) {
   const [draft, setDraft] = useState<HITLDraft>({});
@@ -215,7 +206,7 @@ function HITLResponseForm({ block, runStatus }: { block: HITLInteractionState; r
   const isClosed = runStatus !== undefined && !ACTIVE_RUN_STATUSES.has(runStatus);
   const isWaiting = runStatus === 'waiting_user';
   const canSubmit = block.questions.every(
-    (question) => !question.required || hasHITLValue(draft[question.questionId]),
+    (question) => !question.required || hasHITLValue(getHITLAnswerValue(question, draft[question.questionId])),
   );
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -224,8 +215,8 @@ function HITLResponseForm({ block, runStatus }: { block: HITLInteractionState; r
     if (!isWaiting || !canSubmit || isSubmitting || isSubmitted) return;
 
     const answers: HITLAnswer[] = block.questions.flatMap((question) => {
-      const value = draft[question.questionId];
-      return hasHITLValue(value) && value !== undefined
+      const value = getHITLAnswerValue(question, draft[question.questionId]);
+      return hasHITLValue(value)
         ? [{ questionId: question.questionId, value }]
         : [];
     });
@@ -327,10 +318,13 @@ function RunProcess({ blocks, run, hasContent, isCurrent, onOpenSource }: {
   isCurrent: boolean;
   onOpenSource?: (source: KnowledgeSource) => void;
 }) {
-  const [view, setView] = useState({ hasContent, expanded: !hasContent });
+  const waitingForAnswer = run.status === 'waiting_user' && blocks.some(
+    (block) => block.kind === 'hitl' && block.status === 'requested',
+  );
+  const [view, setView] = useState({ hasContent, waitingForAnswer, expanded: waitingForAnswer || !hasContent });
   const contentId = useId();
-  if (view.hasContent !== hasContent) {
-    setView({ hasContent, expanded: !hasContent });
+  if (view.hasContent !== hasContent || view.waitingForAnswer !== waitingForAnswer) {
+    setView({ hasContent, waitingForAnswer, expanded: waitingForAnswer || !hasContent });
   }
   const isWorking = isCurrent && (run.status === 'running' || run.status === 'pending');
 
@@ -338,7 +332,7 @@ function RunProcess({ blocks, run, hasContent, isCurrent, onOpenSource }: {
     <div className='chat-run-process'>
       <button type='button' className='chat-run-process-heading'
         aria-expanded={view.expanded} aria-controls={contentId}
-        onClick={() => setView({ hasContent, expanded: !view.expanded })}>
+        onClick={() => setView({ hasContent, waitingForAnswer, expanded: !view.expanded })}>
         <img src={thinkingProcessIcon} width={18} height={18} alt='' aria-hidden='true'
           className={isWorking ? 'chat-run-process-icon is-active' : 'chat-run-process-icon'} />
         <span>思考过程</span>
@@ -360,11 +354,11 @@ function RunTraceContent({ run, blocks, hideThinkingIndicator, hasContent, isCur
   onOpenSource?: (source: KnowledgeSource) => void;
 }) {
   const isActive = ACTIVE_RUN_STATUSES.has(run.status);
-  const processBlocks = blocks.filter((block) => block.kind !== 'hitl');
+  const processBlocks = blocks.filter((block) => block.kind !== 'hitl' || block.status === 'requested');
   const showHeading = isCurrent && run.status !== 'completed' &&
     !(isActive && (processBlocks.length > 0 || hideThinkingIndicator));
 
-  if (blocks.length === 0 && !showHeading) return null;
+  if (processBlocks.length === 0 && !showHeading) return null;
 
   return (
     <div className='chat-run-trace' data-status={run.status}>
@@ -398,25 +392,27 @@ export function AgentRunTrace({
   }
 
   const blocks = detail.blocks.filter((block) => block.runId === runId);
-  // 块数组保留发生顺序，即使 HITL 和恢复后的思考处于同一正文位置，也能划分为两段。
+  // 正文决定过程块的位置；同一位置的思考和工具合并，HITL 恢复后另起一段。
   const text = content ?? '';
-  const sections: { key: string; blocks: AgentBlockState[]; content: string; interaction?: HITLInteractionState }[] = [];
+  const sections: { key: string; blocks: AgentBlockState[]; content: string }[] = [];
   let section: (typeof sections)[number] = { key: 'start', blocks: [], content: '' };
   let cursor = 0;
   for (const block of blocks) {
-    if (block.kind !== 'hitl') {
-      section.blocks.push(block);
-      continue;
-    }
     const offset = block.contentOffset;
     const end = offset !== undefined && Number.isInteger(offset) && offset >= 0
       ? Math.max(cursor, Math.min(offset, text.length))
-      : text.length;
-    section.content = text.slice(cursor, end);
-    section.interaction = block;
-    sections.push(section);
-    section = { key: `after:${block.id}`, blocks: [], content: '' };
-    cursor = end;
+      : block.kind === 'hitl' ? text.length : cursor;
+    if (end > cursor) {
+      section.content = text.slice(cursor, end);
+      sections.push(section);
+      section = { key: `before:${block.kind}:${block.id}`, blocks: [], content: '' };
+      cursor = end;
+    }
+    section.blocks.push(block);
+    if (block.kind === 'hitl') {
+      sections.push(section);
+      section = { key: `after:hitl:${block.id}`, blocks: [], content: '' };
+    }
   }
   section.content = text.slice(cursor);
   sections.push(section);
@@ -425,12 +421,12 @@ export function AgentRunTrace({
     <>
       {sections.map((part, index) => (
         <Fragment key={part.key}>
-          <RunTraceContent run={run} blocks={part.blocks} hideThinkingIndicator={hideThinkingIndicator || run.status === 'waiting_user'}
-            isCurrent={index === sections.length - 1} hasContent={Boolean(part.content.trim())} onOpenSource={onOpenSource} />
+          <RunTraceContent run={run} blocks={part.blocks}
+            hideThinkingIndicator={hideThinkingIndicator || run.status === 'waiting_user' || blocks.some((block) => block.kind === 'tool' && block.status === 'running')}
+            isCurrent={index === sections.length - 1}
+            hasContent={Boolean(part.content.trim()) || !ACTIVE_RUN_STATUSES.has(run.status)}
+            onOpenSource={onOpenSource} />
           {part.content ? <p className='chat-message-text'>{part.content}</p> : null}
-          {part.interaction ? (
-            <AgentBlockList blocks={[part.interaction]} runStatus={run.status} onOpenSource={onOpenSource} />
-          ) : null}
         </Fragment>
       ))}
     </>

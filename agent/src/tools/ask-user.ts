@@ -10,16 +10,18 @@ export const askUser = tool(
   },
   {
     name: 'ask_user',
-    description: '缺少影响任务结果的关键信息，且无法从上下文确定时向用户提问。将相关问题集中在一次调用中，等待真实回答后继续。已有明确答案或可采用合理默认值时不要反复询问。',
+    description: '仅在缺少影响结果的关键信息时提问。默认只问一个核心问题，优先提供单选；确实允许组合才用多选。前端会为每道选择题自动提供自填输入框，不要再为同一问题追加多选题、其他选项或文本题。只有互不重复且都阻碍继续的独立问题才合并询问，最多三个。已有答案或能用合理默认值时直接继续，不要为了展示交互而提问。',
     schema: z.object({
       questions: z.array(z.object({
         questionId: z.string().trim().min(1).max(100).describe('本次提问中唯一的问题标识'),
         prompt: z.string().trim().min(1).max(2000).describe('向用户展示的问题'),
-        options: z.array(z.string().trim().min(1).max(500)).min(1).max(20).optional()
-          .describe('可选答案；省略时使用自由文本输入'),
-        multiple: z.boolean().optional().describe('提供 options 时是否允许多选'),
+        options: z.array(z.string().trim().min(1).max(500)).min(2).max(6).optional()
+          .describe('2～6 个简短候选答案，不包含“其他/自行填写”；仅无法提供有意义候选项时省略'),
+        recommendedOption: z.string().trim().min(1).max(500).optional()
+          .describe('有明确依据时填写一个推荐选项，必须与 options 中某项完全一致；前端置顶并标注推荐，不在选项文字中加标记。没有推荐则省略'),
+        multiple: z.boolean().optional().describe('默认 false 单选；只有答案可组合时为 true，不要为同一问题同时生成单选和多选'),
         required: z.boolean().optional().describe('继续任务所必需的问题设为 true'),
-      })).min(1).max(10),
+      })).min(1).max(3),
     }).superRefine(({ questions }, ctx) => {
       const ids = new Set<string>();
       for (const question of questions) {
@@ -28,6 +30,9 @@ export const askUser = tool(
           ctx.addIssue({ code: 'custom', message: '问题 ID、选项不得重复，多选题必须提供选项' });
         }
         ids.add(question.questionId);
+        if (question.recommendedOption && !question.options?.includes(question.recommendedOption)) {
+          ctx.addIssue({ code: 'custom', message: '推荐项必须属于候选选项' });
+        }
       }
     }),
   },
@@ -61,9 +66,9 @@ export function validateAnswers(questions: z.infer<typeof askUser.schema>['quest
     if (question.required && (!values.length || values.some((item) => !item.trim()))) {
       throw new Error('请回答必填问题');
     }
-    if (new Set(values).size !== values.length
-      || (question.options && values.some((item) => !question.options?.includes(item)))) {
-      throw new Error('答案不在可选范围内');
+    // 候选项是帮助用户表达偏好的建议，允许用户填写选项之外的真实答案。
+    if (new Set(values).size !== values.length) {
+      throw new Error('不能重复选择同一选项');
     }
   }
   return response;

@@ -151,11 +151,12 @@ type ToolFailedPayload struct {
 }
 
 type HITLQuestion struct {
-	QuestionID string   `json:"questionId"`
-	Prompt     string   `json:"prompt"`
-	Options    []string `json:"options,omitempty"`
-	Multiple   bool     `json:"multiple,omitempty"`
-	Required   bool     `json:"required,omitempty"`
+	RecommendedOption string   `json:"recommendedOption,omitempty"`
+	QuestionID        string   `json:"questionId"`
+	Prompt            string   `json:"prompt"`
+	Options           []string `json:"options,omitempty"`
+	Multiple          bool     `json:"multiple,omitempty"`
+	Required          bool     `json:"required,omitempty"`
 }
 
 type InteractionRequestedPayload struct {
