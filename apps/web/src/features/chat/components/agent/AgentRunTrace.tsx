@@ -1,6 +1,7 @@
 import { Ban, Check, ChevronDown, CircleAlert, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
 import { Fragment, useId, useState, type FormEvent } from 'react';
 import Markdown from 'react-markdown';
+import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 
 import thinkingProcessIcon from '@/assets/icons/thinking-process.png';
@@ -22,6 +23,9 @@ import { ThinkingBlock } from './ThinkingBlock';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolCallItem } from './ToolCallItem';
 import type { KnowledgeSource } from './KnowledgeSources';
+
+// A/B 测试时通过此开关控制代码高亮。
+const CODE_HIGHLIGHT_ENABLED = true;
 
 interface AgentRunTraceProps {
   threadId: ThreadId;
@@ -390,7 +394,7 @@ export function AgentRunTrace({
   const run = detail?.runs.find((current) => current.id === runId);
 
   if (!detail || !run) {
-    return content ? <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown></div> : null;
+    return content ? <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={CODE_HIGHLIGHT_ENABLED ? [rehypeHighlight] : []}>{content}</Markdown></div> : null;
   }
 
   const blocks = detail.blocks.filter((block) => block.runId === runId);
@@ -424,7 +428,7 @@ export function AgentRunTrace({
             isCurrent={index === sections.length - 1}
             hasContent={Boolean(part.content.trim()) || !ACTIVE_RUN_STATUSES.has(run.status)}
             onOpenSource={onOpenSource} />
-          {part.content ? <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]}>{part.content}</Markdown></div> : null}
+          {part.content ? <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={CODE_HIGHLIGHT_ENABLED ? [rehypeHighlight] : []}>{part.content}</Markdown></div> : null}
         </Fragment>
       ))}
     </>

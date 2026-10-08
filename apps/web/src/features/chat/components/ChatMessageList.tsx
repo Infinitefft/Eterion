@@ -1,5 +1,6 @@
 import { Fragment } from 'react';
 import Markdown from 'react-markdown';
+import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 
 import { getAssistantPlaceholders } from '@/features/chat/model/chatSelectors';
@@ -10,6 +11,8 @@ import { AgentRunTrace } from './agent/AgentRunTrace';
 import type { KnowledgeSource } from './agent/KnowledgeSources';
 import { ThinkingIndicator } from './agent/ThinkingIndicator';
 
+// A/B 测试时通过此开关控制代码高亮。
+const CODE_HIGHLIGHT_ENABLED = true;
 const EMPTY_MESSAGES: MessageState[] = [];
 const EMPTY_RUNS: RunState[] = [];
 const EMPTY_BLOCKS: AgentBlockState[] = [];
@@ -116,7 +119,7 @@ function AssistantMessage({ message, onOpenSource }: MessageProps & {
         ) : null}
 
         {!message.runId && message.content ? (
-          <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown></div>
+          <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={CODE_HIGHLIGHT_ENABLED ? [rehypeHighlight] : []}>{message.content}</Markdown></div>
         ) : null}
 
         {statusText ? (

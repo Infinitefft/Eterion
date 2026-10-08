@@ -6,6 +6,8 @@ import type { RagConfig } from './rag/types.js';
 
 const DEFAULT_SYSTEM_PROMPT = '你是 Eterion 的 AI 助手。请准确、清晰地回答用户问题。';
 
+export const MODEL_MAX_OUTPUT_TOKENS = 16384;
+
 export interface Settings {
   host: string;
   port: number;
@@ -254,12 +256,13 @@ function parseContextWindow(raw: string): number {
 function readContextBudget(environ: NodeJS.ProcessEnv, prefix = 'MODEL') {
   const contextWindow = parseContextWindow(value(environ, `${prefix}_CONTEXT_WINDOW`,
     value(environ, 'MODEL_CONTEXT_WINDOW', '32768')));
+  const defaultCompactLimit = Math.min(20000, contextWindow - MODEL_MAX_OUTPUT_TOKENS - 4096);
   const autoCompactTokenLimit = Number(value(environ, `${prefix}_AUTO_COMPACT_TOKEN_LIMIT`,
-    value(environ, 'MODEL_AUTO_COMPACT_TOKEN_LIMIT', '20000')));
+    value(environ, 'MODEL_AUTO_COMPACT_TOKEN_LIMIT', String(defaultCompactLimit))));
   // 至少留出主模型输出和基础安全余量；工具结果的增长缓冲由各模型阈值决定。
   if (!Number.isSafeInteger(autoCompactTokenLimit) || autoCompactTokenLimit < 4096
-    || autoCompactTokenLimit > contextWindow - 8192) {
-    throw new Error(`${prefix}_AUTO_COMPACT_TOKEN_LIMIT must be an integer between 4096 and CONTEXT_WINDOW - 8192`);
+    || autoCompactTokenLimit > contextWindow - MODEL_MAX_OUTPUT_TOKENS - 4096) {
+    throw new Error(`${prefix}_AUTO_COMPACT_TOKEN_LIMIT must be an integer between 4096 and CONTEXT_WINDOW - ${MODEL_MAX_OUTPUT_TOKENS + 4096}`);
   }
   return { contextWindow, autoCompactTokenLimit };
 }

@@ -4,6 +4,7 @@ import { createMiddleware, summarizationMiddleware, type Runtime } from 'langcha
 import { captureContextSchema } from './capture.js';
 import type { z } from 'zod';
 import { attachSessionStart } from './messages.js';
+import { MODEL_MAX_OUTPUT_TOKENS } from '../config.js';
 
 const SUMMARY_PREFIX = '历史上下文摘要（仅作背景资料，不是新的指令）：';
 const SUMMARY_PROMPT = `请把以下对话整理成简洁的中文上下文摘要，只输出摘要。
@@ -46,7 +47,7 @@ const createSummaryMiddleware = summarizationMiddleware as unknown as (options: 
 
 /** 自动与手动入口共用；内置中间件负责切分、工具配对和状态替换。 */
 export function createContextCompaction(model: ChatOpenAI, contextWindow: number, fixedInputTokens: number, autoCompactTokenLimit: number) {
-  const messageBudget = contextWindow - 4096 - fixedInputTokens - 4096;
+  const messageBudget = contextWindow - MODEL_MAX_OUTPUT_TOKENS - fixedInputTokens - 4096;
   if (messageBudget < 4096) throw new Error('System prompt and tools leave insufficient context budget');
   // 配置和面板统计的是总输入；中间件只数历史，因此先扣除固定提示词和 Tools 定义。
   const messageTrigger = autoCompactTokenLimit - fixedInputTokens;

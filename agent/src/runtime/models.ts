@@ -1,6 +1,6 @@
 import { ChatOpenAI } from '@langchain/openai';
 
-import type { Settings } from '../config.js';
+import { MODEL_MAX_OUTPUT_TOKENS, type Settings } from '../config.js';
 
 /** SDK 创建集中在这里，Runtime 不感知 API Key、Base URL 等厂商细节。 */
 export function buildModelClients(settings: Settings, summary = false): Map<string, ChatOpenAI> {
@@ -12,8 +12,8 @@ export function buildModelClients(settings: Settings, summary = false): Map<stri
         apiKey: model.apiKey,
         timeout: settings.modelTimeoutMs,
         maxRetries: summary ? 0 : 2,
-        // 摘要和正式回答均保留 4096 Token 输出上限，避免较长中文摘要过早截断。
-        maxTokens: 4096,
+        // 正式回答为长代码留出空间；摘要和标题保持较小的输出预算。
+        maxTokens: summary ? 4096 : MODEL_MAX_OUTPUT_TOKENS,
 
         // 部分 OpenAI-compatible 服务不支持 stream_options。
         streamUsage: false,
