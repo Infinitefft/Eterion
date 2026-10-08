@@ -1,8 +1,5 @@
 import { Ban, Check, ChevronDown, CircleAlert, LoaderCircle, Sparkles, Wrench } from 'lucide-react';
 import { Fragment, useId, useState, type FormEvent } from 'react';
-import Markdown from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
-import remarkGfm from 'remark-gfm';
 import { useShallow } from 'zustand/react/shallow';
 
 import thinkingProcessIcon from '@/assets/icons/thinking-process.png';
@@ -24,15 +21,14 @@ import { ThinkingBlock } from './ThinkingBlock';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ToolCallItem } from './ToolCallItem';
 import type { KnowledgeSource } from './KnowledgeSources';
-
-// A/B 测试时通过此开关控制代码高亮。
-const CODE_HIGHLIGHT_ENABLED = true;
+import { StreamingMarkdown } from '../StreamingMarkdown';
 
 interface AgentRunTraceProps {
   threadId: ThreadId;
   runId: RunId;
   hideThinkingIndicator?: boolean;
   content?: string;
+  streaming?: boolean;
   onOpenSource?: (source: KnowledgeSource) => void;
 }
 
@@ -389,6 +385,7 @@ export function AgentRunTrace({
   runId,
   hideThinkingIndicator = false,
   content,
+  streaming,
   onOpenSource,
 }: AgentRunTraceProps) {
   const run = useIMStore((state) =>
@@ -400,7 +397,7 @@ export function AgentRunTrace({
   ));
 
   if (!run) {
-    return content ? <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={CODE_HIGHLIGHT_ENABLED ? [rehypeHighlight] : []}>{content}</Markdown></div> : null;
+    return content ? <div className='chat-message-text'><StreamingMarkdown content={content} streaming={streaming} /></div> : null;
   }
 
   // 只有实际正文才分隔过程；工具调用、HITL 暂停和恢复本身不另起一段。
@@ -433,7 +430,12 @@ export function AgentRunTrace({
             isCurrent={index === sections.length - 1}
             hasContent={Boolean(part.content.trim()) || !ACTIVE_RUN_STATUSES.has(run.status)}
             onOpenSource={onOpenSource} />
-          {part.content ? <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={CODE_HIGHLIGHT_ENABLED ? [rehypeHighlight] : []}>{part.content}</Markdown></div> : null}
+          {part.content ? <div className='chat-message-text'>
+            <StreamingMarkdown
+              content={part.content}
+              streaming={index === sections.length - 1 && (streaming ?? ACTIVE_RUN_STATUSES.has(run.status))}
+            />
+          </div> : null}
         </Fragment>
       ))}
     </>

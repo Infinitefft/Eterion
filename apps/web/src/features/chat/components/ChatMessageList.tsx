@@ -1,7 +1,4 @@
 import { Fragment, memo } from 'react';
-import Markdown from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
-import remarkGfm from 'remark-gfm';
 
 import { getAssistantPlaceholders } from '@/features/chat/model/chatSelectors';
 import type { AgentBlockState, MessageState, RunId, RunState, ThreadId } from '@/service/im/types';
@@ -10,9 +7,8 @@ import { useIMStore } from '@/store/im-store';
 import { AgentRunTrace } from './agent/AgentRunTrace';
 import type { KnowledgeSource } from './agent/KnowledgeSources';
 import { ThinkingIndicator } from './agent/ThinkingIndicator';
+import { StreamingMarkdown } from './StreamingMarkdown';
 
-// A/B 测试时通过此开关控制代码高亮。
-const CODE_HIGHLIGHT_ENABLED = true;
 const EMPTY_MESSAGES: MessageState[] = [];
 const EMPTY_RUNS: RunState[] = [];
 const EMPTY_BLOCKS: AgentBlockState[] = [];
@@ -108,6 +104,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onOpenSource 
             runId={message.runId}
             hideThinkingIndicator={isStreaming}
             content={message.content}
+            streaming={isStreaming}
             onOpenSource={onOpenSource}
           />
         ) : null}
@@ -119,7 +116,7 @@ const AssistantMessage = memo(function AssistantMessage({ message, onOpenSource 
         ) : null}
 
         {!message.runId && message.content ? (
-          <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={CODE_HIGHLIGHT_ENABLED ? [rehypeHighlight] : []}>{message.content}</Markdown></div>
+          <div className='chat-message-text'><StreamingMarkdown content={message.content} streaming={isStreaming} /></div>
         ) : null}
 
         {statusText ? (

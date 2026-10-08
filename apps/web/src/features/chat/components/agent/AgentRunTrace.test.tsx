@@ -30,12 +30,22 @@ function render(content: string, status: 'running' | 'completed' | 'waiting_user
 }
 
 describe('combined run process', () => {
-  it('renders a GFM table in the answer instead of showing pipe separators', () => {
+  it('preserves unsupported table syntax as text in the lightweight renderer', () => {
     const html = render('汇总结论\n\n| 检查项 | 结果 |\n|---|---|\n| 英文查询 | ✅ 正常 |', 'completed');
-    expect(html).toContain('<table>');
-    expect(html).toContain('<th>检查项</th>');
-    expect(html).toContain('<td>✅ 正常</td>');
-    expect(html).not.toContain('|---|---|');
+    expect(html).not.toContain('<table>');
+    expect(html).toContain('| 检查项 | 结果 |');
+    expect(html).toContain('|---|---|');
+    expect(html).toContain('| 英文查询 | ✅ 正常 |');
+  });
+
+  it('renders custom headings, bold text and highlighted code in streaming and history', () => {
+    for (const status of ['running', 'completed'] as const) {
+      const html = render('# 标题\n\n**加粗**\n\n```ts\nconst value = 1;\n```', status);
+      expect(html).toContain('<h1>标题</h1>');
+      expect(html).toContain('<strong>加粗</strong>');
+      expect(html).toContain('hljs-keyword');
+      expect(html).not.toContain('```');
+    }
   });
 
   it('shows web tools inside their process group at the saved UTF-16 position', () => {

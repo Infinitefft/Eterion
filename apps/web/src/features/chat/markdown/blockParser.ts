@@ -202,7 +202,7 @@ export class MarkdownBlockParser {
    */
   previewLine(line: string, startOffset: number): MarkdownBlockNode | null {
     const currentActive = this.getActiveBlock();
-    const previewParser = this.createPreviewParser();
+    const previewParser = this.clone();
     const previewStable = previewParser.pushLine(line, startOffset);
 
     if (currentActive && previewStable.length > 0) {
@@ -337,8 +337,8 @@ export class MarkdownBlockParser {
     return completed;
   }
 
-  /** Preview 使用独立副本，任何试探性解析都不会污染真实的 Block 状态机。 */
-  private createPreviewParser(): MarkdownBlockParser {
+  /** Preview 和 React 渲染重试使用独立副本，不修改已经提交的解析状态。 */
+  clone(): MarkdownBlockParser {
     const parser = new MarkdownBlockParser();
     const active = this.activeBlock;
 

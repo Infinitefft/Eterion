@@ -15,7 +15,7 @@ export interface StreamingMarkdownSnapshot {
  * activeBlock 独立更新，因此后续 React.memo 可以跳过全部历史稳定块。
  */
 export class StreamingMarkdownParser {
-  private readonly blockParser = new MarkdownBlockParser();
+  private blockParser = new MarkdownBlockParser();
 
   private stableBlocks: readonly MarkdownBlockNode[] = [];
 
@@ -35,6 +35,18 @@ export class StreamingMarkdownParser {
   /** 返回最近一次 push/finish 生成的只读快照。 */
   getSnapshot(): StreamingMarkdownSnapshot {
     return this.snapshot;
+  }
+
+  /** 稳定 AST 可共享；只有尚未定型的状态需要复制，避免并发渲染污染旧快照。 */
+  clone(): StreamingMarkdownParser {
+    const parser = new StreamingMarkdownParser();
+    parser.blockParser = this.blockParser.clone();
+    parser.stableBlocks = this.stableBlocks;
+    parser.buffer = this.buffer;
+    parser.bufferStartOffset = this.bufferStartOffset;
+    parser.finished = this.finished;
+    parser.snapshot = this.snapshot;
+    return parser;
   }
 
   /**

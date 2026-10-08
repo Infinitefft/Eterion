@@ -29,6 +29,9 @@ importers:
       immer:
         specifier: ^11.1.18
         version: 11.1.18
+      lowlight:
+        specifier: ^3.3.0
+        version: 3.3.0
       lucide-react:
         specifier: ^1.25.0
         version: 1.25.0(react@19.2.7)
