@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, memo } from 'react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -41,7 +41,7 @@ function getUserMessageStatus(message: MessageState): string | null {
 }
 
 /** 用户消息正文和发送终态。重试能力留给后续 Command 层。 */
-function UserMessage({ message }: MessageProps) {
+const UserMessage = memo(function UserMessage({ message }: MessageProps) {
   const statusText = getUserMessageStatus(message);
   const isError = message.status === 'failed';
 
@@ -61,7 +61,7 @@ function UserMessage({ message }: MessageProps) {
       </div>
     </article>
   );
-}
+});
 
 function getAssistantStatus(message: MessageState): string | null {
   switch (message.status) {
@@ -77,7 +77,7 @@ function getAssistantStatus(message: MessageState): string | null {
 }
 
 /** Assistant 正文及其关联 Run 的公开过程。 */
-function AssistantMessage({ message, onOpenSource }: MessageProps & {
+const AssistantMessage = memo(function AssistantMessage({ message, onOpenSource }: MessageProps & {
   onOpenSource: (source: KnowledgeSource) => void;
 }) {
   const statusText = getAssistantStatus(message);
@@ -133,10 +133,10 @@ function AssistantMessage({ message, onOpenSource }: MessageProps & {
       </div>
     </article>
   );
-}
+});
 
 /** 正式 AI 消息出现前的过程区域，也保留没有正文的历史运行结果。 */
-function PendingAssistantMessage({ threadId, runId, onOpenSource }: {
+const PendingAssistantMessage = memo(function PendingAssistantMessage({ threadId, runId, onOpenSource }: {
   threadId: ThreadId;
   runId: RunId | null;
   onOpenSource: (source: KnowledgeSource) => void;
@@ -154,7 +154,7 @@ function PendingAssistantMessage({ threadId, runId, onOpenSource }: {
       </div>
     </article>
   );
-}
+});
 
 /** 当前 Thread 的消息列表；Thinking、Tool 和 HITL 由各消息关联的 Run 展示。 */
 export function ChatMessageList({ threadId, onOpenSource }: ChatMessageListProps) {

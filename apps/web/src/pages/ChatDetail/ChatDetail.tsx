@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 
 import { routePaths } from '@/app/routePaths';
@@ -96,6 +96,12 @@ export function ChatDetail() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedSource, threadId]);
 
+  const handleOpenSource = useCallback((source: KnowledgeSource) => {
+    if (!threadId) return;
+    sourceTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSelectedSource({ threadId, source });
+  }, [threadId]);
+
   if (!threadId) {
     return <Navigate to={routePaths.chat} replace />;
   }
@@ -116,10 +122,7 @@ export function ChatDetail() {
         </div>
       ) : null}
 
-      <ChatConversation threadId={threadId} onOpenSource={(source) => {
-        sourceTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        setSelectedSource({ threadId, source });
-      }} />
+      <ChatConversation threadId={threadId} onOpenSource={handleOpenSource} />
       <Composer threadId={threadId} />
       {selectedSource?.threadId === threadId && <KnowledgeSourcePanel
         source={selectedSource.source}

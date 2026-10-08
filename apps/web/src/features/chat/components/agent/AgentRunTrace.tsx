@@ -3,6 +3,7 @@ import { Fragment, useId, useState, type FormEvent } from 'react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
+import { useShallow } from 'zustand/react/shallow';
 
 import thinkingProcessIcon from '@/assets/icons/thinking-process.png';
 import { getHITLAnswerValue, type HITLAnswerDraft } from '@/features/chat/model/hitlAnswers';
@@ -390,14 +391,18 @@ export function AgentRunTrace({
   content,
   onOpenSource,
 }: AgentRunTraceProps) {
-  const detail = useIMStore((state) => state.detailsByThread[threadId]);
-  const run = detail?.runs.find((current) => current.id === runId);
+  const run = useIMStore((state) =>
+    state.detailsByThread[threadId]?.runs.find((current) => current.id === runId),
+  );
+  // 只订阅当前 Run；其他回复的增量不能绕过消息 memo，触发历史正文重新解析。
+  const blocks = useIMStore(useShallow((state) =>
+    state.detailsByThread[threadId]?.blocks.filter((block) => block.runId === runId) ?? [],
+  ));
 
-  if (!detail || !run) {
+  if (!run) {
     return content ? <div className='chat-message-text'><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={CODE_HIGHLIGHT_ENABLED ? [rehypeHighlight] : []}>{content}</Markdown></div> : null;
   }
 
-  const blocks = detail.blocks.filter((block) => block.runId === runId);
   // 只有实际正文才分隔过程；工具调用、HITL 暂停和恢复本身不另起一段。
   const text = content ?? '';
   const sections: { key: string; blocks: AgentBlockState[]; content: string }[] = [];
