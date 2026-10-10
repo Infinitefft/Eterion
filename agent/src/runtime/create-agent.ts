@@ -53,6 +53,7 @@ type KnowledgeSearchTool = ReturnType<typeof createKnowledgeSearchTool>['tool'];
 // 保留捕获回调，身份留在每次调用的运行上下文中，不进入模型消息。
 const agentContextSchema = captureContextSchema.extend({
   userId: z.string().optional(),
+  originalQuestion: z.string().optional(),
   inputMessageCreatedAt: z.number().optional(),
 });
 
@@ -89,8 +90,9 @@ export function createWebAgent(options: CreateWebAgentOptions): WebAgent {
   const modelCallLimit = createModelCallLimit({ runLimit: MAX_MODEL_CALLS, exitBehavior: 'error' });
   const toolError = toolErrorMiddleware({
     tools,
-    onError: (_error, request) =>
-      `工具 ${request.toolCall.name} 执行失败。请调整参数、改用其他信息来源，或如实向用户说明当前限制。`,
+    onError: (_error, request) => request.toolCall.name === 'knowledge_search'
+      ? '知识库检索执行失败，当前无法检索。这不表示资料不存在；该工具没有可改写的查询参数，请如实向用户说明限制。'
+      : `工具 ${request.toolCall.name} 执行失败。请调整参数、改用其他信息来源，或如实向用户说明当前限制。`,
   });
   return createAgent({
     model: options.model,

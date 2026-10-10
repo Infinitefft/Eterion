@@ -72,11 +72,10 @@ export async function embedQuery(
   signal?: AbortSignal,
 ): Promise<number[]> {
   signal?.throwIfAborted();
-  const text = query.trim();
-  if (!text || countBudgetTokens(text) > QUERY_TOKEN_BUDGET) {
+  if (!query.trim() || countBudgetTokens(query) > QUERY_TOKEN_BUDGET) {
     throw new Error('RAG query must be nonempty and within the 2048 proxy token budget');
   }
-  const [embedding] = await embedTexts([text], 'query', config, signal);
+  const [embedding] = await embedTexts([query], 'query', config, signal);
   if (!embedding) throw new Error('Missing query embedding');
   return embedding;
 }

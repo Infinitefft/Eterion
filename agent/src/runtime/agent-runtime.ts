@@ -222,6 +222,8 @@ export function createAgentRuntime(
         if (!input.resume) yield { type: 'content.started', runId, payload: { format: 'markdown' } };
         signal.throwIfAborted();
 
+        // 从原始输入取本轮问题，不读取压缩摘要；暂停恢复仍使用 saved.input 中的原文。
+        const originalMessage = input.messages.at(-1);
         // stream() 真正启动 Agent Loop；不用手动执行 Tool 或回填 ToolMessage。
         const events = await agent.stream(
           input.resume ? new Command({
@@ -236,6 +238,7 @@ export function createAgentRuntime(
               thread_id: input.run_id,
             },
             context: {
+              ...(originalMessage?.role === 'user' ? { originalQuestion: originalMessage.content } : {}),
               ...(input.input_message_created_at === undefined ? {} : { inputMessageCreatedAt: input.input_message_created_at }),
               ...(input.user_id === undefined ? {} : { userId: input.user_id }),
               onContextTruncated() { contextTruncated = true; },
