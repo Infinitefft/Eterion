@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { buildEmbeddingText } from './embedding.js';
 import type { EmbeddedChunk, SearchHit } from './types.js';
 
 const INSERT_BATCH_SIZE = 100;
@@ -62,6 +63,39 @@ export function createRagStore(databaseUrl: string) {
       });
     },
 
+    async searchKeywordChunks(userId: string, query: string, signal?: AbortSignal): Promise<SearchHit[]> {
+      signal?.throwIfAborted();
+      let rows: SearchRow[];
+      try {
+        // ||| 按索引分词器处理普通文本，不把用户文本当成搜索语法。
+        // 必须先限定归属再取 Top K，不能先取全库候选再过滤用户。
+        const result = await pool.query<SearchRow>(`
+          SELECT c.id AS "chunkId", c.file_id AS "fileId",
+            f.knowledge_base_id AS "knowledgeBaseId", f.original_name AS "fileName",
+            c.section_id AS "sectionId", c.chunk_index AS "chunkIndex",
+            c.content, c.heading_path AS "headingPath",
+            c.start_offset AS "startOffset", c.end_offset AS "endOffset",
+            pdb.score(c.id) AS "bm25Score"
+          FROM rag_chunks c
+          JOIN knowledge_files f ON f.id = c.file_id
+          JOIN knowledge_bases b ON b.id = f.knowledge_base_id
+          WHERE b.user_id = $1 AND c.search_text ||| $2::text
+          ORDER BY "bm25Score" DESC, c.id ASC
+          LIMIT ${SEARCH_LIMIT}`, [userId, query]);
+        rows = result.rows;
+      } catch (error) {
+        signal?.throwIfAborted();
+        throw databaseError(error);
+      }
+      signal?.throwIfAborted();
+      return rows.map(({ startOffset, endOffset, ...hit }) => {
+        if (!Number.isFinite(hit.bm25Score)) throw new Error('RAG search returned an invalid BM25 score');
+        return startOffset !== null && endOffset !== null
+          ? { ...hit, startOffset, endOffset }
+          : hit;
+      });
+    },
+
     async assertFileExists(fileId: string): Promise<void> {
       let result;
       try {
@@ -95,12 +129,12 @@ export function createRagStore(databaseUrl: string) {
             const offset = values.length;
             values.push(chunk.id, fileId, chunk.sectionId, chunk.content, chunk.headingPath,
               chunk.chunkIndex, chunk.startOffset ?? null, chunk.endOffset ?? null,
-              JSON.stringify(chunk.embedding));
-            return `(${Array.from({ length: 9 }, (_, index) =>
+              JSON.stringify(chunk.embedding), buildEmbeddingText(chunk));
+            return `(${Array.from({ length: 10 }, (_, index) =>
               `$${offset + index + 1}${index === 8 ? '::vector' : ''}`).join(', ')})`;
           });
           await client.query(`INSERT INTO rag_chunks
-            (id, file_id, section_id, content, heading_path, chunk_index, start_offset, end_offset, embedding)
+            (id, file_id, section_id, content, heading_path, chunk_index, start_offset, end_offset, embedding, search_text)
             VALUES ${rows.join(', ')}`, values);
         }
         signal?.throwIfAborted();

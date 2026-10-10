@@ -143,7 +143,7 @@ Web、Go API 和 Agent 分别使用各自目录下的本地配置文件：
 在根目录创建 `.env.docker`（不提交 Git），填写 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`。值使用单引号包裹，避免密码中的 `$` 被 Compose 插值；数据库名使用 `eterion`。然后在根目录执行：
 
 ```powershell
-docker compose --env-file .env.docker up -d --wait
+docker compose --env-file .env.docker up -d --build --wait
 ```
 
 数据库监听 `127.0.0.1:5433`，保持原本机数据库的 `Asia/Shanghai` 时区。将 `services/api/.env` 的 `DATABASE_URL` 设置为该地址，用户名、密码和数据库名与 `.env.docker` 一致；URL 中的特殊字符需编码。已有进程环境中的 `DATABASE_URL` 会优先于 `.env`，修改后需重启 Go API。
@@ -157,7 +157,11 @@ Set-Location services/api
 goose -dir migrations postgres "<数据库连接字符串>" up
 ```
 
-API 启动不会自动执行迁移。第 10 版迁移启用 `vector` 扩展并创建 `rag_chunks`；回滚该版只删除 Chunk 表，保留扩展。Agent 的数据库客户端将在接入 RAG 时添加。
+API 启动不会自动执行迁移。第 10 版迁移启用 `vector` 扩展并创建 `rag_chunks`；第 11 版启用 `pg_search`，添加 `search_text` 与 Jieba BM25 索引。Agent 直接通过 PostgreSQL 读写 Chunk，文件及知识库归属仍由 Go 维护。
+
+数据库镜像基于 `pgvector/pgvector:0.8.6-pg18-trixie`，由 `docker/postgres/Dockerfile` 安装固定版本 `pg_search 0.26.1` 并预加载。不新增数据库服务或 Node.js 搜索依赖。首次升级先暂停项目写入并备份，再构建镜像、重启数据库、执行 Goose 迁移，最后更新 Agent；保留原卷，不执行 `down -v`。回退时先停止新版 Agent，回滚第 11 版迁移并移除 `pg_search` 扩展后，才恢复旧镜像和预加载配置；回滚不删除原 Chunk 或向量。
+
+新文件入库时同时写入“标题路径 + 正文”的关键词字段，索引随事务提交、文件删除同步维护，重启后仍然存在。已有 Chunk 不补建关键词字段，仍只参与向量召回；如需纳入混合检索，通过正常上传重新入库，A/B 时避免重复资料混在同一检索范围。检索使用向量 Top 20 + BM25 Top 20 → RRF Top 20 → qwen3-rerank → 现有阈值 → 最多 5 条，详见 [Agent 检索说明](agent/README.md)。
 
 从旧数据库迁移时先暂停项目写入，使用 `pg_dump -Fc -f <备份文件>` 备份，再以 `pg_restore --no-owner --no-acl --exit-on-error --single-transaction -d <目标数据库> <备份文件>` 恢复到空库；连接凭据通过本地环境变量提供。不要把二进制备份经过 PowerShell 文本管道。核对业务表和 Goose 历史后，再切换连接并执行新迁移。备份放在 Git 忽略的 `storage/db-backups/`，保留旧库。RAG 表结构及本机迁移结果见 [RAG 入库设计](agent/src/rag/INGESTION.md)。
 

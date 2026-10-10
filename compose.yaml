@@ -2,8 +2,10 @@ name: eterion
 
 services:
   postgres:
-    image: pgvector/pgvector:0.8.6-pg18-trixie
-    command: ["postgres", "-c", "timezone=Asia/Shanghai"]
+    image: eterion-postgres:18-pg-search-0.26.1
+    build:
+      context: ./docker/postgres
+    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "shared_preload_libraries=pg_search"]
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.docker}

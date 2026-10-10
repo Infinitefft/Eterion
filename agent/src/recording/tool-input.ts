@@ -16,11 +16,14 @@ export async function recordToolInput(args: JsonValue, config?: RunnableConfig):
 }
 
 export type RagStageEvent = {
-  name: 'query_embedding' | 'vector_search' | 'rerank' | 'filter'; status: 'running' | 'completed' | 'failed' | 'cancelled';
+  name: 'query_embedding' | 'vector_search' | 'bm25_search' | 'rrf_fusion' | 'rerank' | 'filter'; status: 'running' | 'completed' | 'failed' | 'cancelled';
   startedAt: number; endedAt?: number; model?: string; dimensions?: number; limit?: number;
   resultCount?: number; error?: { name: string; message: string };
   threshold?: number; candidateCount?: number; qualifiedCount?: number;
   candidates?: { chunkId: string; rerankScore: number; selected: boolean }[];
+  vectorCount?: number; bm25Count?: number; rankConstant?: number;
+  fusionCandidates?: { chunkId: string; cosineDistance?: number; bm25Score?: number;
+    vectorRank?: number; bm25Rank?: number; rrfScore: number; selected: boolean }[];
 };
 
 // 监控采集：沿用工具回调 ID 关联阶段；观察事件失败不影响检索。

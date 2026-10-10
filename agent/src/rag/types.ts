@@ -67,6 +67,10 @@ export interface SearchHit {
   startOffset?: number;
   endOffset?: number;
   // 余弦距离越小越接近，不是置信度。
-  cosineDistance: number;
+  cosineDistance?: number;
+  bm25Score?: number;
+  vectorRank?: number;
+  bm25Rank?: number;
+  rrfScore?: number;
   rerankScore?: number;
 }

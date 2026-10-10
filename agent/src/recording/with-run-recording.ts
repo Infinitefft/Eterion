@@ -254,7 +254,7 @@ export function withRunRecording(settings: Settings, runtime: RecordableRuntime)
             else {
               if (!args || typeof args !== 'object') return;
               const event = args as RagStageEvent;
-              if (!['query_embedding', 'vector_search', 'rerank', 'filter'].includes(event.name)) return;
+              if (!['query_embedding', 'vector_search', 'bm25_search', 'rrf_fusion', 'rerank', 'filter'].includes(event.name)) return;
               const stages = request.metadata.ragStages ?? [];
               const index = stages.findIndex((stage) => stage.name === event.name);
               if (index < 0) stages.push(event);
