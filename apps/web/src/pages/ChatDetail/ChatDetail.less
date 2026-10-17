@@ -104,8 +104,25 @@
 
 .chat-conversation {
   position: relative;
+  container-type: inline-size;
   flex: 1 1 auto;
   min-height: 0;
+
+  &::after {
+    content: '';
+    position: absolute;
+    z-index: 1;
+    right: 12px;
+    bottom: 0;
+    left: 0;
+    height: 40px;
+    pointer-events: none;
+    background: linear-gradient(to bottom, transparent, var(--canvas));
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    mask-image: linear-gradient(to bottom, transparent, #000);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000);
+  }
 }
 
 .chat-detail-scroll {
@@ -155,8 +172,9 @@
 
 .chat-message-list,
 .chat-message-empty {
-  width: min(880px, calc(100% - 40px));
-  margin: 0 auto;
+  // 以滚动区域外层计算，避免滚动条占宽导致与输入框错位。
+  width: min(880px, calc(100cqw - 40px));
+  margin: 0 0 0 max(20px, calc((100cqw - 880px) / 2));
 }
 
 .chat-message-list {
@@ -273,7 +291,6 @@
 .chat-message-row-assistant {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  padding-right: clamp(0px, 5vw, 48px);
 }
 
 .chat-assistant-content {
@@ -919,6 +936,7 @@ button.chat-tool-heading {
 
 .chat-scroll-bottom {
   position: absolute;
+  z-index: 2;
   right: 50%;
   bottom: 13px;
   display: inline-flex;
@@ -1196,10 +1214,14 @@ button.chat-tool-heading {
 
   .chat-source-panel { width: 100%; }
 
-  .chat-detail-alert,
+  .chat-detail-alert {
+    width: min(100% - 24px, 760px);
+  }
+
   .chat-message-list,
   .chat-message-empty {
-    width: min(100% - 24px, 760px);
+    width: min(100cqw - 24px, 760px);
+    margin-left: max(12px, calc((100cqw - 760px) / 2));
   }
 
   .chat-message-list {
@@ -1209,10 +1231,6 @@ button.chat-tool-heading {
 
   .chat-message-row-user {
     padding-left: 36px;
-  }
-
-  .chat-message-row-assistant {
-    padding-right: 0;
   }
 
   .chat-detail-compaction-notice {
