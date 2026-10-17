@@ -3,6 +3,7 @@ import { Fragment, memo, useState, type ReactNode } from 'react';
 
 import type { MarkdownBlockNode, MarkdownInlineNode } from '../markdown/ast';
 import { updateMarkdownRenderState } from '../markdown/renderState';
+import { CopyTextButton } from './CopyTextButton';
 
 const highlighter = createLowlight(common);
 
@@ -45,9 +46,15 @@ const MarkdownBlock = memo(function MarkdownBlock({ block }: { block: MarkdownBl
       const highlighted = language && highlighter.registered(language);
       const className = [highlighted ? 'hljs' : '', block.language ? `language-${block.language}` : '']
         .filter(Boolean).join(' ') || undefined;
-      return <pre><code className={className}>
-        {highlighted ? renderHighlight(highlighter.highlight(language, block.value).children) : block.value}
-      </code></pre>;
+      return <div className='chat-code-block'>
+        <div className='chat-code-toolbar'>
+          <span className='chat-code-language'>{block.language || '代码'}</span>
+          <CopyTextButton text={block.value} label='复制代码' />
+        </div>
+        <pre><code className={className}>
+          {highlighted ? renderHighlight(highlighter.highlight(language, block.value).children) : block.value}
+        </code></pre>
+      </div>;
     }
   }
 });

@@ -7,6 +7,7 @@ import { useIMStore } from '@/store/im-store';
 import { AgentRunTrace } from './agent/AgentRunTrace';
 import type { KnowledgeSource } from './agent/KnowledgeSources';
 import { ThinkingIndicator } from './agent/ThinkingIndicator';
+import { CopyTextButton } from './CopyTextButton';
 import { StreamingMarkdown } from './StreamingMarkdown';
 
 const EMPTY_MESSAGES: MessageState[] = [];
@@ -54,6 +55,9 @@ const UserMessage = memo(function UserMessage({ message }: MessageProps) {
             {statusText}
           </span>
         ) : null}
+      </div>
+      <div className='chat-user-message-actions'>
+        <CopyTextButton text={message.content} label='复制问题' />
       </div>
     </article>
   );
