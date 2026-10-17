@@ -639,7 +639,9 @@ button.chat-tool-heading {
     background: var(--hover);
 
     .chat-source-icon {
-      color: #2b561e;
+      color: #202123;
+      background: #fff;
+      border-color: #d8d8d8;
     }
 
     .chat-source-name {
@@ -662,10 +664,13 @@ button.chat-tool-heading {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #4b6343;
-  background: transparent;
-  border: 0;
-  transition: color 140ms ease;
+  width: 44px;
+  height: 48px;
+  border-radius: 11px;
+  color: #202123;
+  background: #fff;
+  border: 1px solid #e7e7e7;
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
 }
 
 .chat-source-name {

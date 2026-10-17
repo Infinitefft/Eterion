@@ -1,5 +1,5 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 
@@ -459,6 +459,13 @@ export function ChatHistoryList({ onNavigate }: ChatHistoryListProps) {
   // selector 本身就是订阅：Store 更新后 React 自动刷新，无需再复制到本地 state。
   const threads = useIMStore((state) => state.threads);
   const loadState = useIMStore((state) => state.threadListLoadState);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const weekAgo = new Date(today);
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  let previousGroup = '';
 
   return (
     <section className='recent-section' aria-labelledby='recent-chat-heading'>
@@ -469,9 +476,19 @@ export function ChatHistoryList({ onNavigate }: ChatHistoryListProps) {
       {/* 已有数据时优先保留列表，重新加载不会把整个列表替换成提示。 */}
       {threads.length > 0 ? (
         <nav className='conversation-nav' aria-label='最近会话'>
-          {threads.map((thread) => (
-            <ThreadHistoryItem key={thread.id} threadId={thread.id} onNavigate={onNavigate} />
-          ))}
+          {threads.map((thread) => {
+            const group = thread.updatedAt >= today.getTime() ? '今天'
+              : thread.updatedAt >= yesterday.getTime() ? '昨天'
+                : thread.updatedAt >= weekAgo.getTime() ? '近 7 天' : '更早';
+            const showGroup = group !== previousGroup;
+            previousGroup = group;
+            return (
+              <Fragment key={thread.id}>
+                {showGroup ? <h3 className='conversation-group-heading'>{group}</h3> : null}
+                <ThreadHistoryItem threadId={thread.id} onNavigate={onNavigate} />
+              </Fragment>
+            );
+          })}
         </nav>
       ) : loadState.status === 'loading' ? (
         <p className='conversation-empty'>正在加载会话…</p>

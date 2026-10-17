@@ -20,6 +20,7 @@ export function LibraryActions({
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const dismissedByPointerRef = useRef(false);
   const mutation = useMutation({
     mutationFn: () => deleteKnowledgeBase(baseId),
     retry: false,
@@ -46,8 +47,13 @@ export function LibraryActions({
             className='knowledge-library-menu'
             align='end'
             sideOffset={4}
+            onPointerDownOutside={() => {
+              dismissedByPointerRef.current = true;
+            }}
             onCloseAutoFocus={(event) => {
-              if (open) event.preventDefault();
+              // 点击外部关闭时不抢回焦点，避免操作按钮残留焦点高亮。
+              if (open || dismissedByPointerRef.current) event.preventDefault();
+              dismissedByPointerRef.current = false;
             }}
           >
             <DropdownMenu.Item

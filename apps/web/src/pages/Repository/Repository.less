@@ -128,7 +128,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #738465;
+  > svg {
+    color: #202123;
+  }
 }
 .repository-library-description {
   flex: 1;
@@ -192,7 +194,7 @@
   padding: 0 10px;
   border: 1px solid var(--repository-line);
   border-radius: 5px;
-  color: #92988b;
+  color: #202123;
   background: #fff;
   &:focus-within {
     border-color: #9eac91;
@@ -238,11 +240,11 @@
     border-color 150ms ease,
     background-color 150ms ease;
   &:hover {
-    background: #f3f5ee;
+    background: #f5f4f1;
   }
   &.is-selected {
-    border-color: #bcc9b0;
-    background: #f0f4e9;
+    border-color: #d8d6cf;
+    background: #edece8;
   }
 }
 .repository-file-cover {
@@ -250,10 +252,7 @@
   width: 40px;
   height: 40px;
   place-items: center;
-  color: #859378;
-  &.is-pdf {
-    color: #ac917d;
-  }
+  color: #202123;
 }
 .repository-file-label {
   display: flex;
@@ -281,7 +280,7 @@
   justify-content: center;
   flex-direction: column;
   border-block: 1px solid var(--repository-line);
-  color: #8c9980;
+  color: #202123;
   h2 {
     margin: 16px 0 8px;
     color: #626c59;
@@ -343,7 +342,7 @@
   place-items: center;
   border: 0;
   border-radius: 5px;
-  color: #7b8471;
+  color: #202123;
   background: transparent;
   cursor: pointer;
   &:hover {
@@ -363,15 +362,10 @@
   width: 58px;
   height: 64px;
   place-items: center;
-  border: 1px solid #e1e5dc;
+  border: 1px solid #e7e7e7;
   border-radius: 7px;
-  color: #798771;
-  background: #f0f3e9;
-  &.is-pdf {
-    border-color: #eadfd6;
-    color: #aa8a74;
-    background: #fbf6f1;
-  }
+  color: #202123;
+  background: #fff;
 }
 .repository-details-name {
   margin: 0;

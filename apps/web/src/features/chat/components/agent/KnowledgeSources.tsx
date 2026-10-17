@@ -40,7 +40,7 @@ export function KnowledgeSources({ sources, onOpenSource }: {
               data-heading={headingText || undefined}
             >
               <div className='chat-source-icon'>
-                <FileText size={34} strokeWidth={1.75} aria-hidden='true' />
+                <FileText size={25} strokeWidth={1.6} aria-hidden='true' />
               </div>
               <span className='chat-source-name'>
                 {source.fileName}
