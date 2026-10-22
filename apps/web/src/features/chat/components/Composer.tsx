@@ -313,7 +313,7 @@ export function Composer({ threadId }: ComposerProps) {
               disabled={!user || !isThreadReady}
               onClick={() => setShowContextUsage((value) => !value)}
             >
-              <Gauge size={18} />
+              <Gauge size={20} />
             </button>
             </ChatTooltip>
             <ChatTooltip label={isCompacting ? '正在压缩上下文' : '压缩上下文，保留原始聊天记录'}>
@@ -324,7 +324,7 @@ export function Composer({ threadId }: ComposerProps) {
               disabled={!user || !isThreadReady || isThreadBusy || isSubmitting || isCompacting || polish.isPolishing}
               onClick={() => { void handleCompact(); }}
             >
-              {isCompacting ? <LoaderCircle className='chat-run-spinner' size={18} /> : <Minimize2 size={18} />}
+              {isCompacting ? <LoaderCircle className='chat-run-spinner' size={20} /> : <Minimize2 size={20} />}
             </button>
             </ChatTooltip>
             <ModelList

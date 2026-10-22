@@ -14,10 +14,12 @@ export function resizeComposerTextarea(
 
   element.style.height = 'auto';
 
-  const nextHeight = Math.min(Math.max(element.scrollHeight, options.minHeight), options.maxHeight);
+  const borderHeight = element.offsetHeight - element.clientHeight;
+  const contentHeight = element.scrollHeight + borderHeight;
+  const nextHeight = Math.min(Math.max(contentHeight, options.minHeight), options.maxHeight);
 
   element.style.height = `${nextHeight}px`;
-  element.style.overflowY = element.scrollHeight > options.maxHeight ? 'auto' : 'hidden';
+  element.style.overflowY = contentHeight > options.maxHeight ? 'auto' : 'hidden';
 }
 
 /**

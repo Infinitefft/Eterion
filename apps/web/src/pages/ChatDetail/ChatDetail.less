@@ -1064,16 +1064,18 @@ button.chat-tool-heading {
   width: 100%;
   min-height: 44px;
   max-height: 160px;
-  padding: 4px 7px;
+  padding: 0 7px 4px;
   color: #111;
   font: inherit;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 450;
   line-height: 1.55;
   resize: none;
   overflow-y: hidden;
   background: transparent;
   border: 0;
+  // 顶部留白不随文本滚动，保持默认文字位置和输入框尺寸。
+  border-top: 4px solid transparent;
   outline: 0;
 }
 
