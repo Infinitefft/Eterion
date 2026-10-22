@@ -1,4 +1,4 @@
-import polishIcon from '@/assets/icons/prompt-polish-v4.png';
+import polishIcon from '@/assets/icons/prompt-polish.svg';
 import { Check, Info, LoaderCircle, Undo2 } from 'lucide-react';
 import { ChatTooltip } from './ChatTooltip';
 

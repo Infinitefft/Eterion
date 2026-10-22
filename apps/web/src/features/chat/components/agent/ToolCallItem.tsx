@@ -1,6 +1,6 @@
 import { Check, ChevronDown, CircleAlert, Globe, LoaderCircle, Search, Wrench } from 'lucide-react';
 import { useState } from 'react';
-import webSearchIcon from '@/assets/icons/web-search.png';
+import webSearchIcon from '@/assets/icons/web-search.svg';
 
 import { getKnowledgeSources, KnowledgeSources, type KnowledgeSource } from './KnowledgeSources';
 

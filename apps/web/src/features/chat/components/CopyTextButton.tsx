@@ -2,7 +2,7 @@ import { Check } from 'lucide-react';
 import { Tooltip } from 'radix-ui';
 import { useEffect, useState } from 'react';
 
-import copyMessageIcon from '@/assets/icons/copy-message.png';
+import copyMessageIcon from '@/assets/icons/copy-message.svg';
 
 export function CopyTextButton({ text, label }: { text: string; label: string }) {
   const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle');

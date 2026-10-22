@@ -2,7 +2,7 @@ import { Ban, Check, ChevronDown, CircleAlert, LoaderCircle, Sparkles, Wrench } 
 import { Fragment, useId, useState, type FormEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
-import thinkingProcessIcon from '@/assets/icons/thinking-process.png';
+import thinkingProcessIcon from '@/assets/icons/thinking-process.svg';
 import { getHITLAnswerValue, type HITLAnswerDraft } from '@/features/chat/model/hitlAnswers';
 import { getIMService } from '@/service/im';
 import type {
