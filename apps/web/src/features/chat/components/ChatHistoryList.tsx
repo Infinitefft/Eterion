@@ -10,6 +10,7 @@ import deleteIconUrl from '@/assets/icons/chat-delete.png';
 import renameIconUrl from '@/assets/icons/chat-rename.png';
 import type { ThreadId } from '@/service/im/types';
 import { useIMStore } from '@/store/im-store';
+import { ChatTooltip } from './ChatTooltip';
 
 interface ChatHistoryListProps {
   onNavigate: () => void;
@@ -56,7 +57,9 @@ function ThreadLinkLabel({
 }: ThreadLinkLabelProps) {
   return (
     <>
-      <span>{title}</span>
+      <ChatTooltip side='right' label={getThreadLinkTitle({ title, isGenerating, isWaitingForAnswer, hasUnread })}>
+        <span>{title}</span>
+      </ChatTooltip>
       {isGenerating ? (
         <span className='conversation-status' role='status' aria-label='正在生成'>
           <i className='conversation-spinner' aria-hidden='true' />
@@ -215,12 +218,6 @@ function ThreadHistoryItem({ threadId, onNavigate }: ThreadHistoryItemProps) {
       <NavLink
         className={({ isActive }) => `conversation-link ${isActive ? 'is-active' : ''}`}
         to={threadPath}
-        title={getThreadLinkTitle({
-          title: displayTitle,
-          isGenerating,
-          isWaitingForAnswer,
-          hasUnread,
-        })}
         onClick={onNavigate}
       >
         <ThreadLinkLabel

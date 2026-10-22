@@ -73,7 +73,7 @@ export function ContextUsageNotice({ threadId, modelId, busy, visible, onClose }
           </span>
         ) : null}
       </div>
-      <button className='chat-detail-tool-button' type='button' title='关闭上下文余量' aria-label='关闭上下文余量' onClick={onClose}>
+      <button className='chat-detail-tool-button' type='button' aria-label='关闭上下文余量' onClick={onClose}>
         <X size={16} />
       </button>
     </div>

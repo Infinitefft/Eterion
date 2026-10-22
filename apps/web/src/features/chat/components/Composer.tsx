@@ -9,6 +9,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { useIMStore } from '@/store/im-store';
 
 import { ContextUsageNotice } from './ContextUsageNotice';
+import { ChatTooltip } from './ChatTooltip';
 import { selectActiveRunId, selectIsChatBusy } from '../model/chatSelectors';
 import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';
 import ModelList from './ModelList/ModelList';
@@ -256,7 +257,6 @@ export function Composer({ threadId }: ComposerProps) {
             className='chat-detail-tool-button'
             type='button'
             aria-label='关闭压缩提示'
-            title='关闭提示'
             onClick={() => setCompactionNoticeDismissed(true)}
           >
             <X size={16} />
@@ -294,10 +294,10 @@ export function Composer({ threadId }: ComposerProps) {
 
         <div className='chat-detail-composer-toolbar'>
           <div className='chat-detail-composer-actions'>
+            <ChatTooltip label='查看上下文余量'>
             <button
               className='chat-detail-tool-button'
               type='button'
-              title='查看上下文余量'
               aria-label='查看上下文余量'
               aria-expanded={showContextUsage}
               aria-controls={showContextUsage ? 'chat-context-usage' : undefined}
@@ -306,16 +306,18 @@ export function Composer({ threadId }: ComposerProps) {
             >
               <Gauge size={18} />
             </button>
+            </ChatTooltip>
+            <ChatTooltip label={isCompacting ? '正在压缩上下文' : '压缩上下文，保留原始聊天记录'}>
             <button
               className='chat-detail-tool-button'
               type='button'
-              title={isCompacting ? '正在压缩上下文' : '压缩上下文，保留原始聊天记录'}
               aria-label={isCompacting ? '正在压缩上下文' : '压缩上下文'}
               disabled={!user || !isThreadReady || isThreadBusy || isSubmitting || isCompacting}
               onClick={() => { void handleCompact(); }}
             >
               {isCompacting ? <LoaderCircle className='chat-run-spinner' size={18} /> : <Minimize2 size={18} />}
             </button>
+            </ChatTooltip>
             <ModelList
               value={selectedModelId}
               onChange={setSelectedModelId}

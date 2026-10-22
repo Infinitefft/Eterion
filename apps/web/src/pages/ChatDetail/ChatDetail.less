@@ -983,6 +983,11 @@ button.chat-tool-heading {
   }
 }
 
+.chat-detail-compaction-notice:not(.chat-context-usage) {
+  min-height: 44px;
+  padding-block: 10px;
+}
+
 .chat-context-usage {
   width: min(800px, calc(100% - 64px));
   padding: 10px 12px;
@@ -1103,6 +1108,35 @@ button.chat-tool-heading {
   color: var(--quiet);
   background: transparent;
   border-radius: 9px;
+}
+
+.chat-detail-composer-actions > .chat-detail-tool-button,
+.chat-detail-compaction-notice > .chat-detail-tool-button {
+  border-radius: 11px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: #eeeeec;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #8b8b88;
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+  }
+}
+
+.chat-detail-compaction-notice > .chat-detail-tool-button {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+
+  &:hover:not(:disabled) {
+    background: #dededc;
+  }
 }
 
 .chat-detail-model-button {
