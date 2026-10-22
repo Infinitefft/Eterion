@@ -137,7 +137,8 @@
 }
 
 .chat-detail-scroll {
-  height: 100%;
+  // dock 包含输入框顶部的 10px 外边距，滚动区域延伸到输入框上沿。
+  height: max(0px, calc(100% - var(--chat-composer-height, 140px) + 10px));
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -192,7 +193,7 @@
   display: flex;
   flex-direction: column;
   gap: 30px;
-  padding: 42px 0 calc(var(--chat-composer-height, 140px) + 24px);
+  padding: 42px 0 24px;
 }
 
 .chat-message-row {
@@ -1123,11 +1124,11 @@ button.chat-tool-heading {
   border-radius: 9px;
 }
 
-.chat-detail-composer-actions > .chat-detail-tool-button {
+.chat-detail-composer-actions .composer-desktop-tools > .chat-detail-tool-button {
   color: #000;
 }
 
-.chat-detail-composer-actions > .chat-detail-tool-button,
+.chat-detail-composer-actions .composer-desktop-tools > .chat-detail-tool-button,
 .chat-detail-compaction-notice > .chat-detail-tool-button {
   border-radius: 11px;
   cursor: pointer;
@@ -1258,6 +1259,10 @@ button.chat-tool-heading {
 }
 
 @media (max-width: 640px) {
+  .chat-detail-composer textarea {
+    font-size: 16px;
+  }
+
   .chat-detail-page {
     height: var(--app-viewport-height, 100dvh);
     &.has-source {
@@ -1269,18 +1274,18 @@ button.chat-tool-heading {
   .chat-source-panel { width: 100%; }
 
   .chat-detail-alert {
-    width: min(100% - 24px, 760px);
+    width: min(calc(100% - 24px), 760px);
   }
 
   .chat-message-list,
   .chat-message-empty {
-    width: min(100cqw - 64px, 720px);
+    width: min(calc(100cqw - 64px), 720px);
     margin-left: max(32px, calc((100cqw - 720px) / 2));
   }
 
   .chat-message-list {
     gap: 24px;
-    padding-top: 28px;
+    padding-top: 76px;
   }
 
   .chat-message-row-user {
@@ -1288,15 +1293,15 @@ button.chat-tool-heading {
   }
 
   .chat-detail-compaction-notice {
-    width: min(100% - 24px, 760px);
+    width: min(calc(100% - 24px), 760px);
   }
 
   .chat-context-usage {
-    width: min(100% - 40px, 700px);
+    width: min(calc(100% - 40px), 700px);
   }
 
   .chat-detail-composer {
-    width: min(100% - 24px, 760px);
+    width: min(calc(100% - 24px), 760px);
     margin-bottom: max(18px, env(safe-area-inset-bottom));
     border-radius: 18px;
   }

@@ -18,6 +18,7 @@ import { useIMStore } from '@/store/im-store';
 
 import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';
 import ModelList from './ModelList/ModelList';
+import { MobileComposerTools } from './MobileComposerTools';
 import { usePromptPolish } from '../model/usePromptPolish';
 import { PromptPolishButton } from './PromptPolishButton';
 
@@ -95,7 +96,7 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
           minHeight: TEXTAREA_MIN_HEIGHT,
           maxHeight: TEXTAREA_MAX_HEIGHT,
         });
-        textarea.focus();
+        textarea.focus({ preventScroll: true });
         textarea.setSelectionRange(nextPrompt.length, nextPrompt.length);
       });
     }
@@ -210,7 +211,10 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
 
           <div className='composer-toolbar'>
             <div className='composer-actions'>
+              <MobileComposerTools polish={{ revision: polish.revision, notice: polish.notice, onToggle: polish.toggle, busy: polish.isPolishing, disabled: !user || !prompt.trim() || isSubmitting, onClick: () => { void polish.polish(); } }} />
+              <div className='composer-desktop-tools'>
               <PromptPolishButton revision={polish.revision} notice={polish.notice} onToggle={polish.toggle} busy={polish.isPolishing} disabled={!user || !prompt.trim() || isSubmitting} onClick={() => { void polish.polish(); }} />
+              </div>
               <ModelList value={selectedModelId} onChange={setSelectedModelId} disabled={isSubmitting || polish.isPolishing} />
 
               <button

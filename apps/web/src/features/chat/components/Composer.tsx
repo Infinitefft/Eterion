@@ -15,6 +15,7 @@ import { ChatTooltip } from './ChatTooltip';
 import { selectActiveRunId, selectIsChatBusy } from '../model/chatSelectors';
 import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';
 import ModelList from './ModelList/ModelList';
+import { MobileComposerTools } from './MobileComposerTools';
 
 interface ComposerProps {
   threadId: ThreadId;
@@ -203,7 +204,7 @@ export function Composer({ threadId }: ComposerProps) {
     } finally {
       if (isCurrentView(view)) {
         setIsSubmitting(false);
-        textareaRef.current?.focus();
+        textareaRef.current?.focus({ preventScroll: true });
       }
     }
   }
@@ -302,6 +303,12 @@ export function Composer({ threadId }: ComposerProps) {
 
         <div className='chat-detail-composer-toolbar'>
           <div className='chat-detail-composer-actions'>
+            <MobileComposerTools
+              polish={{ revision: polish.revision, notice: polish.notice, onToggle: polish.toggle, busy: polish.isPolishing, disabled: !user || !prompt.trim() || !isThreadReady || isThreadBusy || isSubmitting || isCompacting, onClick: () => { void polish.polish(); } }}
+              context={{ disabled: !user || !isThreadReady, onClick: () => setShowContextUsage((value) => !value) }}
+              compression={{ disabled: !user || !isThreadReady || isThreadBusy || isSubmitting || isCompacting || polish.isPolishing, busy: isCompacting, onClick: () => { void handleCompact(); } }}
+            />
+            <div className='composer-desktop-tools'>
             <PromptPolishButton revision={polish.revision} notice={polish.notice} onToggle={polish.toggle} busy={polish.isPolishing} disabled={!user || !prompt.trim() || !isThreadReady || isThreadBusy || isSubmitting || isCompacting} onClick={() => { void polish.polish(); }} />
             <ChatTooltip label='查看上下文余量'>
             <button
@@ -327,6 +334,7 @@ export function Composer({ threadId }: ComposerProps) {
               {isCompacting ? <LoaderCircle className='chat-run-spinner' size={20} /> : <Minimize2 size={20} />}
             </button>
             </ChatTooltip>
+            </div>
             <ModelList
               value={selectedModelId}
               onChange={setSelectedModelId}

@@ -788,12 +788,27 @@
 
 @media (max-width: @sidebar-mobile-breakpoint) {
   .workspace-shell {
+    position: fixed;
+    top: var(--app-viewport-top, 0px);
+    left: 0;
+    right: 0;
     display: block;
+  }
+
+  .workspace-shell,
+  .workspace-main,
+  .workspace-sidebar {
+    height: var(--app-viewport-height, 100dvh);
+    max-height: var(--app-viewport-height, 100dvh);
+  }
+
+  .workspace-quick-actions-floating {
+    top: calc(var(--app-viewport-top, 0px) + 16px);
   }
 
   .workspace-sidebar {
     position: fixed;
-    inset: 0 auto 0 0;
+    inset: var(--app-viewport-top, 0px) auto auto 0;
     box-shadow: 20px 0 50px rgba(24, 26, 31, 0.12);
     overscroll-behavior: contain;
   }

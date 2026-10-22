@@ -25,20 +25,33 @@ void ensureAuthInitialized();
 function useVisualViewportHeight() {
   useEffect(() => {
     const visualViewport = window.visualViewport;
+    let frame: number | null = null;
 
     function updateViewportHeight() {
+      frame = null;
+      // 手动缩放时保留布局，避免把缩放误当作键盘弹出。
+      if (visualViewport && visualViewport.scale !== 1) return;
       const viewportHeight = visualViewport?.height ?? window.innerHeight;
       document.documentElement.style.setProperty('--app-viewport-height', `${viewportHeight}px`);
+      document.documentElement.style.setProperty('--app-viewport-top', `${visualViewport?.offsetTop ?? 0}px`);
+    }
+
+    function scheduleViewportUpdate() {
+      if (frame === null) frame = window.requestAnimationFrame(updateViewportHeight);
     }
 
     updateViewportHeight();
-    window.addEventListener('resize', updateViewportHeight);
-    visualViewport?.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('resize', scheduleViewportUpdate);
+    visualViewport?.addEventListener('resize', scheduleViewportUpdate);
+    visualViewport?.addEventListener('scroll', scheduleViewportUpdate);
 
     return () => {
-      window.removeEventListener('resize', updateViewportHeight);
-      visualViewport?.removeEventListener('resize', updateViewportHeight);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', scheduleViewportUpdate);
+      visualViewport?.removeEventListener('resize', scheduleViewportUpdate);
+      visualViewport?.removeEventListener('scroll', scheduleViewportUpdate);
       document.documentElement.style.removeProperty('--app-viewport-height');
+      document.documentElement.style.removeProperty('--app-viewport-top');
     };
   }, []);
 }
