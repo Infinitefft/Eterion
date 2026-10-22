@@ -8,6 +8,7 @@
   background: var(--canvas);
   &.has-source {
     padding-right: 42.857143%;
+    .chat-composer-dock { right: 42.857143%; }
   }
 }
 
@@ -108,21 +109,31 @@
   flex: 1 1 auto;
   min-height: 0;
 
+}
+
+.chat-composer-dock {
+  position: absolute;
+  z-index: 3;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+
+  // 只遮住输入框下沿到页面底部的空隙，消息仍可从上方滚到输入框后面。
   &::after {
     content: '';
     position: absolute;
-    z-index: 1;
-    right: 12px;
+    right: 0;
     bottom: 0;
     left: 0;
-    height: 40px;
-    pointer-events: none;
-    background: linear-gradient(to bottom, transparent, var(--canvas));
-    backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
-    mask-image: linear-gradient(to bottom, transparent, #000);
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000);
+    height: max(14px, env(safe-area-inset-bottom));
+    background: var(--canvas);
+    pointer-events: auto;
   }
+
+  > * { pointer-events: auto; }
 }
 
 .chat-detail-scroll {
@@ -173,15 +184,15 @@
 .chat-message-list,
 .chat-message-empty {
   // 以滚动区域外层计算，避免滚动条占宽导致与输入框错位。
-  width: min(880px, calc(100cqw - 40px));
-  margin: 0 0 0 max(20px, calc((100cqw - 880px) / 2));
+  width: min(912px, calc(100cqw - 88px));
+  margin: 0 0 0 max(44px, calc((100cqw - 912px) / 2));
 }
 
 .chat-message-list {
   display: flex;
   flex-direction: column;
   gap: 30px;
-  padding: 42px 0 52px;
+  padding: 42px 0 calc(var(--chat-composer-height, 140px) + 24px);
 }
 
 .chat-message-row {
@@ -938,7 +949,7 @@ button.chat-tool-heading {
   position: absolute;
   z-index: 2;
   right: 50%;
-  bottom: 13px;
+  bottom: calc(var(--chat-composer-height, 140px) + 13px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1027,7 +1038,7 @@ button.chat-tool-heading {
 .chat-detail-composer {
   position: relative;
   z-index: 2;
-  width: min(880px, calc(100% - 40px));
+  width: min(952px, calc(100% - 48px));
   margin: 10px auto max(14px, env(safe-area-inset-bottom));
   padding: 11px 12px 9px;
   background: #fff;
@@ -1243,7 +1254,10 @@ button.chat-tool-heading {
 @media (max-width: 640px) {
   .chat-detail-page {
     height: var(--app-viewport-height, 100dvh);
-    &.has-source { padding-right: 0; }
+    &.has-source {
+      padding-right: 0;
+      .chat-composer-dock { right: 0; }
+    }
   }
 
   .chat-source-panel { width: 100%; }
@@ -1254,8 +1268,8 @@ button.chat-tool-heading {
 
   .chat-message-list,
   .chat-message-empty {
-    width: min(100cqw - 24px, 760px);
-    margin-left: max(12px, calc((100cqw - 760px) / 2));
+    width: min(100cqw - 64px, 720px);
+    margin-left: max(32px, calc((100cqw - 720px) / 2));
   }
 
   .chat-message-list {
@@ -1279,6 +1293,10 @@ button.chat-tool-heading {
     width: min(100% - 24px, 760px);
     margin-bottom: max(18px, env(safe-area-inset-bottom));
     border-radius: 18px;
+  }
+
+  .chat-composer-dock::after {
+    height: max(18px, env(safe-area-inset-bottom));
   }
 
   .chat-detail-composer-hint {

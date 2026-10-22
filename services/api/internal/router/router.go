@@ -157,6 +157,7 @@ func New(
 	knowledge.NewFileHandler(knowledge.NewFileService(knowledgeRepository, fileStore, runner), logger).
 		RegisterRoutes(api, authHandler.RequireAccessToken())
 	chatHandler.RegisterRoutes(api, authHandler.RequireAccessToken())
+	chatHandler.RegisterPolishRoute(api, authHandler.RequireAccessToken(), runner)
 	chatHandler.RegisterCompactionRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)
 	chatHandler.RegisterContextUsageRoute(api, authHandler.RequireAccessToken(), chatRepository, runner)
 	apidocs.RegisterRoutes(engine, cfg.AppEnv)

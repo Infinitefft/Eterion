@@ -51,6 +51,25 @@ export function createApp(settings: Settings, runtime: AgentRuntime): FastifyIns
     models: runtime.models,
   }));
 
+  // 润色独立于聊天 Run，仅供 Go 鉴权后转发，不写入会话上下文。
+  app.post('/prompt/polish', { bodyLimit: 64 << 10 }, async (request, reply) => {
+    const parsed = z.object({ content: z.string().trim().min(1).max(8000) }).strict().safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_PROMPT' } });
+    if (!runtime.polishPrompt) return reply.code(409).send({ error: { code: 'POLISH_UNAVAILABLE' } });
+    const controller = new AbortController();
+    const onClose = () => { if (!reply.raw.writableEnded) controller.abort(); };
+    reply.raw.once('close', onClose);
+    try {
+      const content = await runtime.polishPrompt(parsed.data.content,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]));
+      return { content };
+    } catch {
+      return reply.code(502).send({ error: { code: 'POLISH_FAILED' } });
+    } finally {
+      reply.raw.off('close', onClose);
+    }
+  });
+
   // 仅供 Go 调用；标题生成独立于回答流，失败由 Go 保留临时标题。
   app.post('/title', { bodyLimit: 128 << 10 }, async (request, reply) => {
     const parsed = z.object({ model_id: z.string().min(1), content: z.string().trim().min(1).max(64000) }).strict().safeParse(request.body);

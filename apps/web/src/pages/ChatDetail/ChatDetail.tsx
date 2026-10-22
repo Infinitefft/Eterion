@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 
 import { routePaths } from '@/app/routePaths';
@@ -24,6 +24,20 @@ import './ChatDetail.less';
  * 快照请求与事件衔接由 IM 应用入口协调，页面只决定何时加载和标记已读。
  */
 export function ChatDetail() {
+  const composerDockRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const dock = composerDockRef.current;
+    const page = dock?.parentElement;
+    if (!dock || !page) return;
+    // 输入框浮在消息之上；随实际高度保留滚动空间，让最后一条消息可以完整露出。
+    const updateHeight = () => {
+      page.style.setProperty('--chat-composer-height', `${dock.getBoundingClientRect().height}px`);
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(dock);
+    return () => observer.disconnect();
+  }, []);
   const { threadId } = useParams<{ threadId: ThreadId }>();
   const userId = useAuthStore((state) => state.user?.id ?? null);
   const sessionVersion = useAuthStore((state) => state.sessionVersion);
@@ -123,7 +137,9 @@ export function ChatDetail() {
       ) : null}
 
       <ChatConversation threadId={threadId} onOpenSource={handleOpenSource} />
-      <Composer threadId={threadId} />
+      <div ref={composerDockRef} className='chat-composer-dock'>
+        <Composer threadId={threadId} />
+      </div>
       {selectedSource?.threadId === threadId && <KnowledgeSourcePanel
         source={selectedSource.source}
         onClose={() => {

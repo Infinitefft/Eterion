@@ -18,6 +18,8 @@ import { useIMStore } from '@/store/im-store';
 
 import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';
 import ModelList from './ModelList/ModelList';
+import { usePromptPolish } from '../model/usePromptPolish';
+import { PromptPolishButton } from './PromptPolishButton';
 
 const TEXTAREA_MIN_HEIGHT = 44;
 const TEXTAREA_MAX_HEIGHT = 154;
@@ -45,6 +47,10 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
     const viewRef = useRef<NewChatComposerView | null>(null);
     const [selectedModelId, setSelectedModelId] = useState<ModelId | null>(null);
     const [prompt, setPrompt] = useState('');
+    const polish = usePromptPolish('new', prompt, setPrompt);
+    useLayoutEffect(() => {
+      if (textareaRef.current) resizeComposerTextarea(textareaRef.current, { minHeight: TEXTAREA_MIN_HEIGHT, maxHeight: TEXTAREA_MAX_HEIGHT });
+    }, [prompt]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [viewSessionVersion, setViewSessionVersion] = useState(sessionVersion);
@@ -62,7 +68,7 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
 
     const normalizedPrompt = prompt.trim();
     // 未登录时仍可点击发送，沿用原有的登录提示。
-    const canSubmit = normalizedPrompt.length > 0 && !isSubmitting && (user === null || isConnected);
+    const canSubmit = normalizedPrompt.length > 0 && !isSubmitting && !polish.isPolishing && (user === null || isConnected);
 
     function isCurrentView(view: NewChatComposerView | null): view is NewChatComposerView {
       return view !== null && viewRef.current === view &&
@@ -70,15 +76,15 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
     }
 
     function handlePromptChange(event: ChangeEvent<HTMLTextAreaElement>) {
-      setPrompt(event.target.value);
+      polish.edit(event.target.value);
       setSubmitError(null);
     }
 
     function applyPromptStarter(nextPrompt: string) {
       const view = viewRef.current;
-      if (!isCurrentView(view) || view.isSubmitting) return;
+      if (!isCurrentView(view) || view.isSubmitting || polish.isPending()) return;
 
-      setPrompt(nextPrompt);
+      polish.edit(nextPrompt);
       setSubmitError(null);
 
       requestAnimationFrame(() => {
@@ -102,7 +108,7 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
       event.preventDefault();
 
       const view = viewRef.current;
-      if (!normalizedPrompt || !isCurrentView(view) || view.isSubmitting) return;
+      if (!normalizedPrompt || !isCurrentView(view) || view.isSubmitting || polish.isPending()) return;
 
       if (!useAuthStore.getState().user) {
         setSubmitError('请先登录，再发起新的 AI 对话');
@@ -119,6 +125,7 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
 
       function finishCreation(threadId: ThreadId) {
         if (!isCurrentView(view) || !useIMStore.getState().detailsByThread[threadId]) return;
+        polish.clear();
         setPrompt('');
         void navigate(createChatDetailPath(threadId));
       }
@@ -189,7 +196,7 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
             rows={1}
             placeholder='给 Eterion 发送消息'
             value={prompt}
-            disabled={isSubmitting}
+            disabled={isSubmitting || polish.isPolishing}
             onChange={handlePromptChange}
             onKeyDown={(event) => submitComposerOnEnter(event, canSubmit)}
             onInput={(event) =>
@@ -203,7 +210,8 @@ export const NewChatComposer = forwardRef<NewChatComposerHandle>(
 
           <div className='composer-toolbar'>
             <div className='composer-actions'>
-              <ModelList value={selectedModelId} onChange={setSelectedModelId} disabled={isSubmitting} />
+              <PromptPolishButton revision={polish.revision} notice={polish.notice} onToggle={polish.toggle} busy={polish.isPolishing} disabled={!user || !prompt.trim() || isSubmitting} onClick={() => { void polish.polish(); }} />
+              <ModelList value={selectedModelId} onChange={setSelectedModelId} disabled={isSubmitting || polish.isPolishing} />
 
               <button
                 className='send-button'

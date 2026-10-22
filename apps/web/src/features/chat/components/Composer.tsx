@@ -9,6 +9,8 @@ import { useAuthStore } from '@/store/auth-store';
 import { useIMStore } from '@/store/im-store';
 
 import { ContextUsageNotice } from './ContextUsageNotice';
+import { usePromptPolish } from '../model/usePromptPolish';
+import { PromptPolishButton } from './PromptPolishButton';
 import { ChatTooltip } from './ChatTooltip';
 import { selectActiveRunId, selectIsChatBusy } from '../model/chatSelectors';
 import { resizeComposerTextarea, submitComposerOnEnter } from '../utils/composerInput';
@@ -35,6 +37,10 @@ const TEXTAREA_MAX_HEIGHT = 160;
 export function Composer({ threadId }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [prompt, setPrompt] = useState('');
+  const polish = usePromptPolish(threadId, prompt, setPrompt);
+  useLayoutEffect(() => {
+    if (textareaRef.current) resizeComposerTextarea(textareaRef.current, { minHeight: TEXTAREA_MIN_HEIGHT, maxHeight: TEXTAREA_MAX_HEIGHT });
+  }, [prompt]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<ModelId | null>(null);
   const [cancelRequestedRunId, setCancelRequestedRunId] = useState<RunId | null>(null);
@@ -83,11 +89,11 @@ export function Composer({ threadId }: ComposerProps) {
   const isCancelling = activeRunId !== null && cancelRequestedRunId === activeRunId;
   const canSubmit =
     user !== null && isThreadReady && isConnected && normalizedPrompt.length > 0 &&
-    !isThreadBusy && !isSubmitting && !isCompacting;
+    !isThreadBusy && !isSubmitting && !isCompacting && !polish.isPolishing;
 
   async function handleCompact() {
     const view = viewRef.current;
-    if (!isCurrentView(view) || compactionController.current || isCompacting || isSubmitting || !isThreadReady
+    if (!isCurrentView(view) || polish.isPending() || compactionController.current || isCompacting || isSubmitting || !isThreadReady
       || selectIsChatBusy(useIMStore.getState(), threadId)) return;
     const controller = new AbortController();
     compactionController.current = controller;
@@ -118,7 +124,7 @@ export function Composer({ threadId }: ComposerProps) {
   }
 
   function handlePromptChange(event: ChangeEvent<HTMLTextAreaElement>) {
-    setPrompt(event.target.value);
+    polish.edit(event.target.value);
     setSubmitError(null);
   }
 
@@ -130,7 +136,7 @@ export function Composer({ threadId }: ComposerProps) {
     const view = viewRef.current;
     const store = useIMStore.getState();
     if (
-      !canSubmit || !isCurrentView(view) ||
+      !canSubmit || polish.isPending() || !isCurrentView(view) ||
       store.connection.status !== 'connected' ||
       store.detailLoadStateByThread[threadId]?.status !== 'ready' ||
       selectIsChatBusy(store, threadId)
@@ -186,6 +192,8 @@ export function Composer({ threadId }: ComposerProps) {
 
       if (!ack.ok) {
         handleFailure(ack.error);
+      } else if (isCurrentView(view)) {
+        polish.clear();
       }
     } catch (error) {
       handleFailure({
@@ -280,7 +288,7 @@ export function Composer({ threadId }: ComposerProps) {
           rows={1}
           value={prompt}
           placeholder={placeholder}
-          disabled={user === null}
+          disabled={user === null || polish.isPolishing}
           aria-describedby={submitError ? 'chat-detail-submit-error' : undefined}
           onChange={handlePromptChange}
           onKeyDown={(event) => submitComposerOnEnter(event, canSubmit)}
@@ -294,6 +302,7 @@ export function Composer({ threadId }: ComposerProps) {
 
         <div className='chat-detail-composer-toolbar'>
           <div className='chat-detail-composer-actions'>
+            <PromptPolishButton revision={polish.revision} notice={polish.notice} onToggle={polish.toggle} busy={polish.isPolishing} disabled={!user || !prompt.trim() || !isThreadReady || isThreadBusy || isSubmitting || isCompacting} onClick={() => { void polish.polish(); }} />
             <ChatTooltip label='查看上下文余量'>
             <button
               className='chat-detail-tool-button'
@@ -312,7 +321,7 @@ export function Composer({ threadId }: ComposerProps) {
               className='chat-detail-tool-button'
               type='button'
               aria-label={isCompacting ? '正在压缩上下文' : '压缩上下文'}
-              disabled={!user || !isThreadReady || isThreadBusy || isSubmitting || isCompacting}
+              disabled={!user || !isThreadReady || isThreadBusy || isSubmitting || isCompacting || polish.isPolishing}
               onClick={() => { void handleCompact(); }}
             >
               {isCompacting ? <LoaderCircle className='chat-run-spinner' size={18} /> : <Minimize2 size={18} />}
@@ -321,7 +330,7 @@ export function Composer({ threadId }: ComposerProps) {
             <ModelList
               value={selectedModelId}
               onChange={setSelectedModelId}
-              disabled={!isThreadReady || isThreadBusy || isSubmitting || isCompacting}
+              disabled={!isThreadReady || isThreadBusy || isSubmitting || isCompacting || polish.isPolishing}
               side='top'
             />
 

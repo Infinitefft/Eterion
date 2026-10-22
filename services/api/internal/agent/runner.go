@@ -154,6 +154,10 @@ type TitleGenerator interface {
 	GenerateTitle(context.Context, TitleInput) (string, error)
 }
 
+type PromptPolisher interface {
+	PolishPrompt(context.Context, string) (string, error)
+}
+
 type CompactResult struct {
 	AgentContext json.RawMessage `json:"agent_context"`
 	Changed      bool            `json:"changed"`
